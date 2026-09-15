@@ -5,7 +5,7 @@ import { Button, Input, Tooltip } from '@/shared/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '@/shared/constants';
 import { IS_PLATFORM,cn } from '@/shared/utils';
 import type { SidebarSearchMode } from '@/shared/types';
-import GitHubStarBadge from '@/modules/sidebar/GitHubStarBadge';
+import GitIdentityBadge from '@/modules/sidebar/GitIdentityBadge';
 
 const MOD_KEY =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
@@ -135,7 +135,7 @@ export default function SidebarHeader({
           </div>
         </div>
 
-        <GitHubStarBadge />
+        <GitIdentityBadge />
 
         {/* Search bar */}
         {showSearchTools && (

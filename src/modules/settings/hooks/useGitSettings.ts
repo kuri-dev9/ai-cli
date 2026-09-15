@@ -42,6 +42,8 @@ export function useGitSettings() {
       const response = await api.user.updateGitConfig(gitName, gitEmail);
 
       if (response.ok) {
+        // 사이드바 배지가 같은 값을 보여주므로, 저장되면 다시 읽어가도록 알린다.
+        window.dispatchEvent(new Event('git-config:updated'));
         setSaveStatus('success');
         clearStatusTimerRef.current = window.setTimeout(() => {
           setSaveStatus(null);

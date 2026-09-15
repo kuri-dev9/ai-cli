@@ -66,6 +66,7 @@ export default function GitConfigurationStep({
           />
           <p className="mt-1 text-xs text-muted-foreground">{t('onboarding.gitEmailHint')}</p>
         </div>
+
       </div>
     </div>
   );
