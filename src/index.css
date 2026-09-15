@@ -23,38 +23,39 @@
 
 @layer base {
   :root {
-    --background: 44 22% 96%;
-    --foreground: 36 25% 4%;
-    --card: 0 0% 100%;
-    --card-foreground: 36 25% 4%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 36 25% 4%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 44 15% 91%;
-    --secondary-foreground: 36 15% 18%;
-    --muted: 44 15% 91%;
-    --muted-foreground: 40 5% 44%;
-    --accent: 44 15% 91%;
-    --accent-foreground: 36 15% 18%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 44 14% 87%;
-    --input: 44 14% 87%;
-    --ring: 221.2 83.2% 53.3%;
+    /* Claude 앱 계열 라이트 팔레트 — 따뜻한 크림 + 주황 액센트 */
+    --background: 43 26% 95%;          /* #F5F3EE 앱 캔버스/사이드바 */
+    --foreground: 40 5% 12%;           /* #1F1E1C 기본 텍스트 (대비 15.0:1) */
+    --card: 40 60% 99%;                /* #FEFDFB 카드/시트 표면 */
+    --card-foreground: 40 5% 12%;
+    --popover: 40 60% 99%;
+    --popover-foreground: 40 5% 12%;
+    --primary: 15 56% 52%;             /* #C96442 Claude 오렌지 */
+    --primary-foreground: 40 60% 99%;
+    --secondary: 44 23% 91%;           /* #EDEAE2 살짝 진한 크림 */
+    --secondary-foreground: 40 7% 16%;
+    --muted: 44 23% 91%;
+    --muted-foreground: 40 4% 40%;     /* #6B6862 보조 텍스트 (대비 5.0:1) */
+    --accent: 44 23% 91%;
+    --accent-foreground: 40 7% 16%;
+    --destructive: 0 65% 48%;          /* 채도를 낮춘 경고 빨강 */
+    --destructive-foreground: 40 60% 99%;
+    --border: 40 21% 89%;              /* #E8E4DC 따뜻한 테두리 */
+    --input: 40 21% 89%;
+    --ring: 15 56% 52%;
     --radius: 0.5rem;
 
     /* Nav design tokens */
-    --nav-glass-bg: 44 22% 96% / 0.7;
+    --nav-glass-bg: 43 26% 95% / 0.7;
     --nav-glass-blur: 20px;
     --nav-glass-saturate: 1.8;
-    --nav-tab-glow: 221.2 83.2% 53.3% / 0.18;
-    --nav-tab-ring: 221.2 83.2% 53.3% / 0.10;
-    --nav-float-shadow: 0 0% 0% / 0.06;
-    --nav-float-ring: 44 14% 87% / 0.5;
-    --nav-divider-color: 44 14% 87% / 0.5;
-    --nav-input-bg: 44 15% 91% / 0.5;
-    --nav-input-focus-ring: 221.2 83.2% 53.3% / 0.22;
+    --nav-tab-glow: 15 56% 52% / 0.18;
+    --nav-tab-ring: 15 56% 52% / 0.10;
+    --nav-float-shadow: 30 10% 6% / 0.06;
+    --nav-float-ring: 40 21% 89% / 0.5;
+    --nav-divider-color: 40 21% 89% / 0.5;
+    --nav-input-bg: 44 23% 91% / 0.5;
+    --nav-input-focus-ring: 15 56% 52% / 0.22;
 
     /* Safe area CSS variables */
     --safe-area-inset-top: env(safe-area-inset-top);
@@ -85,37 +86,38 @@
   }
 
   .dark {
-    --background: 0 0% 8%;
-    --foreground: 40 8% 93%;
-    --card: 0 0% 12%;
-    --card-foreground: 40 8% 93%;
-    --popover: 0 0% 12%;
-    --popover-foreground: 40 8% 93%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 0 0% 8%;
-    --secondary: 0 0% 17%;
-    --secondary-foreground: 40 8% 93%;
-    --muted: 0 0% 17%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 17%;
-    --accent-foreground: 40 8% 93%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 40 8% 93%;
-    --border: 0 0% 17%;
-    --input: 0 0% 23%;
-    --ring: 217.2 91.2% 59.8%;
+    /* Claude 앱 계열 다크 팔레트 — 따뜻한 차콜 + 밝은 주황 액센트 */
+    --background: 30 3% 12%;           /* #1F1E1D 본문 배경 */
+    --foreground: 50 26% 95%;          /* #F5F4EE 기본 텍스트 (대비 14.8:1) */
+    --card: 60 3% 15%;                 /* #262624 패널/카드 (본문보다 살짝 밝게) */
+    --card-foreground: 50 26% 95%;
+    --popover: 60 3% 15%;
+    --popover-foreground: 50 26% 95%;
+    --primary: 15 63% 60%;             /* #D97757 어두운 배경용 밝은 주황 (대비 5.3:1) */
+    --primary-foreground: 30 3% 12%;
+    --secondary: 36 5% 18%;            /* #302E2B */
+    --secondary-foreground: 50 26% 95%;
+    --muted: 36 5% 18%;
+    --muted-foreground: 46 7% 61%;     /* #A3A096 보조 텍스트 (대비 6.4:1) */
+    --accent: 36 5% 18%;
+    --accent-foreground: 50 26% 95%;
+    --destructive: 0 55% 42%;          /* 채도를 낮춘 경고 빨강 */
+    --destructive-foreground: 50 26% 95%;
+    --border: 43 6% 21%;               /* #3A3833 */
+    --input: 45 6% 26%;
+    --ring: 15 63% 60%;
 
     /* Nav design tokens — dark overrides */
-    --nav-glass-bg: 0 0% 12% / 0.55;
+    --nav-glass-bg: 60 3% 15% / 0.55;
     --nav-glass-blur: 24px;
     --nav-glass-saturate: 1.6;
-    --nav-tab-glow: 217.2 91.2% 59.8% / 0.25;
-    --nav-tab-ring: 217.2 91.2% 59.8% / 0.15;
+    --nav-tab-glow: 15 63% 60% / 0.25;
+    --nav-tab-ring: 15 63% 60% / 0.15;
     --nav-float-shadow: 0 0% 0% / 0.35;
-    --nav-float-ring: 0 0% 17% / 0.3;
-    --nav-divider-color: 0 0% 17% / 0.5;
-    --nav-input-bg: 0 0% 17% / 0.5;
-    --nav-input-focus-ring: 217.2 91.2% 59.8% / 0.25;
+    --nav-float-ring: 43 6% 21% / 0.3;
+    --nav-divider-color: 43 6% 21% / 0.5;
+    --nav-input-bg: 36 5% 18% / 0.5;
+    --nav-input-focus-ring: 15 63% 60% / 0.25;
   }
 }
 
@@ -129,11 +131,17 @@
   body {
     @apply bg-background text-foreground;
 
-    font-family: "Encode Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    @apply font-sans;
+
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     margin: 0;
     padding: 0;
+  }
+
+  /* Claude 앱의 가장 큰 시각적 특징: 제목은 세리프 */
+  h1, h2, h3 {
+    @apply font-serif;
   }
 
   html, body {
@@ -347,20 +355,20 @@
   
   /* Dark mode scrollbar styles */
   .dark .scrollbar-thin {
-    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+    scrollbar-color: rgba(163, 160, 150, 0.5) transparent;
   }
   
   .dark .scrollbar-thin::-webkit-scrollbar-track {
-    background: rgba(38, 38, 38, 0.3);
+    background: rgba(38, 38, 36, 0.3);
   }
   
   .dark .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgba(156, 163, 175, 0.5);
+    background-color: rgba(163, 160, 150, 0.5);
     border-radius: 3px;
   }
   
   .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(156, 163, 175, 0.7);
+    background-color: rgba(163, 160, 150, 0.7);
   }
   
   /* Global scrollbar styles for main content areas */
@@ -370,27 +378,27 @@
   }
   
   .dark::-webkit-scrollbar-track {
-    background: rgba(38, 38, 38, 0.5);
+    background: rgba(38, 38, 36, 0.5);
   }
   
   .dark::-webkit-scrollbar-thumb {
-    background-color: rgba(107, 114, 128, 0.5);
+    background-color: rgba(138, 134, 124, 0.5);
     border-radius: 4px;
   }
   
   .dark::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(107, 114, 128, 0.7);
+    background-color: rgba(138, 134, 124, 0.7);
   }
   
   /* Firefox scrollbar styles */
   .dark {
     scrollbar-width: thin;
-    scrollbar-color: rgba(115, 115, 115, 0.5) rgba(38, 38, 38, 0.5);
+    scrollbar-color: rgba(138, 134, 124, 0.5) rgba(38, 38, 36, 0.5);
   }
   
   /* Ensure checkbox styling is preserved */
   input[type="checkbox"] {
-    @apply accent-blue-600;
+    accent-color: hsl(var(--primary));
     opacity: 1;
   }
   
@@ -402,38 +410,40 @@
   
   /* Fix checkbox appearance in dark mode */
   .dark input[type="checkbox"] {
-    background-color: rgb(31 41 55); /* gray-800 */
-    border-color: rgb(75 85 99); /* gray-600 */
-    color: rgb(37 99 235); /* blue-600 */
+    background-color: hsl(var(--secondary));
+    border-color: hsl(var(--input));
+    accent-color: hsl(var(--primary));
+    color: hsl(var(--primary));
     color-scheme: dark;
   }
   
   .dark input[type="checkbox"]:checked {
-    background-color: rgb(37 99 235); /* blue-600 */
-    border-color: rgb(37 99 235); /* blue-600 */
+    background-color: hsl(var(--primary));
+    border-color: hsl(var(--primary));
   }
   
   .dark input[type="checkbox"]:focus {
-    --tw-ring-color: rgb(59 130 246); /* blue-500 */
-    --tw-ring-offset-color: rgb(31 41 55); /* gray-800 */
+    --tw-ring-color: hsl(var(--ring));
+    --tw-ring-offset-color: hsl(var(--background));
   }
   
   /* Fix radio button appearance in dark mode */
   .dark input[type="radio"] {
-    background-color: rgb(31 41 55); /* gray-800 */
-    border-color: rgb(75 85 99); /* gray-600 */
-    color: rgb(37 99 235); /* blue-600 */
+    background-color: hsl(var(--secondary));
+    border-color: hsl(var(--input));
+    accent-color: hsl(var(--primary));
+    color: hsl(var(--primary));
     color-scheme: dark;
   }
   
   .dark input[type="radio"]:checked {
-    background-color: rgb(37 99 235); /* blue-600 */
-    border-color: rgb(37 99 235); /* blue-600 */
+    background-color: hsl(var(--primary));
+    border-color: hsl(var(--primary));
   }
   
   .dark input[type="radio"]:focus {
-    --tw-ring-color: rgb(59 130 246); /* blue-500 */
-    --tw-ring-offset-color: rgb(31 41 55); /* gray-800 */
+    --tw-ring-color: hsl(var(--ring));
+    --tw-ring-offset-color: hsl(var(--background));
   }
   
   /* Ensure textarea text is always visible in dark mode */
@@ -442,122 +452,122 @@
   }
   
   .dark textarea {
-    color: rgb(243 244 246) !important; /* gray-100 */
-    -webkit-text-fill-color: rgb(243 244 246) !important;
-    caret-color: rgb(243 244 246) !important;
+    color: rgb(245 244 238) !important; /* #F5F4EE */
+    -webkit-text-fill-color: rgb(245 244 238) !important;
+    caret-color: rgb(245 244 238) !important;
   }
   
   /* Fix for focus state in dark mode */
   .dark textarea:focus {
-    color: rgb(243 244 246) !important;
-    -webkit-text-fill-color: rgb(243 244 246) !important;
+    color: rgb(245 244 238) !important;
+    -webkit-text-fill-color: rgb(245 244 238) !important;
   }
   
   /* Fix for iOS/Safari dark mode textarea issues */
   @supports (-webkit-touch-callout: none) {
     .dark textarea {
       background-color: transparent !important;
-      color: rgb(243 244 246) !important;
-      -webkit-text-fill-color: rgb(243 244 246) !important;
+      color: rgb(245 244 238) !important;
+      -webkit-text-fill-color: rgb(245 244 238) !important;
     }
     
     .dark textarea:focus {
       background-color: transparent !important;
-      color: rgb(243 244 246) !important;
-      -webkit-text-fill-color: rgb(243 244 246) !important;
+      color: rgb(245 244 238) !important;
+      -webkit-text-fill-color: rgb(245 244 238) !important;
     }
   }
   
   /* Ensure parent container doesn't override textarea styles */
   .dark .bg-gray-800 textarea {
-    color: rgb(243 244 246) !important;
-    -webkit-text-fill-color: rgb(243 244 246) !important;
+    color: rgb(245 244 238) !important;
+    -webkit-text-fill-color: rgb(245 244 238) !important;
   }
   
   /* Fix focus-within container issues in dark mode */
   .dark .focus-within\:ring-2:focus-within {
-    background-color: rgb(20 20 20) !important;
+    background-color: rgb(31 30 29) !important;
   }
   
   /* Ensure textarea remains transparent with visible text */
   .dark textarea.bg-transparent {
     background-color: transparent !important;
-    color: rgb(243 244 246) !important;
-    -webkit-text-fill-color: rgb(243 244 246) !important;
+    color: rgb(245 244 238) !important;
+    -webkit-text-fill-color: rgb(245 244 238) !important;
   }
   
   /* Fix placeholder text color to be properly gray */
   textarea::placeholder {
-    color: rgb(156 163 175) !important; /* gray-400 */
+    color: rgb(140 136 127) !important; /* gray-400 */
     opacity: 1 !important;
   }
   
   .dark textarea::placeholder {
-    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    color: rgb(116 112 103) !important; /* 따뜻한 회색 */
     opacity: 1 !important;
   }
   
   /* More specific selector for chat input textarea */
   .dark .bg-gray-800 textarea::placeholder,
   .dark textarea.bg-transparent::placeholder {
-    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    color: rgb(116 112 103) !important; /* 따뜻한 회색 */
     opacity: 1 !important;
-    -webkit-text-fill-color: rgb(75 85 99) !important;
+    -webkit-text-fill-color: rgb(116 112 103) !important;
   }
   
   /* Custom class for chat input placeholder */
   .chat-input-placeholder::placeholder {
-    color: rgb(156 163 175) !important;
+    color: rgb(140 136 127) !important;
     opacity: 1 !important;
   }
 
   .dark .chat-input-placeholder::placeholder {
-    color: rgb(75 85 99) !important;
+    color: rgb(116 112 103) !important;
     opacity: 1 !important;
-    -webkit-text-fill-color: rgb(75 85 99) !important;
+    -webkit-text-fill-color: rgb(116 112 103) !important;
   }
 
   .chat-input-placeholder::-webkit-input-placeholder {
-    color: rgb(156 163 175) !important;
+    color: rgb(140 136 127) !important;
     opacity: 1 !important;
   }
 
   .dark .chat-input-placeholder::-webkit-input-placeholder {
-    color: rgb(75 85 99) !important;
+    color: rgb(116 112 103) !important;
     opacity: 1 !important;
-    -webkit-text-fill-color: rgb(75 85 99) !important;
+    -webkit-text-fill-color: rgb(116 112 103) !important;
   }
   
   /* WebKit specific placeholder styles */
   textarea::-webkit-input-placeholder {
-    color: rgb(156 163 175) !important;
+    color: rgb(140 136 127) !important;
     opacity: 1 !important;
   }
   
   .dark textarea::-webkit-input-placeholder {
-    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    color: rgb(116 112 103) !important; /* 따뜻한 회색 */
     opacity: 1 !important;
   }
   
   /* Mozilla specific placeholder styles */
   textarea::-moz-placeholder {
-    color: rgb(156 163 175) !important;
+    color: rgb(140 136 127) !important;
     opacity: 1 !important;
   }
   
   .dark textarea::-moz-placeholder {
-    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    color: rgb(116 112 103) !important; /* 따뜻한 회색 */
     opacity: 1 !important;
   }
   
   /* IE/Edge specific placeholder styles */
   textarea:-ms-input-placeholder {
-    color: rgb(156 163 175) !important;
+    color: rgb(140 136 127) !important;
     opacity: 1 !important;
   }
   
   .dark textarea:-ms-input-placeholder {
-    color: rgb(75 85 99) !important; /* gray-600 - darker gray */
+    color: rgb(116 112 103) !important; /* 따뜻한 회색 */
     opacity: 1 !important;
   }
 }
@@ -840,7 +850,7 @@
   .chat-input-placeholder {
     display: block !important;
     scrollbar-width: thin;
-    scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+    scrollbar-color: rgba(140, 136, 127, 0.3) transparent;
   }
 
   /* Ensure container fits textarea tightly */
@@ -858,25 +868,25 @@
   }
   
   .chat-input-placeholder::-webkit-scrollbar-thumb {
-    background-color: rgba(156, 163, 175, 0.3);
+    background-color: rgba(140, 136, 127, 0.3);
     border-radius: 3px;
     transition: background-color 0.2s;
   }
   
   .chat-input-placeholder::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(156, 163, 175, 0.5);
+    background-color: rgba(163, 160, 150, 0.5);
   }
   
   .dark .chat-input-placeholder {
-    scrollbar-color: rgba(107, 114, 128, 0.3) transparent;
+    scrollbar-color: rgba(138, 134, 124, 0.3) transparent;
   }
   
   .dark .chat-input-placeholder::-webkit-scrollbar-thumb {
-    background-color: rgba(107, 114, 128, 0.3);
+    background-color: rgba(138, 134, 124, 0.3);
   }
   
   .dark .chat-input-placeholder::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(107, 114, 128, 0.5);
+    background-color: rgba(138, 134, 124, 0.5);
   }
   
   /* Enhanced box shadow when textarea expands */
@@ -890,12 +900,12 @@
   
   /* Fix focus ring offset color in dark mode */
   .dark [class*="ring-offset"] {
-    --tw-ring-offset-color: rgb(20 20 20);
+    --tw-ring-offset-color: rgb(31 30 29);
   }
 
   /* Ensure buttons don't show white backgrounds in dark mode */
   .dark button:focus {
-    --tw-ring-offset-color: rgb(20 20 20);
+    --tw-ring-offset-color: rgb(31 30 29);
   }
   
   /* Fix mobile select dropdown styling */
@@ -908,7 +918,7 @@
   
   /* Improve select appearance in dark mode */
   .dark select {
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A3A096' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
     background-size: 1.5em 1.5em;
@@ -919,7 +929,7 @@
   }
   
   select {
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236B6862' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
     background-size: 1.5em 1.5em;
@@ -933,13 +943,13 @@
   select option {
     font-size: 16px !important;
     padding: 8px !important;
-    background-color: var(--background) !important;
-    color: var(--foreground) !important;
+    background-color: hsl(var(--background)) !important;
+    color: hsl(var(--foreground)) !important;
   }
   
   .dark select option {
-    background-color: rgb(31 31 31) !important;
-    color: rgb(237 235 230) !important;
+    background-color: rgb(38 38 36) !important;
+    color: rgb(245 244 238) !important;
   }
 
   /* Tool details chevron animation */

@@ -15,8 +15,10 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['"Encode Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
-        serif: ['Merriweather', 'Georgia', 'Cambria', '"Times New Roman"', 'serif'],
+        // 본문 UI: Inter 우선, CDN 미로딩 시 시스템 폰트로 안전하게 폴백 (한글은 Apple SD Gothic Neo / Malgun Gothic)
+        sans: ['Inter', 'Pretendard', '-apple-system', 'BlinkMacSystemFont', '"Apple SD Gothic Neo"', '"Segoe UI"', '"Malgun Gothic"', 'Roboto', '"Helvetica Neue"', 'Arial', 'system-ui', 'sans-serif'],
+        // 제목/대화 본문: Claude 앱 특유의 세리프. 폴백은 Georgia -> 시스템 세리프
+        serif: ['"Source Serif 4"', '"Noto Serif KR"', 'Georgia', 'Cambria', '"Times New Roman"', 'serif'],
       },
       colors: {
         border: "hsl(var(--border))",
