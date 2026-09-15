@@ -5,7 +5,7 @@ import type { TFunction } from 'i18next';
 import { Button } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 import type { LLMProvider, MCPServerStatus, Project, ProjectSession, SessionWithProvider } from '@/shared/types';
-import { getTaskIndicatorStatus } from '@/modules/sidebar/utils/sidebarProjectFormatting';
+import { formatCompactAge, getTaskIndicatorStatus } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import TaskIndicator from '@/modules/sidebar/TaskIndicator';
 import SidebarProjectSessions from '@/modules/sidebar/SidebarProjectSessions';
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
@@ -21,6 +21,11 @@ type SidebarProjectItemProps = {
   isEditing: boolean;
   renameDraft: string;
   sessions: SessionWithProvider[];
+  /**
+   * 이 프로젝트에서 마지막으로 대화한 시각(ISO). 꺼 둔 CLI 의 대화는 빠져 있다.
+   * 비어 있으면 시각을 그리지 않는다.
+   */
+  lastActivity: string;
   /** 꺼 둔 CLI 가 있어 `sessions` 가 걸러진 목록인지. 개수 배지가 이 값을 본다. */
   hasHiddenProviders: boolean;
   initialSessionsLoaded: boolean;
@@ -79,6 +84,7 @@ function SidebarProjectItem({
   isEditing,
   renameDraft,
   sessions,
+  lastActivity,
   hasHiddenProviders,
   initialSessionsLoaded,
   isLoadingMoreSessions,
@@ -112,6 +118,10 @@ function SidebarProjectItem({
   const isSelected = selectedProject?.projectId === project.projectId;
   const totalSessionCount = getSessionCountDisplay(project, sessions, hasHiddenProviders);
   const sessionCountDisplay = String(totalSessionCount);
+  // 세션 행과 같은 포맷 함수를 쓴다 — 같은 사이드바 안에서 `2hr` 과 `2시간 전` 이
+  // 섞이면 안 된다.
+  const lastActivityAge = formatCompactAge(lastActivity, currentTime);
+  const lastActivityTooltip = t('tooltips.lastActivity');
   const sessionCountLabel = `${sessionCountDisplay} session${totalSessionCount === 1 ? '' : 's'}`;
   const taskStatus = getTaskIndicatorStatus(project, mcpServerStatus);
   const mobileRenameInputRef = useRef<HTMLInputElement>(null);
@@ -169,6 +179,7 @@ function SidebarProjectItem({
                 'bg-yellow-50/50 dark:bg-yellow-900/5 border-yellow-200/30 dark:border-yellow-800/30',
             )}
             onClick={toggleProject}
+            title={project.fullPath}
           >
             <div className="flex items-center justify-between">
               <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -234,7 +245,17 @@ function SidebarProjectItem({
                           />
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">{sessionCountLabel}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {sessionCountLabel}
+                        {lastActivityAge && (
+                          <>
+                            <span aria-hidden> · </span>
+                            <span className="tabular-nums" title={lastActivityTooltip}>
+                              {lastActivityAge}
+                            </span>
+                          </>
+                        )}
+                      </p>
                     </>
                   )}
                 </div>
@@ -310,6 +331,7 @@ function SidebarProjectItem({
               'bg-yellow-50/50 dark:bg-yellow-900/10 hover:bg-yellow-100/50 dark:hover:bg-yellow-900/20',
           )}
           onClick={selectAndToggleProject}
+          title={project.fullPath}
         >
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <div
@@ -359,16 +381,32 @@ function SidebarProjectItem({
                 </div>
               ) : (
                 <div>
-                  <div className="truncate text-sm font-normal text-foreground" title={project.displayName}>
+                  {/* 이름 위에서도 경로를 볼 수 있게 두 줄로 묶는다 — 행 툴팁이 여기서는 가려진다. */}
+                  <div
+                    className="truncate text-sm font-normal text-foreground"
+                    title={
+                      project.fullPath && project.fullPath !== project.displayName
+                        ? `${project.displayName}\n${project.fullPath}`
+                        : project.displayName
+                    }
+                  >
                     {project.displayName}
                   </div>
+                  {/*
+                    예전에는 여기에 `...proj/vscode/QueryForge` 처럼 중간이 잘린 경로가
+                    늘 붙어 있었다. 잘린 경로는 프로젝트를 구분하는 데 거의 쓸모가 없어
+                    지웠고, 대신 이 프로젝트에서 마지막으로 대화한 시각을 보여준다.
+                    전체 경로는 행 전체의 툴팁으로 남아 있다.
+                  */}
                   <div className="text-xs text-muted-foreground">
                     {sessionCountDisplay}
-                    {project.fullPath !== project.displayName && (
-                      <span className="ml-1 opacity-60" title={project.fullPath}>
-                        {' - '}
-                        {project.fullPath.length > 25 ? `...${project.fullPath.slice(-22)}` : project.fullPath}
-                      </span>
+                    {lastActivityAge && (
+                      <>
+                        <span aria-hidden>{' · '}</span>
+                        <span className="tabular-nums" title={lastActivityTooltip}>
+                          {lastActivityAge}
+                        </span>
+                      </>
                     )}
                   </div>
                 </div>

@@ -166,3 +166,35 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
     );
   });
 });
+
+test('getLastActivityByProjectPath aggregates the newest session per project and provider', async () => {
+  await withIsolatedDatabase(() => {
+    // 같은 프로젝트에 provider 두 개. codex 쪽이 더 최근이다.
+    sessionsDb.createSession(
+      'claude-old', 'claude', '/workspace/demo-project', 'Old', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z',
+    );
+    sessionsDb.createSession(
+      'claude-new', 'claude', '/workspace/demo-project', 'New', '2026-09-02T10:00:00.000Z', '2026-09-02T10:00:00.000Z',
+    );
+    sessionsDb.createSession(
+      'codex-new', 'codex', '/workspace/demo-project', 'Codex', '2026-09-03T10:00:00.000Z', '2026-09-03T10:00:00.000Z',
+    );
+    // 보관된 세션은 목록에서 빠지므로 집계에서도 빠져야 한다.
+    sessionsDb.createSession(
+      'claude-archived', 'claude', '/workspace/demo-project', 'Archived', '2026-09-09T10:00:00.000Z', '2026-09-09T10:00:00.000Z',
+    );
+    sessionsDb.updateSessionIsArchived('claude-archived', true);
+    // 다른 프로젝트의 세션이 섞이지 않는지.
+    sessionsDb.createSession(
+      'other', 'claude', '/workspace/other-project', 'Other', '2026-09-05T10:00:00.000Z', '2026-09-05T10:00:00.000Z',
+    );
+
+    const aggregates = sessionsDb.getLastActivityByProjectPath();
+    const byKey = new Map(aggregates.map((row) => [`${row.project_path}|${row.provider}`, row.last_activity]));
+
+    assert.equal(byKey.get('/workspace/demo-project|claude'), '2026-09-02T10:00:00.000Z');
+    assert.equal(byKey.get('/workspace/demo-project|codex'), '2026-09-03T10:00:00.000Z');
+    assert.equal(byKey.get('/workspace/other-project|claude'), '2026-09-05T10:00:00.000Z');
+    assert.equal(aggregates.length, 3);
+  });
+});

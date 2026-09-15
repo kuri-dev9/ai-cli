@@ -113,6 +113,15 @@ export type Project = {
   path?: string;
   isStarred?: boolean;
   sessions?: ProjectSession[];
+  /**
+   * provider 별 마지막 대화 시각(ISO). 서버가 세션 전체를 집계해 내려준다.
+   *
+   * 사이드바 프로젝트 행은 접힌 상태에서도 마지막 대화 시각을 보여주는데,
+   * `sessions` 에는 첫 페이지만 들어 있어 화면에서는 그 값을 계산할 수 없다.
+   * provider 로 나뉘어 있는 것은 설정에서 꺼 둔 CLI 의 세션 시각을 빼고 볼 수
+   * 있게 하기 위해서다.
+   */
+  lastActivityByProvider?: Record<string, string>;
   sessionMeta?: ProjectSessionMeta;
   taskmaster?: ProjectTaskmasterInfo;
   [key: string]: unknown;
@@ -1268,6 +1277,11 @@ export type SidebarProjectListProps = SessionRowActions & {
   tasksEnabled: boolean;
   mcpServerStatus: MCPServerStatus;
   getProjectSessions: (project: Project) => SessionWithProvider[];
+  /**
+   * 프로젝트 행에 그릴 마지막 대화 시각(ISO). 꺼 둔 CLI 의 세션은 빠진다.
+   * 행이 memo 경계를 유지하도록 여기서 문자열 하나로 풀어서 넘긴다.
+   */
+  getProjectLastActivity: (project: Project) => string;
   /**
    * 설정에서 꺼 둔 CLI 가 있어 `getProjectSessions` 가 세션을 걸러내고 있는지.
    * 행 개수 배지가 서버의 전체 개수 대신 실제로 보이는 개수를 쓰도록 하는 데 쓴다.

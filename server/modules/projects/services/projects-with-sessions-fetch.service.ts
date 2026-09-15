@@ -5,7 +5,7 @@ import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { RealtimeClientConnection } from '@/shared/types.js';
-import { AppError } from '@/shared/utils.js';
+import { AppError, normalizeProjectPath } from '@/shared/utils.js';
 
 type SessionSummary = {
   id: string;
@@ -23,6 +23,16 @@ type SessionRepositoryRow = {
   created_at?: string | null;
 };
 
+/**
+ * 이 프로젝트에서 provider 별로 마지막으로 대화한 시각(ISO).
+ *
+ * 사이드바가 프로젝트 행에 마지막 대화 시각을 그리는 데 쓴다. 프로젝트 행은
+ * 펼치기 전에도 보이는데 세션은 첫 페이지만 내려가므로, 화면에서 계산하면
+ * 접힌 프로젝트나 페이지 밖의 세션이 빠진다. 그래서 서버가 세션 전체를 집계해
+ * 함께 내려준다.
+ */
+type ProjectLastActivityByProvider = Record<string, string>;
+
 export type ProjectListItem = {
   projectId: string;
   path: string;
@@ -30,6 +40,7 @@ export type ProjectListItem = {
   fullPath: string;
   isStarred: boolean;
   sessions: SessionSummary[];
+  lastActivityByProvider: ProjectLastActivityByProvider;
   sessionMeta: {
     hasMore: boolean;
     total: number;
@@ -127,6 +138,45 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
   };
 }
 
+/**
+ * 세션 목록에서 provider 별 최신 시각을 뽑는다.
+ *
+ * 세션을 전부 들고 있는 경우(보관된 프로젝트)에만 쓴다. 활성 프로젝트 목록은
+ * 세션을 한 페이지만 읽으므로 DB 집계를 쓴다.
+ */
+function buildLastActivityByProvider(sessions: SessionSummary[]): ProjectLastActivityByProvider {
+  const lastActivityByProvider: ProjectLastActivityByProvider = {};
+
+  for (const session of sessions) {
+    const provider = session.provider || 'claude';
+    const current = lastActivityByProvider[provider];
+    if (!current || new Date(session.lastActivity).getTime() > new Date(current).getTime()) {
+      lastActivityByProvider[provider] = session.lastActivity;
+    }
+  }
+
+  return lastActivityByProvider;
+}
+
+/**
+ * 프로젝트 경로 → provider 별 마지막 대화 시각. 목록 전체에 한 번만 질의한다.
+ */
+function readLastActivityByProjectPath(): Map<string, ProjectLastActivityByProvider> {
+  const byProjectPath = new Map<string, ProjectLastActivityByProvider>();
+
+  for (const row of sessionsDb.getLastActivityByProjectPath()) {
+    const existing = byProjectPath.get(row.project_path);
+    if (existing) {
+      existing[row.provider] = row.last_activity;
+      continue;
+    }
+
+    byProjectPath.set(row.project_path, { [row.provider]: row.last_activity });
+  }
+
+  return byProjectPath;
+}
+
 function readProjectSessionsIncludingArchived(projectPath: string): ProjectSessionsPageResult {
   const rows = sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath) as SessionRepositoryRow[];
 
@@ -191,6 +241,7 @@ export async function getProjectsWithSessions(
     isStarred?: number;
   }>;
   const totalProjects = projectRows.length;
+  const lastActivityByProjectPath = readLastActivityByProjectPath();
   const projects: ProjectListItem[] = [];
   let processedProjects = 0;
 
@@ -224,6 +275,7 @@ export async function getProjectsWithSessions(
       fullPath: projectPath,
       isStarred: Boolean(row.isStarred),
       sessions: sessionsPage.sessions,
+      lastActivityByProvider: lastActivityByProjectPath.get(normalizeProjectPath(projectPath)) ?? {},
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
         total: sessionsPage.total,
@@ -277,6 +329,7 @@ export async function getArchivedProjectsWithSessions(
       isStarred: Boolean(row.isStarred),
       isArchived: true,
       sessions: sessionsPage.sessions,
+      lastActivityByProvider: buildLastActivityByProvider(sessionsPage.sessions),
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
         total: sessionsPage.total,

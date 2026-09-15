@@ -114,6 +114,9 @@ const projectsHaveChanges = (
       nextProject.fullPath !== prevProject.fullPath ||
       Boolean(nextProject.isStarred) !== Boolean(prevProject.isStarred) ||
       serialize(nextProject.sessionMeta) !== serialize(prevProject.sessionMeta) ||
+      // 프로젝트 행이 보여주는 "마지막 대화 시각" 의 출처. 이걸 빼면 세션 목록이
+      // 그대로인 새로고침에서 시각만 갱신된 응답이 버려진다.
+      serialize(nextProject.lastActivityByProvider) !== serialize(prevProject.lastActivityByProvider) ||
       serialize(nextProject.sessions) !== serialize(prevProject.sessions) ||
       serialize(nextProject.taskmaster) !== serialize(prevProject.taskmaster)
     );

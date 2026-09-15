@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 
-import { hasHiddenProviders, toProviderName } from '@/shared/providerVisibility';
+import { hasHiddenProviders, isVisibleProvider, toProviderName } from '@/shared/providerVisibility';
 import type {
   LLMProvider,
   Project,
@@ -135,6 +135,57 @@ export const getVisibleSessions = (
   const sessions = allSessions.filter((session) => enabledProviders.includes(session.__provider));
   visibleSessionsByProject.set(project, { key, sessions });
   return sessions;
+};
+
+/**
+ * 프로젝트 행에 그릴 마지막 대화 시각(ISO). 보여 줄 게 없으면 빈 문자열.
+ *
+ * 두 곳을 합쳐서 본다.
+ *
+ * 1. 서버가 내려준 provider 별 집계(`lastActivityByProvider`). 프로젝트를 펼치기
+ *    전에는 세션이 첫 페이지밖에 없어서 화면만으로는 계산할 수 없다 — 접힌
+ *    프로젝트에 시각이 안 나오는 걸 막는 쪽이 이 값이다.
+ * 2. 지금 들고 있는 세션 목록. 대화를 주고받는 동안 세션 행은 websocket 으로
+ *    갱신되지만 집계는 다음 `/api/projects` 까지 그대로라, 방금 보낸 메시지가
+ *    프로젝트 행에는 몇 분 전으로 남는다.
+ *
+ * 둘 다 켜 둔 provider 것만 본다. 감춰 둔 CLI 의 대화가 가장 최근이라고 그
+ * 시각을 보여주면 사용자는 목록에 없는 대화의 시각을 보게 된다. 인자로 받는
+ * `sessions` 는 이미 `getVisibleSessions` 로 걸러진 목록이다.
+ */
+export const getVisibleLastActivity = (
+  project: Project,
+  sessions: SessionWithProvider[],
+  enabledProviders: readonly LLMProvider[],
+): string => {
+  let latest = 0;
+  let latestIso = '';
+
+  const consider = (value: string) => {
+    const time = new Date(value).getTime();
+    if (!Number.isNaN(time) && time > latest) {
+      latest = time;
+      latestIso = value;
+    }
+  };
+
+  const aggregates = project.lastActivityByProvider;
+  if (aggregates) {
+    for (const [provider, lastActivity] of Object.entries(aggregates)) {
+      if (typeof lastActivity === 'string' && isVisibleProvider(provider, enabledProviders)) {
+        consider(lastActivity);
+      }
+    }
+  }
+
+  for (const session of sessions) {
+    const sessionTime = getSessionTime(session);
+    if (sessionTime) {
+      consider(sessionTime);
+    }
+  }
+
+  return latestIso;
 };
 
 const getProjectLastActivity = (project: Project): Date => {

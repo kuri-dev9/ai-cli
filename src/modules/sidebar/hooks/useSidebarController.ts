@@ -7,6 +7,7 @@ import { usePaletteOps } from '@/modules/command-palette';
 import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode } from '@/shared/types';
 import {
   filterProjects,
+  getVisibleLastActivity,
   getVisibleSessions,
   sortProjects,
 } from '@/modules/sidebar/utils/sidebarProjectFormatting';
@@ -605,6 +606,15 @@ export function useSidebarController({
     [enabledProviders],
   );
 
+  const getProjectLastActivity = useCallback(
+    (project: Project) => getVisibleLastActivity(
+      project,
+      getVisibleSessions(project, enabledProviders),
+      enabledProviders,
+    ),
+    [enabledProviders],
+  );
+
   const loadMoreSessionsForProject = useCallback(async (projectId: string) => {
     if (!onLoadMoreSessions) {
       return;
@@ -1193,6 +1203,7 @@ export function useSidebarController({
     toggleStarProject,
     isProjectStarred,
     getProjectSessions,
+    getProjectLastActivity,
     loadMoreSessionsForProject,
     startEditingProject,
     startEditingSession,

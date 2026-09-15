@@ -643,6 +643,55 @@ export const sessionsDb = {
     return normalizeSessionRows(rows);
   },
 
+  /**
+   * 프로젝트 × provider 별 마지막 대화 시각. 한 번의 질의로 전부 집계한다.
+   *
+   * 사이드바 프로젝트 행이 "이 프로젝트에서 마지막으로 대화한 게 언제인지" 를
+   * 보여주는 데 쓴다. 행마다 세션을 훑으면 프로젝트 수만큼 질의가 나가므로
+   * 전체를 한 번에 묶어 돌려준다 — `idx_sessions_project_path` 를 타는 단일
+   * 집계 패스다.
+   *
+   * provider 로 쪼개는 이유는 설정에서 꺼 둔 CLI 때문이다. 감춘 provider 의
+   * 세션이 가장 최근이라 해서 그 시각을 그대로 보여주면, 사용자는 목록에
+   * 없는 대화의 시각을 보게 된다. provider 별로 내려 두면 화면에서 켜 둔
+   * 것만 골라 쓸 수 있다.
+   *
+   * 정렬·비교는 페이지 질의와 같은 `datetime(COALESCE(updated_at, created_at))`
+   * 를 쓴다. 세션 행의 시각은 SQLite 기본 포맷과 ISO 문자열이 섞여 있어서
+   * 문자열 비교로는 최댓값이 어긋난다.
+   */
+  getLastActivityByProjectPath(): Array<{ project_path: string; provider: string; last_activity: string }> {
+    const db = getConnection();
+    const rows = db
+      .prepare(
+        `SELECT project_path,
+                provider,
+                MAX(datetime(COALESCE(updated_at, created_at))) AS last_activity
+         FROM sessions
+         WHERE project_path IS NOT NULL
+           AND isArchived = 0
+         GROUP BY project_path, provider`
+      )
+      .all() as Array<{ project_path: string | null; provider: string | null; last_activity: string | null }>;
+
+    const aggregates: Array<{ project_path: string; provider: string; last_activity: string }> = [];
+
+    for (const row of rows) {
+      const lastActivity = normalizeTimestamp(row.last_activity ?? undefined);
+      if (!row.project_path || !lastActivity) {
+        continue;
+      }
+
+      aggregates.push({
+        project_path: normalizeProjectPath(row.project_path),
+        provider: row.provider || 'claude',
+        last_activity: lastActivity,
+      });
+    }
+
+    return aggregates;
+  },
+
   countSessionsByProjectPath(projectPath: string): number {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
