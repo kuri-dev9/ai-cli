@@ -37,6 +37,70 @@ export class ClaudeProviderAuth implements IProviderAuth {
   }
 
   /**
+   * `claude auth status` 로 CLI 에게 직접 인증 상태를 묻는다.
+   *
+   * CLI 가 자기 자격증명을 어디에 두든(환경변수, 파일, macOS 키체인) 정확한 답을
+   * 주고, 이메일과 인증 방식까지 함께 알려준다. 토큰 값은 출력하지 않는다.
+   *
+   * 실패하거나 형식이 예상과 다르면 null 을 돌려주고 아래의 기존 경로로 넘어간다.
+   */
+  private checkCliAuthStatus(): ClaudeCredentialsStatus | null {
+    const cliPath = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH) ?? 'claude';
+
+    try {
+      const result = spawn.sync(cliPath, ['auth', 'status'], {
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+
+      if (result.status !== 0 || typeof result.stdout !== 'string') {
+        return null;
+      }
+
+      const parsed = readObjectRecord(JSON.parse(result.stdout));
+      if (!parsed || parsed.loggedIn !== true) {
+        return null;
+      }
+
+      return {
+        authenticated: true,
+        email: readOptionalString(parsed.email) ?? 'Authenticated',
+        method: readOptionalString(parsed.authMethod) ?? 'cli',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Claude Code가 macOS 키체인에 자격증명을 저장했는지 확인한다.
+   *
+   * 일부러 `-w`를 붙이지 않는다. 그래서 비밀 값 자체는 절대 읽지 않고
+   * 항목의 존재 여부만 본다. 값을 읽으려 할 때 뜨는 키체인 접근 승인
+   * 팝업도 이 덕분에 뜨지 않는다.
+   *
+   * 만료 여부는 여기서 판정하지 않는다. 토큰 갱신은 CLI가 알아서 하므로
+   * 항목이 있으면 로그인된 것으로 본다.
+   */
+  private hasKeychainCredentials(): boolean {
+    if (process.platform !== 'darwin') {
+      return false;
+    }
+
+    try {
+      const result = spawn.sync(
+        'security',
+        ['find-generic-password', '-s', 'Claude Code-credentials'],
+        { stdio: 'ignore', timeout: 5000 },
+      );
+      return result.status === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Returns Claude installation and credential status using Claude Code's auth priority.
    */
   async getStatus(): Promise<ProviderAuthStatus> {
@@ -53,7 +117,20 @@ export class ClaudeProviderAuth implements IProviderAuth {
       };
     }
 
-    const credentials = await this.checkCredentials();
+    const fileCredentials = await this.checkCredentials();
+
+    // 환경변수와 settings.json, .credentials.json 파일에서 못 찾은 경우를 처리한다.
+    // Claude Code 는 macOS 에서 자격증명을 키체인에 넣는데 위 경로들은 그걸 보지
+    // 못해서, 멀쩡히 로그인된 상태인데도 미인증으로 표시되는 문제가 있었다.
+    //
+    // 1순위는 CLI 에게 직접 묻는 것이다. 자격증명을 어디에 뒀든 정확하고 이메일까지
+    // 알려준다. CLI 호출이 실패할 때를 대비해 키체인 항목 존재 확인을 남겨둔다.
+    const credentials = fileCredentials.authenticated
+      ? fileCredentials
+      : this.checkCliAuthStatus()
+        ?? (this.hasKeychainCredentials()
+          ? { authenticated: true, email: 'macOS Keychain', method: 'keychain' }
+          : fileCredentials);
 
     return {
       installed,

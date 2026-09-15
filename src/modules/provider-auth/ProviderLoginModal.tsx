@@ -44,7 +44,11 @@ const getProviderCommand = ({
   }
 
   if (provider === 'claude') {
-    return 'claude --dangerously-skip-permissions /login';
+    // 전에는 `claude --dangerously-skip-permissions /login` 으로 대화형 세션을
+    // 통째로 띄우고 슬래시 명령을 쳤다. 그 바람에 로그인만 하려는데 폴더 신뢰
+    // 확인 프롬프트가 먼저 뜨고, 권한 검사를 통째로 끄는 위험한 플래그까지
+    // 붙었다. `claude auth login` 은 인증만 하는 전용 명령이라 둘 다 필요 없다.
+    return 'claude auth login';
   }
 
   if (provider === 'cursor') {
@@ -59,7 +63,7 @@ const getProviderCommand = ({
     return 'opencode auth login';
   }
 
-  return 'claude --dangerously-skip-permissions /login';
+  return 'claude auth login';
 };
 
 const getProviderTitle = (provider: LLMProvider) => {
