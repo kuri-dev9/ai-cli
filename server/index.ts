@@ -5,6 +5,7 @@ import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
 import http from 'http';
+import https from 'https';
 
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
@@ -19,6 +20,7 @@ import { createWebSocketServer } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
+import { HttpsConfigError, isHttpsEnabled, loadHttpsCredentials } from './shared/https-config.js';
 import { createGitModule } from './modules/git/index.js';
 import {
     authenticateToken,
@@ -82,7 +84,39 @@ const systemRoutes = createSystemModule({
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
 const app = express();
-const server = http.createServer(app);
+
+/**
+ * 기본은 HTTP 다. `.env` 의 HTTPS_ENABLED=true 일 때만 TLS 로 뜬다.
+ * TLS 를 켜 놓고 인증서를 못 읽으면 평문으로 폴백하지 않고 즉시 멈춘다 —
+ * 암호화됐다고 믿는 채로 평문으로 도는 것이 가장 나쁜 실패다.
+ */
+function createAppServer() {
+    if (!isHttpsEnabled()) {
+        return { server: http.createServer(app), protocol: 'http' as const };
+    }
+
+    try {
+        const credentials = loadHttpsCredentials(APP_ROOT);
+        console.log(`${terminalTextStyles.info('[INFO]')} HTTPS enabled`);
+        console.log(`${terminalTextStyles.info('[INFO]')}   key:  ${terminalTextStyles.dim(credentials.keyPath)}`);
+        console.log(`${terminalTextStyles.info('[INFO]')}   cert: ${terminalTextStyles.dim(credentials.certPath)}`);
+        return {
+            server: https.createServer({ key: credentials.key, cert: credentials.cert }, app),
+            protocol: 'https' as const,
+        };
+    } catch (error) {
+        if (error instanceof HttpsConfigError) {
+            console.error('');
+            console.error(`${terminalTextStyles.error('[ERROR]')} ${error.message}`);
+            console.error('');
+        } else {
+            console.error(`${terminalTextStyles.error('[ERROR]')} HTTPS 인증서를 불러오지 못했습니다:`, error);
+        }
+        process.exit(1);
+    }
+}
+
+const { server, protocol: SERVER_PROTOCOL } = createAppServer();
 const queryClaude = providerRuntimeService.getRunner('claude');
 const queryCursor = providerRuntimeService.getRunner('cursor');
 const queryCodex = providerRuntimeService.getRunner('codex');
@@ -296,7 +330,7 @@ async function writeLocalServerMarker() {
         pid: process.pid,
         host: HOST,
         port: Number.parseInt(String(SERVER_PORT), 10),
-        url: `http://${DISPLAY_HOST}:${SERVER_PORT}`,
+        url: `${SERVER_PROTOCOL}://${DISPLAY_HOST}:${SERVER_PORT}`,
         installMode,
         appRoot: APP_ROOT,
         updatedAt: new Date().toISOString(),
@@ -342,10 +376,10 @@ async function startServer() {
         console.log('');
 
         if (isProduction) {
-            console.log(`${terminalTextStyles.info('[INFO]')} To run in production mode, go to http://${DISPLAY_HOST}:${SERVER_PORT}`);
+            console.log(`${terminalTextStyles.info('[INFO]')} To run in production mode, go to ${SERVER_PROTOCOL}://${DISPLAY_HOST}:${SERVER_PORT}`);
         }
 
-        console.log(`${terminalTextStyles.info('[INFO]')} To run in development mode with hot-module replacement, go to http://${DISPLAY_HOST}:${VITE_PORT}`);
+        console.log(`${terminalTextStyles.info('[INFO]')} To run in development mode with hot-module replacement, go to ${SERVER_PROTOCOL}://${DISPLAY_HOST}:${VITE_PORT}`);
    
         server.listen(SERVER_PORT, HOST, async () => {
             const appInstallPath = APP_ROOT;
@@ -358,7 +392,7 @@ async function startServer() {
             console.log(`  ${terminalTextStyles.bright('CloudCLI Server - Ready')}`);
             console.log(terminalTextStyles.dim('═'.repeat(63)));
             console.log('');
-            console.log(`${terminalTextStyles.info('[INFO]')} Server URL:  ${terminalTextStyles.bright('http://' + DISPLAY_HOST + ':' + SERVER_PORT)}`);
+            console.log(`${terminalTextStyles.info('[INFO]')} Server URL:  ${terminalTextStyles.bright(SERVER_PROTOCOL + '://' + DISPLAY_HOST + ':' + SERVER_PORT)}`);
             console.log(`${terminalTextStyles.info('[INFO]')} Installed at: ${terminalTextStyles.dim(appInstallPath)}`);
             console.log(`${terminalTextStyles.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');

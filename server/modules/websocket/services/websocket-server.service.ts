@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
+import type { Server as HttpsServer } from 'node:https';
 
 import { WebSocket, WebSocketServer, type VerifyClientCallbackSync } from 'ws';
 
@@ -81,7 +82,9 @@ export function attachWebSocketHeartbeat(
  * plugin proxy routes. Exported through the websocket module for server startup.
  */
 export function createWebSocketServer(
-  server: HttpServer,
+  // HTTPS 로 띄우면 여기 들어오는 것은 https.Server 다. 같은 서버에 붙으므로
+  // 클라이언트도 자동으로 wss:// 가 된다 (URL 은 window.location.protocol 에서 파생).
+  server: HttpServer | HttpsServer,
   dependencies: WebSocketServerDependencies
 ): WebSocketServer {
   const wss = new WebSocketServer({

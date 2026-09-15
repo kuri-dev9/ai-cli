@@ -147,3 +147,13 @@ tasks/
 cloudcli-sidebar-app-source.tar.gz
 cloudcli-sidebar.html
 electron/*.tar.gz
+
+# TLS 인증서 — 개인키가 들어 있으므로 절대 커밋하지 않는다
+# (scripts/generate-cert.sh 가 certs/ 에 생성한다)
+certs/
+*.key
+*.crt
+*.csr
+*.pem
+*.p12
+*.pfx

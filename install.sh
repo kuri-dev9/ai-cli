@@ -3,6 +3,7 @@
 # AI-CLI 설치 스크립트
 #
 #   git clone <저장소> ai-cli && cd ai-cli && ./install.sh
+#   ./install.sh --https     # HTTPS 인증서까지 만들고 .env 에 켜 둡니다
 #
 # 하는 일: Node 확인 → 의존성 설치 → 네이티브 모듈 빌드 승인 → 검증 → .env 생성 → 빌드
 #
@@ -17,6 +18,19 @@ warn()  { printf "%s[경고]%s %s\n"  "$YELLOW" "$NC" "$1"; }
 fail()  { printf "%s[실패]%s %s\n"  "$RED"    "$NC" "$1" >&2; exit 1; }
 
 MIN_NODE_MAJOR=22
+
+WANT_HTTPS=0
+for arg in "$@"; do
+  case "$arg" in
+    --https) WANT_HTTPS=1 ;;
+    -h|--help)
+      printf "사용법: ./install.sh [--https]\n\n"
+      printf "  --https   로컬 HTTPS 인증서를 만들고 .env 에 HTTPS_ENABLED=true 를 켭니다.\n"
+      printf "            폰/태블릿에서 접속할 때 로그인 토큰이 평문으로 흐르지 않게 합니다.\n"
+      exit 0 ;;
+    *) fail "알 수 없는 옵션: $arg" ;;
+  esac
+done
 
 printf "\n%s===============================================%s\n" "$DIM" "$NC"
 printf "  AI-CLI 설치\n"
@@ -115,7 +129,29 @@ fi
 PORT="$(grep -E '^SERVER_PORT=' .env | cut -d= -f2 | tr -d '[:space:]')"
 PORT="${PORT:-3001}"
 
-# ---------------------------------------------------------------- 6. 빌드
+# ------------------------------------------------------- 6. HTTPS (선택 사항)
+#
+# 기본값은 HTTP 다. 이 맥에서만 쓰면 http://localhost 는 브라우저가 이미 안전한
+# 출처로 취급하므로 켤 이유가 없다. --https 는 폰에서 LAN IP 로 붙는 경우를 위한 것.
+if [ "$WANT_HTTPS" -eq 1 ]; then
+  printf "\n"
+  info "HTTPS 인증서를 준비합니다"
+  # 이미 인증서가 있으면 스크립트가 그대로 두고 넘어간다. 재설치 때 인증서를
+  # 새로 만들어 버리면 폰에 등록해 둔 신뢰 설정이 한 번에 무효가 된다.
+  ./scripts/generate-cert.sh
+
+  if grep -q '^HTTPS_ENABLED=' .env; then
+    sed -i.bak 's/^HTTPS_ENABLED=.*/HTTPS_ENABLED=true/' .env && rm -f .env.bak
+  else
+    printf '\nHTTPS_ENABLED=true\n' >> .env
+  fi
+  ok ".env 에 HTTPS_ENABLED=true 를 설정했습니다"
+  SCHEME="https"
+else
+  SCHEME="http"
+fi
+
+# ---------------------------------------------------------------- 7. 빌드
 printf "\n"
 info "앱을 빌드합니다"
 npm run build
@@ -127,10 +163,15 @@ printf "%s===============================================%s\n\n" "$DIM" "$NC"
 printf "실행:\n"
 printf "  %snpm run server%s\n\n" "$BLUE" "$NC"
 printf "접속:\n"
-printf "  %shttp://localhost:%s%s\n\n" "$BLUE" "$PORT" "$NC"
+printf "  %s%s://localhost:%s%s\n\n" "$BLUE" "$SCHEME" "$PORT" "$NC"
 printf "%s처음 실행하면:%s\n" "$YELLOW" "$NC"
 printf "  1. 로컬 계정을 하나 만듭니다 (이 컴퓨터의 auth.db 에만 저장됩니다)\n"
 printf "  2. 설정(⚙) 에서 사용할 도구를 켜세요. 기본값은 전부 꺼짐입니다.\n"
 printf "  3. claude 로그인이 안 돼 있으면 터미널에서 'claude' 를 한 번 실행해 로그인하세요.\n\n"
 printf "%s다른 기기에서 접속하려면 .env 의 HOST 를 0.0.0.0 으로 바꾸세요.%s\n" "$DIM" "$NC"
 printf "%s단, 같은 네트워크의 누구나 이 컴퓨터에서 명령을 실행할 수 있게 됩니다.%s\n\n" "$DIM" "$NC"
+
+if [ "$WANT_HTTPS" -eq 0 ]; then
+  printf "%s폰/태블릿에서 쓸 계획이라면 HTTPS 를 고려하세요 (평문이면 로그인 토큰이 노출됩니다):%s\n" "$DIM" "$NC"
+  printf "%s  ./scripts/generate-cert.sh  →  .env 에 HTTPS_ENABLED=true%s\n\n" "$DIM" "$NC"
+fi

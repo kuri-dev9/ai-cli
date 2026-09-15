@@ -100,6 +100,66 @@ HOST=0.0.0.0       # 같은 네트워크의 다른 기기에서도
 SERVER_PORT=3001
 ```
 
+### HTTPS (선택 사항)
+
+기본값은 HTTP 입니다. **이 컴퓨터에서만 쓴다면 켤 필요가 없습니다** — 브라우저는
+`http://localhost` 를 이미 안전한 출처(secure context)로 취급합니다.
+
+폰/태블릿에서 `http://192.168.x.x` 로 붙는 경우에만 의미가 있습니다. 평문이라
+같은 네트워크에서 트래픽을 보면 **로그인 토큰이 그대로 노출**됩니다.
+
+```bash
+./scripts/generate-cert.sh     # certs/server.key, certs/server.crt 생성
+```
+
+그리고 `.env` 에:
+
+```
+HTTPS_ENABLED=true
+```
+
+서버를 다시 시작하면 `https://` 로 뜹니다. WebSocket 은 페이지 프로토콜을 따라가므로
+자동으로 `wss://` 가 됩니다 — 따로 설정할 것이 없습니다.
+
+인증서 경로를 옮기려면 `HTTPS_KEY_PATH`, `HTTPS_CERT_PATH` 를 설정하세요. 켜 놓고
+인증서를 읽지 못하면 서버는 **HTTP 로 폴백하지 않고 에러를 내며 멈춥니다.**
+암호화됐다고 착각한 채 평문으로 도는 쪽이 더 위험하기 때문입니다.
+
+#### 어느 방법으로 인증서를 만들지
+
+`generate-cert.sh` 는 `mkcert` 가 깔려 있으면 그걸 쓰고, 없으면 `openssl` 로
+자체 서명 인증서를 만듭니다. 둘은 대가가 꽤 다릅니다.
+
+| | openssl (자체 서명) | mkcert (로컬 CA) |
+|---|---|---|
+| 준비 | 없음 | `brew install mkcert` + 폰에 CA 설치 |
+| 브라우저 경고 | 접속할 때마다 통과 | 없음 |
+| service worker | **등록 안 됨** | 정상 |
+| 웹 푸시 알림 | **안 됨** | 정상 |
+| 홈 화면 PWA 설치 | **막힘** | 정상 |
+
+브라우저는 인증서 오류가 난 페이지에서 service worker 등록을 거부합니다
+(`An SSL certificate error occurred when fetching the script`). 경고를 클릭해서
+통과해도 마찬가지입니다. 그래서 **자체 서명으로는 PWA 기능이 죽습니다.**
+
+> 다만 지금 `http://192.168.x.x` 로 쓰고 있다면 service worker 는 **이미**
+> 동작하지 않습니다(평문은 secure context 가 아님). 즉 자체 서명으로 바꿔도
+> 잃는 것은 없고, TLS 만 얻습니다.
+
+폰에서 PWA 로 쓰고 싶다면 mkcert 쪽을 고르세요. CA 를 한 번 설치하면 경고도 없고
+지금보다 **오히려 기능이 늘어납니다**:
+
+```bash
+brew install mkcert
+./scripts/generate-cert.sh --force
+mkcert -CAROOT          # 이 폴더의 rootCA.pem 을 폰으로 보내 설치
+```
+
+- iOS: 프로파일 설치 후 **설정 > 일반 > 정보 > 인증서 신뢰 설정** 에서 켜야 합니다
+- Android: **설정 > 보안 > 인증서 설치 > CA 인증서**
+
+인증서 파일(`certs/`)은 `.gitignore` 에 있어 커밋되지 않습니다.
+
 ---
 
 ## 개발
