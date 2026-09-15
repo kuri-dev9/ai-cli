@@ -5,7 +5,7 @@ import type { TFunction } from 'i18next';
 import { Button } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 import type { LLMProvider, MCPServerStatus, Project, ProjectSession, SessionWithProvider } from '@/shared/types';
-import { formatCompactAge, getTaskIndicatorStatus } from '@/modules/sidebar/utils/sidebarProjectFormatting';
+import { formatAbsoluteDateTime, formatCompactAge, getTaskIndicatorStatus } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import TaskIndicator from '@/modules/sidebar/TaskIndicator';
 import SidebarProjectSessions from '@/modules/sidebar/SidebarProjectSessions';
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
@@ -121,6 +121,7 @@ function SidebarProjectItem({
   // 세션 행과 같은 포맷 함수를 쓴다 — 같은 사이드바 안에서 `2hr` 과 `2시간 전` 이
   // 섞이면 안 된다.
   const lastActivityAge = formatCompactAge(lastActivity, currentTime);
+  const lastActivityAt = formatAbsoluteDateTime(lastActivity);
   const lastActivityTooltip = t('tooltips.lastActivity');
   const sessionCountLabel = `${sessionCountDisplay} session${totalSessionCount === 1 ? '' : 's'}`;
   const taskStatus = getTaskIndicatorStatus(project, mcpServerStatus);
@@ -252,6 +253,14 @@ function SidebarProjectItem({
                             <span aria-hidden> · </span>
                             <span className="tabular-nums" title={lastActivityTooltip}>
                               {lastActivityAge}
+                            </span>
+                          </>
+                        )}
+                        {lastActivityAt && (
+                          <>
+                            <span aria-hidden> · </span>
+                            <span className="tabular-nums" title={lastActivityTooltip}>
+                              {lastActivityAt}
                             </span>
                           </>
                         )}
@@ -405,6 +414,14 @@ function SidebarProjectItem({
                         <span aria-hidden>{' · '}</span>
                         <span className="tabular-nums" title={lastActivityTooltip}>
                           {lastActivityAge}
+                        </span>
+                      </>
+                    )}
+                    {lastActivityAt && (
+                      <>
+                        <span aria-hidden>{' · '}</span>
+                        <span className="tabular-nums" title={lastActivityTooltip}>
+                          {lastActivityAt}
                         </span>
                       </>
                     )}

@@ -153,6 +153,27 @@ export const getVisibleSessions = (
  * 시각을 보여주면 사용자는 목록에 없는 대화의 시각을 보게 된다. 인자로 받는
  * `sessions` 는 이미 `getVisibleSessions` 로 걸러진 목록이다.
  */
+/**
+ * 마지막 대화 시각을 `2026-09-15 18:56` 로 적는다.
+ *
+ * 상대 표기(`<1m`, `2hr`)만으로는 "그래서 언제였는지" 를 알 수 없어서 절대
+ * 시각을 함께 보여준다. 표시 기준은 보는 사람의 시간대다.
+ */
+export const formatAbsoluteDateTime = (value: string): string => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + ` ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 export const getVisibleLastActivity = (
   project: Project,
   sessions: SessionWithProvider[],
