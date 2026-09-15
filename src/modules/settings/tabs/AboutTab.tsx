@@ -46,7 +46,7 @@ export default function AboutTab() {
               className="text-base font-semibold text-foreground"
               style={{ fontFamily: CLOUDCLI_WORDMARK_FONT_FAMILY }}
             >
-              CloudCLI
+              AI-CLI
             </span>
             <a
               href={releasesUrl}
@@ -163,9 +163,21 @@ export default function AboutTab() {
       )}
 
       {/* License */}
-      <div className="border-t border-border/50 pt-4">
+      <div className="border-t border-border/50 pt-4 space-y-1">
         <p className="text-xs text-muted-foreground/60">
           {t('about.licensed')}
+        </p>
+        <p className="text-xs text-muted-foreground/60">
+          이 소프트웨어는{' '}
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            CloudCLI UI
+          </a>
+          {' '}(https://github.com/siteboon/claudecodeui)를 기반으로 수정한 버전입니다.
         </p>
       </div>
     </div>
