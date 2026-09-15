@@ -111,10 +111,10 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
             )}
             {userCopyContent.trim().length > 0 || (!message.images?.length && !message.files?.length) ? (
               <div className="group max-w-full rounded-2xl rounded-br-md border border-border/60 bg-muted/60 px-3 py-2 text-foreground shadow-sm dark:bg-gray-800/60 sm:px-4">
-                <div dir="auto" className="break-words font-serif text-sm">
+                <div dir="auto" className="break-words font-sans text-sm">
                   <Markdown
                     breaks
-                    className="prose prose-sm max-w-none font-serif dark:prose-invert"
+                    className="prose prose-sm max-w-none font-sans dark:prose-invert"
                   >
                     {message.content}
                   </Markdown>
@@ -221,7 +221,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               <>
                 <div className="flex flex-col">
                   <div className="flex flex-col">
-                    <Markdown className="prose prose-sm max-w-none font-serif dark:prose-invert">
+                    <Markdown className="prose prose-sm max-w-none font-sans dark:prose-invert">
                       {String(message.displayText || '')}
                     </Markdown>
                   </div>
@@ -275,7 +275,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               <Reasoning defaultOpen={isExporting}>
                 <ReasoningTrigger />
                 <ReasoningContent>
-                  <Markdown className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert">
+                  <Markdown className="prose prose-sm prose-gray max-w-none font-sans dark:prose-invert">
                     {message.content}
                   </Markdown>
                   {!isExporting && (
@@ -339,7 +339,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                     <StreamingMarkdown
                       content={content}
                       isStreaming={Boolean(message.isStreaming)}
-                      className="prose prose-sm prose-gray max-w-none font-serif dark:prose-invert"
+                      className="prose prose-sm prose-gray max-w-none font-sans dark:prose-invert"
                     />
                   ) : (
                     <div className="whitespace-pre-wrap">
