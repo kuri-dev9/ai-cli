@@ -255,5 +255,16 @@
   "optionalDependencies": {
     "@nut-tree-fork/nut-js": "^4.2.6",
     "screenshot-desktop": "^1.15.4"
+  },
+  "allowScripts": {
+    "@vscode/ripgrep@1.17.1": true,
+    "bcrypt@6.0.0": true,
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.25.8": true,
+    "esbuild@0.27.7": true,
+    "fsevents@2.3.3": true,
+    "node-pty@1.2.0-beta.12": true,
+    "sharp@0.34.3": true,
+    "unrs-resolver@1.11.1": true
   }
 }
