@@ -28,6 +28,7 @@ export type UserPreferences = {
   codeEditorSettings: unknown;
   uiPreferences: unknown;
   selectedProvider: string;
+  disabledProviders: unknown;
 };
 
 export type UserPreferenceKey = keyof UserPreferences;
@@ -67,6 +68,9 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   codeEditorSettings: '',
   uiPreferences: 'uiPreferences',
   selectedProvider: 'selected-provider',
+  // Unused: which CLI providers are hidden used to be a build-time .env value
+  // (VITE_ENABLED_PROVIDERS), so there is no localStorage predecessor for it.
+  disabledProviders: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

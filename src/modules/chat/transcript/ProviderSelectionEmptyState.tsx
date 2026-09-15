@@ -25,8 +25,9 @@ import {
 import ModelGroupList, { type ModelGroup } from "@/modules/chat/composer/ModelGroupList";
 import ModelLibraryPanel from "@/modules/chat/modals/ModelLibraryPanel";
 import { writeSelectedProvider } from '@/shared/selectedProvider';
+import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 
-const PROVIDER_META: { id: LLMProvider; name: string }[] = [
+const ALL_PROVIDER_META: { id: LLMProvider; name: string }[] = [
   { id: "claude", name: "Anthropic" },
   { id: "codex", name: "OpenAI" },
   { id: "cursor", name: "Cursor" },
@@ -102,6 +103,7 @@ export default function ProviderSelectionEmptyState({
   setInput,
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation("chat");
+  const enabledProviders = useEnabledProviders();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [modelLibraryOpen, setModelLibraryOpen] = useState(false);
 
@@ -121,15 +123,20 @@ export default function ProviderSelectionEmptyState({
     }
   }, []);
 
-  /** One collapsible branch per provider, in the order the picker lists them. */
+  /**
+   * One collapsible branch per provider, in the order the picker lists them.
+   * 설정에서 꺼 둔 CLI 는 목록에 넣지 않는다.
+   */
   const visibleProviderGroups = useMemo<ModelGroup[]>(
-    () => PROVIDER_META.map((meta) => ({
-      key: meta.id,
-      provider: meta.id,
-      name: meta.name,
-      models: providerModelCatalog[meta.id]?.OPTIONS ?? [],
-    })),
-    [providerModelCatalog],
+    () => ALL_PROVIDER_META
+      .filter((meta) => enabledProviders.includes(meta.id))
+      .map((meta) => ({
+        key: meta.id,
+        provider: meta.id,
+        name: meta.name,
+        models: providerModelCatalog[meta.id]?.OPTIONS ?? [],
+      })),
+    [enabledProviders, providerModelCatalog],
   );
 
   const nextTaskPrompt = t("tasks.nextTaskPrompt", {

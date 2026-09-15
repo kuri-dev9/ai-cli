@@ -21,6 +21,8 @@ type SidebarProjectItemProps = {
   isEditing: boolean;
   renameDraft: string;
   sessions: SessionWithProvider[];
+  /** 꺼 둔 CLI 가 있어 `sessions` 가 걸러진 목록인지. 개수 배지가 이 값을 본다. */
+  hasHiddenProviders: boolean;
   initialSessionsLoaded: boolean;
   isLoadingMoreSessions: boolean;
   currentTime: Date;
@@ -50,10 +52,21 @@ type SidebarProjectItemProps = {
   t: TFunction;
 };
 
-const getSessionCountDisplay = (project: Project, sessions: SessionWithProvider[]): string => {
-  const total = Number(project.sessionMeta?.total ?? sessions.length);
-  return String(total);
-};
+/**
+ * 행 개수 배지.
+ *
+ * 평소에는 서버가 세어 준 전체 개수를 쓴다 — 아직 다 받아 오지 않았어도 이 프로젝트에
+ * 대화가 몇 개 있는지는 그 수가 맞다. 다만 꺼 둔 CLI 가 있어 목록을 거르고 있을 때는
+ * 그 수에 감춘 대화까지 들어 있어, 배지가 "12" 인데 펼치면 아무것도 없는 화면이 된다.
+ * 그때는 실제로 보이는 개수를 쓴다.
+ */
+const getSessionCountDisplay = (
+  project: Project,
+  sessions: SessionWithProvider[],
+  hasHiddenProviders: boolean,
+): number => (
+  hasHiddenProviders ? sessions.length : Number(project.sessionMeta?.total ?? sessions.length)
+);
 
 /** Rendered by SidebarProjectList for one project row, including its expand, rename, star and delete controls. */
 function SidebarProjectItem({
@@ -66,6 +79,7 @@ function SidebarProjectItem({
   isEditing,
   renameDraft,
   sessions,
+  hasHiddenProviders,
   initialSessionsLoaded,
   isLoadingMoreSessions,
   currentTime,
@@ -96,8 +110,8 @@ function SidebarProjectItem({
   // Project identity is tracked by the DB-assigned `projectId` everywhere
   // after the projectName → projectId migration.
   const isSelected = selectedProject?.projectId === project.projectId;
-  const totalSessionCount = Number(project.sessionMeta?.total ?? sessions.length);
-  const sessionCountDisplay = getSessionCountDisplay(project, sessions);
+  const totalSessionCount = getSessionCountDisplay(project, sessions, hasHiddenProviders);
+  const sessionCountDisplay = String(totalSessionCount);
   const sessionCountLabel = `${sessionCountDisplay} session${totalSessionCount === 1 ? '' : 's'}`;
   const taskStatus = getTaskIndicatorStatus(project, mcpServerStatus);
   const mobileRenameInputRef = useRef<HTMLInputElement>(null);

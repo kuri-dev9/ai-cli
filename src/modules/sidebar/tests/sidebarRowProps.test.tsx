@@ -75,6 +75,7 @@ const listProps = (activeRename: ActiveSidebarRename | null): SidebarProjectList
   tasksEnabled: false,
   mcpServerStatus: null,
   getProjectSessions: getAllSessions,
+  hasHiddenProviders: false,
   onLoadMoreSessions: noop,
   loadingMoreProjects: new Set(),
   activeSessions: NO_SESSION_IDS,

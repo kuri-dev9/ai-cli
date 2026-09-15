@@ -1268,6 +1268,11 @@ export type SidebarProjectListProps = SessionRowActions & {
   tasksEnabled: boolean;
   mcpServerStatus: MCPServerStatus;
   getProjectSessions: (project: Project) => SessionWithProvider[];
+  /**
+   * 설정에서 꺼 둔 CLI 가 있어 `getProjectSessions` 가 세션을 걸러내고 있는지.
+   * 행 개수 배지가 서버의 전체 개수 대신 실제로 보이는 개수를 쓰도록 하는 데 쓴다.
+   */
+  hasHiddenProviders: boolean;
   onLoadMoreSessions: (projectId: string) => void;
   loadingMoreProjects: Set<string>;
   forceExpanded?: boolean;

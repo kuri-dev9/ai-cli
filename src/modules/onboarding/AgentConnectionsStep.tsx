@@ -1,14 +1,16 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { LLMProvider, ProviderAuthStatusMap } from '@/shared/types';
 import AgentConnectionCard from '@/modules/onboarding/AgentConnectionCard';
+import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 
 type AgentConnectionsStepProps = {
   providerStatuses: ProviderAuthStatusMap;
   onOpenProviderLogin: (provider: LLMProvider) => void;
 };
 
-const providerCards = [
+const PROVIDER_CARDS = [
   {
     provider: 'claude' as const,
     title: 'Claude Code',
@@ -45,6 +47,13 @@ export default function AgentConnectionsStep({
   onOpenProviderLogin,
 }: AgentConnectionsStepProps) {
   const { t } = useTranslation('auth');
+  // 설정에서 꺼 둔 CLI 는 온보딩에서도 묻지 않는다.
+  const enabledProviders = useEnabledProviders();
+  const visibleProviderCards = useMemo(
+    () => PROVIDER_CARDS.filter((card) => enabledProviders.includes(card.provider)),
+    [enabledProviders],
+  );
+
   return (
     <div className="space-y-4">
       <div className="text-center">
@@ -55,7 +64,7 @@ export default function AgentConnectionsStep({
       </div>
 
       <div className="-mr-1 max-h-[38vh] space-y-2 overflow-y-auto pr-1">
-        {providerCards.map((providerCard) => (
+        {visibleProviderCards.map((providerCard) => (
           <AgentConnectionCard
             key={providerCard.provider}
             provider={providerCard.provider}

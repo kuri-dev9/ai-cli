@@ -64,7 +64,9 @@ export default function SidebarRecentConversations({
   onRetry,
   t,
 }: SidebarRecentConversationsProps) {
-  if (isLoading && conversations.length === 0) {
+  // 다음 페이지를 받는 중에도 보여줄 행이 없으면 스켈레톤을 유지한다. 꺼 둔 CLI 의
+  // 대화만 들어 있던 페이지를 건너뛰는 동안 "대화가 없습니다" 가 잠깐 스치면 안 된다.
+  if ((isLoading || isLoadingMore) && conversations.length === 0) {
     return <RecentConversationSkeleton />;
   }
 

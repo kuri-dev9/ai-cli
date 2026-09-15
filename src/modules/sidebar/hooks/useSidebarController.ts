@@ -7,9 +7,11 @@ import { usePaletteOps } from '@/modules/command-palette';
 import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode } from '@/shared/types';
 import {
   filterProjects,
-  getAllSessions,
+  getVisibleSessions,
   sortProjects,
 } from '@/modules/sidebar/utils/sidebarProjectFormatting';
+import { hasHiddenProviders as computeHasHiddenProviders, isVisibleProvider } from '@/shared/providerVisibility';
+import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 import {
   clearLegacyStarredProjectIds,
   readLegacyStarredProjectIds,
@@ -113,10 +115,25 @@ export function useSidebarController({
   const [loadingMoreProjects, setLoadingMoreProjects] = useState<Set<string>>(new Set());
   const searchSeqRef = useRef(0);
   const recentConversationsSeqRef = useRef(0);
+  const autoAdvancedRecentOffsetRef = useRef(-1);
   const eventSourceRef = useRef<EventSource | null>(null);
   const starToggleSequenceByProjectRef = useRef<Map<string, number>>(new Map());
   const migrationStartedRef = useRef(false);
   const onRefreshRef = useRef(onRefresh);
+
+  /**
+   * 설정 > 에이전트 에서 꺼 둔 CLI 는 사이드바의 대화 목록에서도 감춘다.
+   *
+   * 사용자가 Claude 만 쓰려고 나머지를 껐는데 지난 Codex 대화가 목록에 그대로
+   * 남아 있으면 "Codex 가 연결돼 있다" 로 읽힌다. 그래서 새 대화를 시작할 CLI 만
+   * 거를 게 아니라 과거 세션 목록도 같은 규칙으로 걸러야 한다.
+   *
+   * 거르는 것은 **화면에 그리는 목록뿐**이다. 서버에서 받아 둔 원본 상태는 그대로
+   * 두므로 다시 켜면 전부 돌아오고, "더 보기" 가 쓰는 offset(= 받아 둔 개수)도
+   * 어긋나지 않는다.
+   */
+  const enabledProviders = useEnabledProviders();
+  const hasHiddenProviders = computeHasHiddenProviders(enabledProviders);
 
   const isSidebarCollapsed = !isMobile && !sidebarVisible;
   const activeSessionIds = activeSessions;
@@ -220,6 +237,7 @@ export function useSidebarController({
     if (append) {
       setIsLoadingMoreRecentConversations(true);
     } else {
+      autoAdvancedRecentOffsetRef.current = -1;
       setIsRecentConversationsLoading(true);
     }
     setRecentConversationsError(false);
@@ -582,7 +600,10 @@ export function useSidebarController({
     [resolveProjectStarState],
   );
 
-  const getProjectSessions = useCallback((project: Project) => getAllSessions(project), []);
+  const getProjectSessions = useCallback(
+    (project: Project) => getVisibleSessions(project, enabledProviders),
+    [enabledProviders],
+  );
 
   const loadMoreSessionsForProject = useCallback(async (projectId: string) => {
     if (!onLoadMoreSessions) {
@@ -653,7 +674,12 @@ export function useSidebarController({
     }
 
     return sortedProjects.reduce<Project[]>((acc, project) => {
-      const sessions = (project.sessions ?? []).filter((session) => activeSessionIds.has(String(session.id)));
+      // 꺼 둔 CLI 로 돌고 있는 세션은 "실행 중" 목록에서도 빼야 한다. 그렇지 않으면
+      // 목록의 개수와 실제로 그려지는 행이 어긋난다.
+      const sessions = (project.sessions ?? []).filter((session) => (
+        activeSessionIds.has(String(session.id))
+        && isVisibleProvider(session.__provider ?? session.provider, enabledProviders)
+      ));
       const runningCount = sessions.length;
 
       if (runningCount === 0) {
@@ -671,20 +697,32 @@ export function useSidebarController({
       });
       return acc;
     }, []);
-  }, [activeSessionIds, sortedProjects]);
+  }, [activeSessionIds, enabledProviders, sortedProjects]);
 
   const filteredProjects = useMemo(
     () => filterProjects(searchMode === 'running' ? runningProjects : sortedProjects, debouncedSearchQuery),
     [debouncedSearchQuery, runningProjects, searchMode, sortedProjects],
   );
 
-  const filteredArchivedSessions = useMemo(() => {
-    const normalizedSearch = debouncedSearchQuery.trim().toLowerCase();
-    if (!normalizedSearch) {
+  // 아카이브의 "N/M" 배지가 분모로 쓰는 개수도 이 목록에서 나오므로, 검색 필터보다
+  // 먼저 provider 필터를 적용해 둘이 같은 모수를 보게 한다.
+  const providerVisibleArchivedSessions = useMemo(() => {
+    if (!hasHiddenProviders) {
       return archivedSessions;
     }
 
-    return archivedSessions.filter((session) => {
+    return archivedSessions.filter((session) => (
+      isVisibleProvider(session.provider, enabledProviders)
+    ));
+  }, [archivedSessions, enabledProviders, hasHiddenProviders]);
+
+  const filteredArchivedSessions = useMemo(() => {
+    const normalizedSearch = debouncedSearchQuery.trim().toLowerCase();
+    if (!normalizedSearch) {
+      return providerVisibleArchivedSessions;
+    }
+
+    return providerVisibleArchivedSessions.filter((session) => {
       const searchableFields = [
         session.sessionTitle,
         session.projectDisplayName,
@@ -694,7 +732,7 @@ export function useSidebarController({
 
       return searchableFields.some((value) => value.toLowerCase().includes(normalizedSearch));
     });
-  }, [archivedSessions, debouncedSearchQuery]);
+  }, [debouncedSearchQuery, providerVisibleArchivedSessions]);
 
   const filteredArchivedProjects = useMemo(() => {
     const normalizedSearch = debouncedSearchQuery.trim().toLowerCase();
@@ -712,7 +750,7 @@ export function useSidebarController({
         return true;
       }
 
-      return getAllSessions(project).some((session) => {
+      return getVisibleSessions(project, enabledProviders).some((session) => {
         const sessionSummary =
           typeof session.summary === 'string' && session.summary.trim().length > 0
             ? session.summary
@@ -726,7 +764,86 @@ export function useSidebarController({
         ].some((value) => value.toLowerCase().includes(normalizedSearch));
       });
     });
-  }, [archivedProjects, debouncedSearchQuery]);
+  }, [archivedProjects, debouncedSearchQuery, enabledProviders]);
+
+  const visibleRecentConversations = useMemo(() => {
+    if (!hasHiddenProviders) {
+      return recentConversations;
+    }
+
+    return recentConversations.filter((conversation) => (
+      isVisibleProvider(conversation.provider, enabledProviders)
+    ));
+  }, [enabledProviders, hasHiddenProviders, recentConversations]);
+
+  /**
+   * 서버가 준 한 페이지가 전부 꺼 둔 CLI 의 대화라 아무것도 안 보이게 될 수 있다.
+   * 그대로 두면 "대화가 없습니다" 와 "더 보기" 버튼이 같이 뜨는 이상한 화면이
+   * 되므로, 보여줄 것이 하나라도 생길 때까지 다음 페이지를 이어서 가져온다.
+   *
+   * 같은 offset 으로 두 번 들어가지 않게 ref 로 막는다. 서버가 빈 페이지를
+   * 돌려주면 목록 길이가 그대로라 이 가드가 없으면 같은 요청을 무한히 반복한다.
+   */
+  useEffect(() => {
+    if (
+      !hasHiddenProviders
+      || visibleRecentConversations.length > 0
+      || recentConversations.length === 0
+      || !recentConversationsHasMore
+      || isRecentConversationsLoading
+      || isLoadingMoreRecentConversations
+      || autoAdvancedRecentOffsetRef.current === recentConversations.length
+    ) {
+      return;
+    }
+
+    autoAdvancedRecentOffsetRef.current = recentConversations.length;
+    void fetchRecentConversationsPage(recentConversations.length, true);
+  }, [
+    fetchRecentConversationsPage,
+    hasHiddenProviders,
+    isLoadingMoreRecentConversations,
+    isRecentConversationsLoading,
+    recentConversations.length,
+    recentConversationsHasMore,
+    visibleRecentConversations.length,
+  ]);
+
+  /**
+   * 검색 결과에도 같은 규칙을 건다. 목록에서는 감췄는데 검색하면 나오는 것만큼
+   * 일관성 없는 것도 없다. 제목 매치와 본문 매치 양쪽 모두 거르고, 세션이 하나도
+   * 남지 않은 프로젝트 묶음은 빈 제목만 남으므로 통째로 뺀다.
+   */
+  const visibleConversationResults = useMemo<ConversationSearchResults | null>(() => {
+    if (!conversationResults || !hasHiddenProviders) {
+      return conversationResults;
+    }
+
+    const results = conversationResults.results
+      .map((projectResult) => ({
+        ...projectResult,
+        sessions: projectResult.sessions.filter((session) => (
+          isVisibleProvider(session.provider, enabledProviders)
+        )),
+      }))
+      .filter((projectResult) => projectResult.sessions.length > 0);
+
+    return {
+      ...conversationResults,
+      results,
+      titleResults: conversationResults.titleResults.filter((result) => (
+        isVisibleProvider(result.provider, enabledProviders)
+      )),
+      // 감춘 대화의 매치까지 세면 결과 개수와 실제로 그려지는 행이 어긋난다.
+      totalMatches: results.reduce(
+        (total, projectResult) => total + projectResult.sessions.reduce(
+          (sessionTotal, session) => sessionTotal + session.matches.length,
+          0,
+        ),
+        0,
+      ),
+    };
+  }, [conversationResults, enabledProviders, hasHiddenProviders]);
 
   // Keyed by projectId so the rename survives display-name mutations that arrive
   // while the input is open.
@@ -1052,13 +1169,18 @@ export function useSidebarController({
     pendingDeletion,
     showVersionModal,
     filteredProjects,
+    hasHiddenProviders,
     runningSessionsCount,
     archivedProjects: filteredArchivedProjects,
     archivedSessions: filteredArchivedSessions,
-    archivedSessionsCount: archivedProjects.length + archivedSessions.length,
+    archivedSessionsCount: archivedProjects.length + providerVisibleArchivedSessions.length,
     isArchivedSessionsLoading,
-    recentConversations,
-    recentConversationsTotal,
+    recentConversations: visibleRecentConversations,
+    // 서버가 세는 전체 개수에는 감춘 CLI 의 대화도 들어 있다. 그 수를 그대로 보여주면
+    // 목록에 없는 대화가 어딘가 더 있는 것처럼 읽히므로, 거를 때는 보이는 만큼만 센다.
+    recentConversationsTotal: hasHiddenProviders
+      ? visibleRecentConversations.length
+      : recentConversationsTotal,
     recentConversationsHasMore,
     isRecentConversationsLoading,
     isLoadingMoreRecentConversations,
@@ -1092,7 +1214,7 @@ export function useSidebarController({
     setShowNewProject,
     searchMode,
     setSearchMode,
-    conversationResults,
+    conversationResults: visibleConversationResults,
     isSearching,
     searchProgress,
     clearConversationResults: useCallback(() => {

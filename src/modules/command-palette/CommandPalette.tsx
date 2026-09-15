@@ -31,6 +31,8 @@ import { useTheme } from '@/shared/context/ThemeContext';
 import { usePaletteOps } from '@/modules/command-palette/context/PaletteOpsContext';
 import { SETTINGS_MAIN_TABS } from '@/shared/constants';
 import type { AppTab, Project } from '@/shared/types';
+import { isVisibleProvider } from '@/shared/providerVisibility';
+import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 import { useSessionsSource } from '@/modules/command-palette/hooks/useSessionsSource';
 import { useFilesSource } from '@/modules/command-palette/hooks/useFilesSource';
 import { useCommitsSource } from '@/modules/command-palette/hooks/useCommitsSource';
@@ -98,6 +100,7 @@ function CommandPalette({
   const showCommits = !page || page === 'commits';
   const showBranches = !page || page === 'branches' || page === 'actions';
 
+  const enabledProviders = useEnabledProviders();
   const sessions = useSessionsSource(projectId, open && showSessions);
   const messageMatches = useSessionMessageSearch(projectId, search, open && showSessions);
   const files = useFilesSource(projectId, open && showFiles);
@@ -125,8 +128,10 @@ function CommandPalette({
         });
       }
     }
-    return Array.from(byId.values());
-  }, [sessions, messageMatches, showSessions]);
+    // 사이드바 대화 목록과 같은 규칙: 설정에서 꺼 둔 CLI 의 세션은 여기서도 감춘다.
+    // 목록에서는 안 보이는데 팔레트로는 열리면 감춘 의미가 없다.
+    return Array.from(byId.values()).filter((row) => isVisibleProvider(row.provider, enabledProviders));
+  }, [enabledProviders, sessions, messageMatches, showSessions]);
 
   const run = React.useCallback((fn: () => void) => {
     setOpen(false);

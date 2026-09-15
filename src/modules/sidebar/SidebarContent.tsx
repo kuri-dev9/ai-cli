@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next';
 
 import { LLMProviderLogo, ScrollArea } from '@/shared/ui';
 import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationSearchResults, Project, RecentConversationListItem, ReleaseInfo, SearchProgress, SidebarProjectListProps, SidebarSearchMode } from '@/shared/types';
-import { formatCompactAge, getAllSessions } from '@/modules/sidebar/utils/sidebarProjectFormatting';
+import { formatCompactAge } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import SidebarFooter from '@/modules/sidebar/SidebarFooter';
 import SidebarHeader from '@/modules/sidebar/SidebarHeader';
 import SidebarProjectList from '@/modules/sidebar/SidebarProjectList';
@@ -498,7 +498,9 @@ export default function SidebarContent({
                 </span>
               </div>
               {archivedProjects.map((project) => {
-                const projectSessions = getAllSessions(project);
+                // 활성 프로젝트 목록과 같은 리더를 쓴다 — 꺼 둔 CLI 의 세션은
+                // 아카이브에서도 보이지 않아야 한다.
+                const projectSessions = projectListProps.getProjectSessions(project);
 
                 return (
                   <section

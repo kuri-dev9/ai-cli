@@ -4,6 +4,8 @@ import type { AgentCategory, AgentContextByProvider, AgentProvider, AgentSetting
 import AgentCategoryContentSection from '@/modules/settings/tabs/agents-settings/sections/AgentCategoryContentSection';
 import AgentCategoryTabsSection from '@/modules/settings/tabs/agents-settings/sections/AgentCategoryTabsSection';
 import AgentSelectorSection from '@/modules/settings/tabs/agents-settings/sections/AgentSelectorSection';
+import { ALL_PROVIDERS } from '@/shared/providerVisibility';
+import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 
 type ProviderAuthStatusByProvider = Record<AgentProvider, ProviderAuthStatus>;
 
@@ -39,9 +41,16 @@ export default function AgentsSettingsTab({
       : ['account', 'permissions', 'mcp', 'skills']
   ), [selectedAgent]);
 
-  const visibleAgents = useMemo<AgentProvider[]>(() => {
-    return ['claude', 'cursor', 'codex', 'opencode'];
-  }, []);
+  /**
+   * 이 탭만은 꺼 둔 CLI 도 계속 보여준다. 채팅과 온보딩에서는 감추지만, 여기서
+   * 감추면 한 번 끈 CLI 를 다시 켤 방법이 없어진다. 대신 꺼진 것은 흐리게 그린다.
+   */
+  const visibleAgents = useMemo<AgentProvider[]>(() => [...ALL_PROVIDERS], []);
+  const enabledProviders = useEnabledProviders();
+  const disabledAgents = useMemo<AgentProvider[]>(
+    () => visibleAgents.filter((agent) => !enabledProviders.includes(agent)),
+    [enabledProviders, visibleAgents],
+  );
 
   const agentContextById = useMemo<AgentContextByProvider>(() => ({
     claude: {
@@ -78,6 +87,7 @@ export default function AgentsSettingsTab({
     <div className="-mx-4 -mb-4 -mt-2 flex min-h-[300px] min-w-0 flex-col overflow-hidden md:-mx-6 md:-mb-6 md:-mt-2 md:min-h-[500px]">
       <AgentSelectorSection
         agents={visibleAgents}
+        disabledAgents={disabledAgents}
         selectedAgent={selectedAgent}
         onSelectAgent={setSelectedAgent}
         agentContextById={agentContextById}

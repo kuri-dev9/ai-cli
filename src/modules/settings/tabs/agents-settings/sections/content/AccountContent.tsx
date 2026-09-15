@@ -1,8 +1,11 @@
-import { LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Badge, Button, LLMProviderLogo } from '@/shared/ui';
 import type { AgentProvider, ProviderAuthStatus } from '@/shared/types';
+import SettingsToggle from '@/modules/settings/SettingsToggle';
+import { setProviderEnabled } from '@/shared/providerVisibility';
+import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 
 type AccountContentProps = {
   agent: AgentProvider;
@@ -61,17 +64,63 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
   const { t } = useTranslation('settings');
   const config = agentConfig[agent];
 
+  const enabledProviders = useEnabledProviders();
+  const isEnabled = enabledProviders.includes(agent);
+  // 마지막으로 남은 하나까지 끄면 채팅을 시작할 CLI 가 없어진다. 그래서 그때는
+  // 토글을 비활성화해 아예 누를 수 없게 하고, 왜 못 끄는지 한 줄로 설명한다.
+  // (`setProviderEnabled` 도 같은 규칙으로 거절하므로 UI 를 우회해도 안전하다.)
+  const canDisable = !isEnabled || enabledProviders.length > 1;
+
   return (
     <div className="space-y-6">
       <div className="mb-4 flex items-center gap-3">
-        <LLMProviderLogo provider={agent} className="h-6 w-6" />
-        <div>
-          <h3 className="text-lg font-medium text-foreground">{config.name}</h3>
+        <LLMProviderLogo
+          provider={agent}
+          className={`h-6 w-6 ${isEnabled ? '' : 'opacity-40 grayscale'}`}
+        />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-lg font-medium text-foreground">{config.name}</h3>
+            {!isEnabled && (
+              <Badge variant="secondary" className="bg-muted text-muted-foreground">
+                {t('agents.visibility.disabledBadge')}
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             {t(`agents.account.${agent}.description`, {
               defaultValue: config.description || `${config.name} CLI assistant`,
             })}
           </p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-muted/30 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 font-medium text-foreground">
+              {isEnabled
+                ? <Eye className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                : <EyeOff className="h-4 w-4 flex-shrink-0 text-muted-foreground" />}
+              {t('agents.visibility.title')}
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isEnabled
+                ? t('agents.visibility.enabledDescription')
+                : t('agents.visibility.disabledDescription')}
+            </p>
+            {isEnabled && !canDisable && (
+              <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-500">
+                {t('agents.visibility.lastOneHint')}
+              </p>
+            )}
+          </div>
+          <SettingsToggle
+            checked={isEnabled}
+            disabled={isEnabled && !canDisable}
+            onChange={(next) => setProviderEnabled(agent, next)}
+            ariaLabel={t('agents.visibility.toggleLabel', { agent: config.name })}
+          />
         </div>
       </div>
 

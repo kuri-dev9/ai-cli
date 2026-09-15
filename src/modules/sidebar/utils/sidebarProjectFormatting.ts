@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next';
 
+import { hasHiddenProviders, toProviderName } from '@/shared/providerVisibility';
 import type {
   LLMProvider,
   Project,
@@ -42,12 +43,9 @@ const getUpdatedTimestamp = (session: SessionWithProvider): string => {
   return String(session.lastActivity || '');
 };
 
-const getSessionProvider = (session: ProjectSession): LLMProvider => {
-  const provider = session.__provider ?? session.provider;
-  return typeof provider === 'string' && provider.trim()
-    ? provider as LLMProvider
-    : 'claude';
-};
+const getSessionProvider = (session: ProjectSession): LLMProvider => (
+  toProviderName(session.__provider ?? session.provider)
+);
 
 const getSessionDate = (session: SessionWithProvider): Date => {
   return new Date(getUpdatedTimestamp(session) || getCreatedTimestamp(session) || 0);
@@ -103,6 +101,39 @@ export const getAllSessions = (project: Project): SessionWithProvider[] => {
   );
 
   sortedSessionsByProject.set(project, sessions);
+  return sessions;
+};
+
+/**
+ * 설정에서 꺼 둔 CLI 의 세션을 화면에서만 가린 목록.
+ *
+ * **세션 데이터는 건드리지 않는다.** 여기서 거르는 것은 그리는 목록뿐이고, 원본
+ * `project.sessions` 는 그대로 남는다. 그래서 다시 켜면 지난 대화가 전부 돌아오고,
+ * 서버 페이지네이션의 offset(= 지금까지 받아 둔 세션 수)도 어긋나지 않는다.
+ *
+ * `getAllSessions` 와 같은 이유로 project 를 키로 캐시한다. 켜 둔 목록이 바뀌면
+ * 캐시도 무효가 되어야 하므로 그 목록을 캐시 키에 함께 넣는다. 전부 켜져 있을 때는
+ * `getAllSessions` 의 배열을 그대로 돌려주어 행 memo 경계를 유지한다.
+ */
+const visibleSessionsByProject = new WeakMap<Project, { key: string; sessions: SessionWithProvider[] }>();
+
+export const getVisibleSessions = (
+  project: Project,
+  enabledProviders: readonly LLMProvider[],
+): SessionWithProvider[] => {
+  const allSessions = getAllSessions(project);
+  if (!hasHiddenProviders(enabledProviders)) {
+    return allSessions;
+  }
+
+  const key = enabledProviders.join(',');
+  const cached = visibleSessionsByProject.get(project);
+  if (cached && cached.key === key) {
+    return cached.sessions;
+  }
+
+  const sessions = allSessions.filter((session) => enabledProviders.includes(session.__provider));
+  visibleSessionsByProject.set(project, { key, sessions });
   return sessions;
 };
 

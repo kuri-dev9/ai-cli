@@ -11,6 +11,8 @@ import type { PendingPermissionRequest, PermissionMode,
   ProviderModelsDefinition } from '@/shared/types';
 import { DEFAULT_EFFORT_VALUE } from '@/shared/constants';
 import { readSelectedProvider, writeSelectedProvider } from '@/shared/selectedProvider';
+import { ALL_PROVIDERS } from '@/shared/providerVisibility';
+import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 
 const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly string[]>> = {
   // Superset used only before the model catalog loads; `ultracode` belongs to the
@@ -35,7 +37,13 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   opencode: 'anthropic/claude-sonnet-4-5',
 };
 
-const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode'];
+/**
+ * 모델·effort 기록은 꺼 둔 provider 것도 들고 있는다. 이 상태들은
+ * `Record<LLMProvider, ...>` 라서 키가 빠지면 읽는 쪽이 undefined 를 보게 되고,
+ * 무엇보다 잠깐 껐다 켠 뒤 원래 쓰던 모델로 돌아와야 한다. 화면에서 감추는 일은
+ * 목록을 그리는 쪽이 한다.
+ */
+const PROVIDERS: readonly LLMProvider[] = ALL_PROVIDERS;
 
 /** localStorage key holding the user's default model for one provider. */
 const providerModelStorageKey = (provider: LLMProvider): string => `${provider}-model`;
@@ -125,6 +133,7 @@ const getSessionSelectionKey = (provider: LLMProvider, sessionId: string): strin
 );
 
 export function useChatProviderState({ selectedSession, selectedProject: _selectedProject }: UseChatProviderStateArgs) {
+  const enabledProviders = useEnabledProviders();
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
   // The provider the composer sends under. Held here rather than read from
@@ -192,9 +201,13 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     providerModelsRequestIdRef.current = requestId;
     setProviderModelsLoading(true);
 
+    // 꺼 둔 CLI 의 모델 목록은 가져오지 않는다. 다시 켜면 `enabledProviders` 가
+    // 바뀌면서 이 콜백이 새로 만들어지고, 아래 effect 가 그때 다시 불러온다.
+    const targetProviders = enabledProviders;
+
     try {
       const results = await Promise.all(
-        PROVIDERS.map(async (p) => {
+        targetProviders.map(async (p) => {
           const response = await api.providers.models(p);
           const body = (await response.json()) as ProviderModelsApiResponse;
           if (!body.success || !body.data?.models) {
@@ -211,7 +224,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
 
       const nextCatalog: Partial<Record<LLMProvider, ProviderModelsDefinition>> = {};
 
-      PROVIDERS.forEach((p, i) => {
+      targetProviders.forEach((p, i) => {
         const entry = results[i];
         if (!entry) {
           return;
@@ -228,7 +241,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
         setProviderModelsLoading(false);
       }
     }
-  }, []);
+  }, [enabledProviders]);
 
   useEffect(() => {
     void loadProviderModels();
@@ -430,6 +443,23 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     setProvider(selectedSession.__provider);
     writeSelectedProvider(selectedSession.__provider);
   }, [provider, selectedSession]);
+
+  /**
+   * 설정에서 지금 쓰고 있던 CLI 를 꺼 버리면, 목록에서 사라진 CLI 로 메시지를
+   * 보내게 두지 않고 켜져 있는 것으로 옮긴다.
+   *
+   * 이미 열려 있는 세션이 그 CLI 로 만들어진 것이라면 그대로 둔다. 그 세션은
+   * 바로 위 effect 가 다시 제 provider 로 되돌리므로 두 effect 가 서로 싸우게
+   * 되고, 무엇보다 지난 대화를 이어 보는 것까지 막을 이유는 없다. 저장값은
+   * 건드리지 않으므로 다시 켜면 원래 선택으로 돌아온다.
+   */
+  useEffect(() => {
+    if (enabledProviders.includes(provider) || selectedSession?.__provider === provider) {
+      return;
+    }
+
+    setProvider(readSelectedProvider());
+  }, [enabledProviders, provider, selectedSession?.__provider]);
 
   // Permission prompts belong to a session, not to the transient provider
   // selection that is synchronized after navigation.
