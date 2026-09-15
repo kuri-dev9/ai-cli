@@ -176,7 +176,9 @@
     "manageModels": "Manage models",
     "noModelsFound": "No models found.",
     "loadingModels": "Loading models…",
-    "clickToChange": "Click to change model"
+    "clickToChange": "Click to change model",
+    "providerModelCount": "{{name}}, {{total}} models",
+    "providerHasNoModels": "No models available"
   },
   "session": {
     "continue": {
