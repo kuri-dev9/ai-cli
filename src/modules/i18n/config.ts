@@ -50,6 +50,7 @@ import koChat from '@/modules/i18n/locales/ko/chat.json';
 import koCodeEditor from '@/modules/i18n/locales/ko/codeEditor.json';
 // oxlint-disable-next-line importx/order
 import koTasks from '@/modules/i18n/locales/ko/tasks.json';
+import koGit from '@/modules/i18n/locales/ko/git.json';
 
 import zhCommon from '@/modules/i18n/locales/zh-CN/common.json';
 import zhSettings from '@/modules/i18n/locales/zh-CN/settings.json';
@@ -127,7 +128,9 @@ const getSavedLanguage = (): string => {
   if (saved && languages.some(lang => lang.value === saved)) {
     return saved;
   }
-  return 'en';
+  // 저장된 선택이 없으면 한국어로 시작한다. 설정 > Appearance 에서 언제든 바꿀 수 있고,
+  // 바꾼 값은 userLanguage 로 저장되어 이 기본값보다 우선한다.
+  return 'ko';
 };
 
 // Initialize i18next
@@ -172,6 +175,7 @@ git: enGit,
         chat: koChat,
         codeEditor: koCodeEditor,
         tasks: koTasks,
+        git: koGit,
       },
       'zh-CN': {
         common: zhCommon,

@@ -20,7 +20,7 @@
     "runClaudeCli": "Run Claude CLI in a project directory to get started"
   },
   "app": {
-    "title": "CloudCLI",
+    "title": "AI-CLI",
     "subtitle": "AI coding assistant interface"
   },
   "sessions": {
@@ -157,5 +157,8 @@
     "deleteAllData": "Delete all data permanently",
     "allConversationsDeleted": "The project will be removed from the sidebar. Your files, memories, and session data will be preserved.",
     "cannotUndo": "You can re-add the project later."
+  },
+  "identity": {
+    "openProfile": "Open {{name}}'s profile"
   }
 }

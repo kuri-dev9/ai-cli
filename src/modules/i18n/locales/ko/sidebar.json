@@ -20,7 +20,7 @@
     "runClaudeCli": "프로젝트 디렉토리에서 Claude CLI를 실행하여 시작하세요"
   },
   "app": {
-    "title": "CloudCLI",
+    "title": "AI-CLI",
     "subtitle": "AI 코딩 어시스턴트 UI"
   },
   "sessions": {
@@ -134,6 +134,14 @@
     "projectsScanned_one": "프로젝트 {{count}}개 검색됨",
     "projectsScanned_other": "프로젝트 {{count}}개 검색됨"
   },
+  "recent": {
+    "title": "최근 대화",
+    "emptyTitle": "아직 대화가 없습니다",
+    "emptyDescription": "최근에 업데이트된 대화가 여기에 표시됩니다.",
+    "loadFailed": "최근 대화를 불러오지 못했습니다",
+    "loadMore": "이전 대화 불러오기",
+    "loadingMore": "더 불러오는 중..."
+  },
   "deleteConfirmation": {
     "deleteProject": "프로젝트 제거",
     "deleteSession": "세션 삭제",
@@ -149,5 +157,8 @@
     "deleteAllData": "모든 데이터 영구 삭제",
     "allConversationsDeleted": "프로젝트가 사이드바에서 제거됩니다. 파일, 메모리 및 세션 데이터는 보존됩니다.",
     "cannotUndo": "나중에 프로젝트를 다시 추가할 수 있습니다."
+  },
+  "identity": {
+    "openProfile": "{{name}} 프로필 열기"
   }
 }

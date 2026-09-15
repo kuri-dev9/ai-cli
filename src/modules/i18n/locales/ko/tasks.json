@@ -133,10 +133,26 @@
   "priorities": {
     "high": "높음",
     "medium": "중간",
-    "low": "낮음"
+    "low": "낮음",
+    "highTitle": "높은 우선순위",
+    "mediumTitle": "중간 우선순위",
+    "lowTitle": "낮은 우선순위"
   },
   "noMatchingTasks": {
     "title": "필터와 일치하는 작업이 없습니다",
     "description": "검색어나 필터 조건을 조정해보세요."
+  },
+  "banner": {
+    "initialize": "초기화",
+    "hideDetails": "세부정보 숨기기",
+    "whatIsTaskmaster": "TaskMaster란?",
+    "detailAiPowered": "- 의존성과 하위 작업을 포함한 AI 기반 작업 관리.",
+    "detailPrdDriven": "- 더 빠른 프로젝트 시작을 위한 PRD 기반 작업 생성.",
+    "detailKanbanList": "- 일상적인 실행을 위한 칸반 및 목록 보기.",
+    "startTask": "작업 시작",
+    "viewTaskDetails": "작업 세부정보 보기",
+    "viewAllTasks": "모든 작업 보기",
+    "allComplete": "모든 작업 완료",
+    "noPending": "대기 중인 작업 없음"
   }
 }

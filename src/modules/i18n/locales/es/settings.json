@@ -472,7 +472,7 @@
     },
     "managed": {
       "badge": "Gestionado",
-      "hint": "Gestionado por CloudCLI."
+      "hint": "Gestionado por AI-CLI."
     },
     "help": {
       "title": "Acerca de MCP en Codex",

@@ -370,6 +370,14 @@
         "description": "OpenCode CLI assistant"
       }
     },
+    "visibility": {
+      "title": "Use this CLI",
+      "enabledDescription": "Shown in the chat CLI picker and on the onboarding screen.",
+      "disabledDescription": "Currently hidden. Turn it back on to make it appear again.",
+      "lastOneHint": "The last remaining CLI cannot be turned off. Enable another one first.",
+      "disabledBadge": "Not in use",
+      "toggleLabel": "Use {{agent}}"
+    },
     "connectionStatus": "Connection Status",
     "login": {
       "title": "Login",
@@ -489,7 +497,7 @@
     },
     "managed": {
       "badge": "Managed",
-      "hint": "Managed by CloudCLI."
+      "hint": "Managed by AI-CLI."
     },
     "help": {
       "title": "About Codex MCP",
