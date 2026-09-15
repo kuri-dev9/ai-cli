@@ -14,6 +14,8 @@ export default function GitSettingsTab() {
     setGitName,
     gitEmail,
     setGitEmail,
+    githubUsername,
+    setGithubUsername,
     isLoading,
     isSaving,
     saveStatus,
@@ -58,6 +60,25 @@ export default function GitSettingsTab() {
                 className="w-full"
               />
               <p className="mt-1 text-xs text-muted-foreground">{t('git.email.help')}</p>
+
+            <div>
+              <label htmlFor="settings-github-username" className="mb-2 block text-sm font-medium text-foreground">
+                {t('git.githubUsername.label')}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {t('git.githubUsername.optional')}
+                </span>
+              </label>
+              <Input
+                id="settings-github-username"
+                type="text"
+                value={githubUsername}
+                onChange={(event) => setGithubUsername(event.target.value)}
+                placeholder="octocat"
+                disabled={isLoading}
+                className="w-full"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">{t('git.githubUsername.help')}</p>
+            </div>
             </div>
 
             <div className="flex items-center gap-2">

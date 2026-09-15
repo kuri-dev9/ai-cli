@@ -297,6 +297,11 @@
     },
     "status": {
       "success": "저장 완료"
+    },
+    "githubUsername": {
+      "label": "GitHub 사용자명",
+      "optional": "(선택)",
+      "help": "사이드바 배지에 표시되고, 누르면 프로필로 이동합니다. 비워 두면 커밋 이름을 대신 씁니다."
     }
   },
   "apiKeys": {

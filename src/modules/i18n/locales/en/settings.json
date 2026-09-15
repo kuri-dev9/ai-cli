@@ -297,6 +297,11 @@
     },
     "status": {
       "success": "Saved successfully"
+    },
+    "githubUsername": {
+      "label": "GitHub username",
+      "optional": "(optional)",
+      "help": "Shown on the sidebar badge and links to your profile. Falls back to the commit name when empty."
     }
   },
   "apiKeys": {

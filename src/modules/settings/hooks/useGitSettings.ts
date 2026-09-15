@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@/shared/api';
+import { readGithubUsername, writeGithubUsername } from '@/shared/githubAccount';
 
 type GitConfigResponse = {
   gitName?: string;
@@ -13,6 +14,8 @@ type SaveStatus = 'success' | 'error' | null;
 export function useGitSettings() {
   const [gitName, setGitName] = useState('');
   const [gitEmail, setGitEmail] = useState('');
+  // 커밋 정보와 달리 서버의 git config 가 아니라 이 앱의 preference 에 저장된다.
+  const [githubUsername, setGithubUsername] = useState(readGithubUsername);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
@@ -29,6 +32,7 @@ export function useGitSettings() {
       const data = await response.json() as GitConfigResponse;
       setGitName(data.gitName || '');
       setGitEmail(data.gitEmail || '');
+      setGithubUsername(readGithubUsername());
     } catch (error) {
       console.error('Error loading git config:', error);
     } finally {
@@ -42,6 +46,8 @@ export function useGitSettings() {
       const response = await api.user.updateGitConfig(gitName, gitEmail);
 
       if (response.ok) {
+        // GitHub 사용자명은 서버가 아니라 preference 에 있으므로 따로 쓴다.
+        writeGithubUsername(githubUsername);
         // 사이드바 배지가 같은 값을 보여주므로, 저장되면 다시 읽어가도록 알린다.
         window.dispatchEvent(new Event('git-config:updated'));
         setSaveStatus('success');
@@ -61,7 +67,7 @@ export function useGitSettings() {
     } finally {
       setIsSaving(false);
     }
-  }, [gitEmail, gitName]);
+  }, [gitEmail, gitName, githubUsername]);
 
   useEffect(() => {
     void loadGitConfig();
@@ -78,6 +84,8 @@ export function useGitSettings() {
     setGitName,
     gitEmail,
     setGitEmail,
+    githubUsername,
+    setGithubUsername,
     isLoading,
     isSaving,
     saveStatus,
