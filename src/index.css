@@ -45,6 +45,15 @@
     --ring: 15 56% 52%;
     --radius: 0.5rem;
 
+    /* 글꼴 — 설정 > 외관에서 사용자가 고르고, src/shared/fontSettings.ts 가
+       document.documentElement 에 인라인으로 덮어쓴다. 여기 있는 값은 그 스크립트가
+       돌기 전(첫 페인트)의 기본값이며 DEFAULT_FONT_SETTINGS 와 일치해야 한다.
+       CDN 이 죽어도 한글이 깨지지 않도록 폴백 끝까지 적어 둔다. */
+    --app-font-sans: Inter, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Malgun Gothic", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+    /* 제목 기본값은 "본문과 동일". 제목만 세리프로 강제하지 않는다. */
+    --app-font-heading: var(--app-font-sans);
+    --app-font-scale: 1;
+
     /* Nav design tokens */
     --nav-glass-bg: 43 26% 95% / 0.7;
     --nav-glass-blur: 20px;
@@ -139,9 +148,16 @@
     padding: 0;
   }
 
-  /* Claude 앱의 가장 큰 시각적 특징: 제목은 세리프 */
-  h1, h2, h3 {
-    @apply font-serif;
+  /* 제목 글꼴은 설정값을 따른다. 기본값이 "본문과 동일" 이라, 사용자가 세리프를
+     고르지 않는 한 본문과 같은 글꼴로 그려진다. */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+
+  html {
+    /* 글자 크기 설정. rem 을 쓰는 곳이 함께 커지므로 글자만 커지고 여백은 그대로인
+       어색한 화면이 되지 않는다. 기본값 1 에서는 브라우저 기본 크기 그대로다. */
+    font-size: calc(100% * var(--app-font-scale, 1));
   }
 
   html, body {

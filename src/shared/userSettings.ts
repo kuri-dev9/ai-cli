@@ -29,6 +29,7 @@ export type UserPreferences = {
   uiPreferences: unknown;
   selectedProvider: string;
   disabledProviders: unknown;
+  fontSettings: unknown;
 };
 
 export type UserPreferenceKey = keyof UserPreferences;
@@ -71,6 +72,9 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   // Unused: which CLI providers are hidden used to be a build-time .env value
   // (VITE_ENABLED_PROVIDERS), so there is no localStorage predecessor for it.
   disabledProviders: '',
+  // Unused: the app font was hard-coded in tailwind.config.js and in component
+  // class names until it became a setting, so it has no localStorage predecessor.
+  fontSettings: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

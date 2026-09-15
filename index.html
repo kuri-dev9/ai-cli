@@ -5,18 +5,13 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>CloudCLI UI</title>
+    <title>AI-CLI</title>
 
-    <!-- Fonts: Inter (UI) + Source Serif 4 / Noto Serif KR (headings & chat).
-         CDN is optional: every stack in tailwind.config.js falls back to system
-         fonts (Apple SD Gothic Neo / Malgun Gothic / Georgia), so the app still
-         renders correctly offline or on an air-gapped network. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=Noto+Serif+KR:wght@400;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Fonts: 여기에 <link> 를 박아 두지 않는다. 글꼴은 설정 > 외관에서 사용자가
+         고르고(src/shared/fontSettings.ts), 고른 것만 런타임에 주입된다. 정적 링크가
+         있으면 "시스템 기본" 을 고른 사용자도 쓰지 않는 웹폰트를 계속 내려받게 된다.
+         CDN 은 어디까지나 선택이다: 모든 스택이 시스템 폰트(Apple SD Gothic Neo /
+         Malgun Gothic / Georgia)로 끝까지 폴백하므로 오프라인·폐쇄망에서도 정상이다. -->
 
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" crossorigin="use-credentials"  />
@@ -24,7 +19,7 @@
     <!-- iOS Safari PWA Meta Tags -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Claude UI" />
+    <meta name="apple-mobile-web-app-title" content="AI-CLI" />
     
     <!-- iOS Safari Icons -->
     <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />

@@ -151,6 +151,30 @@
       "label": "다크 모드",
       "description": "라이트/다크 테마 전환"
     },
+    "fonts": {
+      "title": "글꼴",
+      "offlineHint": "\"시스템 기본\"은 글꼴을 내려받지 않아 가장 빠르고, 오프라인·폐쇄망에서도 안전합니다. 다른 글꼴을 골라도 내려받지 못하면 시스템 글꼴로 대체됩니다.",
+      "systemDefault": "시스템 기본",
+      "sameAsBody": "본문과 동일",
+      "body": {
+        "label": "본문 글꼴",
+        "description": "메뉴와 대화 내용 등 앱 전체에 쓰는 글꼴입니다."
+      },
+      "heading": {
+        "label": "제목 글꼴",
+        "description": "제목에만 따로 쓸 글꼴입니다. 기본값은 본문과 동일합니다."
+      },
+      "scale": {
+        "label": "글자 크기",
+        "description": "앱 전체의 글자 크기를 조절합니다."
+      },
+      "scaleOptions": {
+        "small": "작게",
+        "normal": "보통",
+        "large": "크게",
+        "xlarge": "아주 크게"
+      }
+    },
     "projectSorting": {
       "label": "프로젝트 정렬",
       "description": "사이드바에서 프로젝트 정렬 방식",

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { scan } from 'react-scan'
 
 import App from '@/App'
+import { startFontSettingsSync } from '@/shared/fontSettings'
 import '@/index.css'
 import 'katex/dist/katex.min.css'
 
@@ -22,6 +23,10 @@ if ('serviceWorker' in navigator) {
     console.warn('Service worker registration failed:', err);
   });
 }
+
+// 저장된 글꼴을 첫 렌더 전에 문서에 입히고, 이후 설정 변경도 계속 따라가게 한다.
+// 설정 저장소가 쓴 즉시 동기로 통지하므로 새로고침 없이 반영된다.
+startFontSettingsSync()
 
 const rootElement = document.getElementById('root')
 if (!rootElement) {

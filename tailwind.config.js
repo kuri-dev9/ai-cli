@@ -1,3 +1,12 @@
+/**
+ * 글꼴 CSS 변수가 아직 없을 때 쓰는 시스템 폴백.
+ * src/shared/fontSettings.ts 의 같은 이름 상수와 짝이다 — 한쪽만 고치지 말 것.
+ */
+const SYSTEM_SANS_FALLBACK =
+  '-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Malgun Gothic", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif';
+const SYSTEM_SERIF_FALLBACK =
+  'Georgia, Cambria, "Apple SD Gothic Neo", "Malgun Gothic", "Times New Roman", serif';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
@@ -15,10 +24,16 @@ export default {
     },
     extend: {
       fontFamily: {
-        // 본문 UI: Inter 우선, CDN 미로딩 시 시스템 폰트로 안전하게 폴백 (한글은 Apple SD Gothic Neo / Malgun Gothic)
-        sans: ['Inter', 'Pretendard', '-apple-system', 'BlinkMacSystemFont', '"Apple SD Gothic Neo"', '"Segoe UI"', '"Malgun Gothic"', 'Roboto', '"Helvetica Neue"', 'Arial', 'system-ui', 'sans-serif'],
-        // 제목/대화 본문: Claude 앱 특유의 세리프. 폴백은 Georgia -> 시스템 세리프
-        serif: ['"Source Serif 4"', '"Noto Serif KR"', 'Georgia', 'Cambria', '"Times New Roman"', 'serif'],
+        // 글꼴은 설정 > 외관에서 사용자가 고른다(src/shared/fontSettings.ts). 여기서는
+        // 그 결과가 담긴 CSS 변수만 가리킨다 — 변수 하나가 바뀌면 앱 전체가 즉시 바뀐다.
+        // var() 의 두 번째 인자는 변수가 아직 안 붙었을 때(첫 페인트, 오프라인)의
+        // 시스템 폴백이고, 한글(Apple SD Gothic Neo / Malgun Gothic)까지 포함한다.
+        sans: [`var(--app-font-sans, ${SYSTEM_SANS_FALLBACK})`],
+        // 제목 전용. 기본값은 "본문과 동일" 이라 아무것도 강요하지 않는다.
+        heading: [`var(--app-font-heading, ${SYSTEM_SANS_FALLBACK})`],
+        // 명시적으로 세리프가 필요한 곳을 위해 남겨 둔 고정 스택. 제목에는 쓰지 말 것 —
+        // 컴포넌트에 글꼴을 박으면 설정이 먹지 않는다.
+        serif: [`"Source Serif 4", "Noto Serif KR", ${SYSTEM_SERIF_FALLBACK}`],
       },
       colors: {
         border: "hsl(var(--border))",

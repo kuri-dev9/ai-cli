@@ -2,6 +2,14 @@ import { useTranslation } from 'react-i18next';
 
 import { DarkModeToggle } from '@/shared/ui';
 import type { CodeEditorSettingsState, ProjectSortOrder } from '@/shared/types';
+import type { FontFamilyId, FontScaleId, HeadingFontId } from '@/shared/fontSettings';
+import {
+  FONT_FAMILIES,
+  FONT_FAMILY_IDS,
+  FONT_SCALE_IDS,
+  HEADING_FONT_IDS,
+} from '@/shared/fontSettings';
+import { useFontSettings } from '@/shared/hooks/useFontSettings';
 import { LanguageSelector } from '@/modules/i18n';
 import SettingsCard from '@/modules/settings/SettingsCard';
 import SettingsRow from '@/modules/settings/SettingsRow';
@@ -29,6 +37,20 @@ export default function AppearanceSettingsTab({
   onCodeEditorFontSizeChange,
 }: AppearanceSettingsTabProps) {
   const { t } = useTranslation('settings');
+  const [fontSettings, updateFontSettings] = useFontSettings();
+
+  // 글꼴 이름은 고유명사라 번역하지 않는다. 번역이 필요한 건 "시스템 기본" 처럼
+  // 특정 글꼴을 가리키지 않는 항목뿐이다.
+  const familyLabel = (id: FontFamilyId) => (
+    id === 'system' ? t('appearanceSettings.fonts.systemDefault') : FONT_FAMILIES[id].label
+  );
+
+  const headingLabel = (id: HeadingFontId) => (
+    id === 'sameAsBody' ? t('appearanceSettings.fonts.sameAsBody') : familyLabel(id)
+  );
+
+  const selectClassName =
+    'w-full touch-manipulation rounded-lg border border-input bg-card p-2.5 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary sm:w-44';
 
   return (
     <div className="space-y-8">
@@ -46,6 +68,71 @@ export default function AppearanceSettingsTab({
       <SettingsSection title={t('mainTabs.appearance')}>
         <SettingsCard>
           <LanguageSelector />
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('appearanceSettings.fonts.title')}
+        description={t('appearanceSettings.fonts.offlineHint')}
+      >
+        <SettingsCard divided>
+          <SettingsRow
+            label={t('appearanceSettings.fonts.body.label')}
+            description={t('appearanceSettings.fonts.body.description')}
+          >
+            <select
+              value={fontSettings.body}
+              onChange={(event) => updateFontSettings({ body: event.target.value as FontFamilyId })}
+              className={selectClassName}
+              aria-label={t('appearanceSettings.fonts.body.label')}
+            >
+              {FONT_FAMILY_IDS.map((id) => (
+                <option key={id} value={id} style={{ fontFamily: FONT_FAMILIES[id].stack }}>
+                  {familyLabel(id)}
+                </option>
+              ))}
+            </select>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('appearanceSettings.fonts.heading.label')}
+            description={t('appearanceSettings.fonts.heading.description')}
+          >
+            <select
+              value={fontSettings.heading}
+              onChange={(event) => updateFontSettings({ heading: event.target.value as HeadingFontId })}
+              className={selectClassName}
+              aria-label={t('appearanceSettings.fonts.heading.label')}
+            >
+              {HEADING_FONT_IDS.map((id) => (
+                <option
+                  key={id}
+                  value={id}
+                  style={id === 'sameAsBody' ? undefined : { fontFamily: FONT_FAMILIES[id].stack }}
+                >
+                  {headingLabel(id)}
+                </option>
+              ))}
+            </select>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('appearanceSettings.fonts.scale.label')}
+            description={t('appearanceSettings.fonts.scale.description')}
+          >
+            <select
+              value={fontSettings.scale}
+              onChange={(event) => updateFontSettings({ scale: event.target.value as FontScaleId })}
+              className={selectClassName}
+              aria-label={t('appearanceSettings.fonts.scale.label')}
+            >
+              {FONT_SCALE_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {t(`appearanceSettings.fonts.scaleOptions.${id}`)}
+                </option>
+              ))}
+            </select>
+          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 

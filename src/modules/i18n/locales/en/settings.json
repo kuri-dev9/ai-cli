@@ -151,6 +151,30 @@
       "label": "Dark Mode",
       "description": "Toggle between light and dark themes"
     },
+    "fonts": {
+      "title": "Fonts",
+      "offlineHint": "\"System default\" downloads no web font, so it is the fastest option and safe offline or on an air-gapped network. Any other choice falls back to system fonts when the download fails.",
+      "systemDefault": "System default",
+      "sameAsBody": "Same as body",
+      "body": {
+        "label": "Body font",
+        "description": "Used across the whole app, including menus and chat content."
+      },
+      "heading": {
+        "label": "Heading font",
+        "description": "Used for headings only. Defaults to the body font."
+      },
+      "scale": {
+        "label": "Text size",
+        "description": "Scales the text size across the whole app."
+      },
+      "scaleOptions": {
+        "small": "Small",
+        "normal": "Normal",
+        "large": "Large",
+        "xlarge": "Extra large"
+      }
+    },
     "projectSorting": {
       "label": "Project Sorting",
       "description": "How projects are ordered in the sidebar",
