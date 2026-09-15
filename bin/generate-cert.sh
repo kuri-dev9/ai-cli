@@ -2,10 +2,10 @@
 #
 # AI-CLI 로컬 HTTPS 인증서 생성
 #
-#   ./scripts/generate-cert.sh                 # LAN IP 를 자동으로 찾아 인증서 생성
-#   ./scripts/generate-cert.sh 192.168.0.42    # 넣을 IP/호스트를 직접 지정 (여러 개 가능)
-#   ./scripts/generate-cert.sh --openssl       # mkcert 가 깔려 있어도 openssl 로 만들기
-#   ./scripts/generate-cert.sh --force         # 이미 있는 인증서를 덮어쓰기
+#   ./bin/generate-cert.sh                 # LAN IP 를 자동으로 찾아 인증서 생성
+#   ./bin/generate-cert.sh 192.168.0.42    # 넣을 IP/호스트를 직접 지정 (여러 개 가능)
+#   ./bin/generate-cert.sh --openssl       # mkcert 가 깔려 있어도 openssl 로 만들기
+#   ./bin/generate-cert.sh --force         # 이미 있는 인증서를 덮어쓰기
 #
 # 만들어지는 것: certs/server.key, certs/server.crt  (둘 다 .gitignore 대상)
 #
@@ -44,7 +44,7 @@ done
 
 if [ -f "$KEY_FILE" ] && [ -f "$CRT_FILE" ] && [ "$FORCE" -eq 0 ]; then
   warn "인증서가 이미 있습니다: $CRT_FILE"
-  warn "다시 만들려면: ./scripts/generate-cert.sh --force"
+  warn "다시 만들려면: ./bin/generate-cert.sh --force"
   exit 0
 fi
 
@@ -94,7 +94,7 @@ ALL_NAMES+=(${LAN_IPS[@]+"${LAN_IPS[@]}"} ${EXTRA_NAMES[@]+"${EXTRA_NAMES[@]}"})
 
 if [ ${#LAN_IPS[@]} -eq 0 ] && [ ${#EXTRA_NAMES[@]} -eq 0 ]; then
   warn "LAN IP 를 찾지 못했습니다. localhost 전용 인증서가 만들어집니다."
-  warn "폰에서 쓰려면 IP 를 직접 넣으세요:  ./scripts/generate-cert.sh 192.168.0.42"
+  warn "폰에서 쓰려면 IP 를 직접 넣으세요:  ./bin/generate-cert.sh 192.168.0.42"
 fi
 
 printf "\n"
@@ -179,7 +179,7 @@ else
   printf "  - %sservice worker 가 등록되지 않습니다%s — 오프라인 캐시, 웹 푸시 알림,\n" "$YELLOW" "$NC"
   printf "    홈 화면 PWA 설치가 동작하지 않습니다 (브라우저가 인증서 오류 페이지를 막습니다)\n"
   printf "  - 경고 없이 쓰고 PWA 도 살리려면 mkcert 를 쓰세요:\n"
-  printf "      %sbrew install mkcert && ./scripts/generate-cert.sh --force%s\n" "$BLUE" "$NC"
+  printf "      %sbrew install mkcert && ./bin/generate-cert.sh --force%s\n" "$BLUE" "$NC"
   printf "  - 또는 %s%s%s 를 폰에 설치해 신뢰 인증서로 등록하세요\n\n" "$BLUE" "$CRT_FILE" "$NC"
   MADE_WITH=openssl
 fi

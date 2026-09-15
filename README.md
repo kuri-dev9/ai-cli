@@ -53,10 +53,48 @@ cd ai-cli
 ## 실행
 
 ```bash
-npm run server
+./run.sh
 ```
 
 브라우저에서 **http://localhost:18200**
+
+`run.sh` 하나로 서버와 watchdog 을 같이 띄운다. 터미널을 닫아도 계속 돈다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `./run.sh` | 켠다 (watchdog 포함) |
+| `./run.sh stop` | 끈다 |
+| `./run.sh restart` | 껐다 켠다 |
+| `./run.sh status` | 서버·watchdog·응답 상태와 로그 크기 |
+| `./run.sh logs` | 로그를 따라 본다 (`logs server` / `logs watchdog` 으로 하나만) |
+| `./run.sh foreground` | 터미널을 잡고 실행. watchdog 없음. 디버깅용 |
+
+### watchdog
+
+15초마다 두 가지를 확인한다.
+
+1. 서버 프로세스가 살아 있는가
+2. `/health` 가 200 을 주는가
+
+2번까지 보는 이유는 **프로세스는 살아 있는데 응답을 못 하는 상태**가 실제로 있기
+때문이다. 포트만 확인하면 이걸 못 잡는다.
+
+3회 연속 실패하면 다시 띄운다. 다만 10분 안에 5번을 넘기면 **같은 이유로 계속 죽는
+것으로 보고 watchdog 이 스스로 끝난다.** 무한 재시작으로 로그만 쌓이는 것보다 낫다.
+그때는 `logs/server.log` 를 봐야 한다.
+
+동작을 바꾸려면 환경변수를 쓴다:
+`WATCHDOG_INTERVAL`, `WATCHDOG_FAIL_THRESHOLD`, `WATCHDOG_MAX_RESTARTS`.
+
+### 로그
+
+`logs/` 에 쌓인다. **10MB 를 넘으면 회전하고 3개까지 보관**한다
+(`server.log.1` ~ `.3`). 그보다 오래된 것은 지운다.
+
+회전은 복사 후 비우는 방식이다. 서버가 이미 열어 둔 파일을 옮기면 새 로그가 회전된
+파일에 쌓이고 현재 로그는 영영 비어 있게 되기 때문이다.
+
+크기와 보관 개수는 `LOG_MAX_BYTES`, `LOG_KEEP` 으로 바꾼다.
 
 ### 처음 실행하면
 
@@ -125,7 +163,7 @@ SERVER_PORT=18200
 같은 네트워크에서 트래픽을 보면 **로그인 토큰이 그대로 노출**됩니다.
 
 ```bash
-./scripts/generate-cert.sh     # certs/server.key, certs/server.crt 생성
+./bin/generate-cert.sh     # certs/server.key, certs/server.crt 생성
 ```
 
 그리고 `.env` 에:
@@ -167,7 +205,7 @@ HTTPS_ENABLED=true
 
 ```bash
 brew install mkcert
-./scripts/generate-cert.sh --force
+./bin/generate-cert.sh --force
 mkcert -CAROOT          # 이 폴더의 rootCA.pem 을 폰으로 보내 설치
 ```
 
@@ -177,6 +215,19 @@ mkcert -CAROOT          # 이 폴더의 rootCA.pem 을 폰으로 보내 설치
 인증서 파일(`certs/`)은 `.gitignore` 에 있어 커밋되지 않습니다.
 
 ---
+
+## 디렉터리
+
+| 경로 | 내용 |
+|---|---|
+| `run.sh` | **평소에 쓰는 실행기.** 이것만 알면 된다 |
+| `install.sh` | 최초 설치. 한 번만 |
+| `bin/` | 운영 스크립트 — watchdog, 인증서 생성, 공통 유틸 |
+| `src/` | 프런트엔드 (React) |
+| `server/` | 백엔드 (Express) |
+| `scripts/` | 빌드 내부용. 직접 실행할 일 없다 |
+| `logs/` `run/` | 로그와 PID. git 에 올라가지 않는다 |
+| `docs/local/` | 이 설치본의 문서 |
 
 ## 개발
 

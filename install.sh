@@ -138,7 +138,7 @@ if [ "$WANT_HTTPS" -eq 1 ]; then
   info "HTTPS 인증서를 준비합니다"
   # 이미 인증서가 있으면 스크립트가 그대로 두고 넘어간다. 재설치 때 인증서를
   # 새로 만들어 버리면 폰에 등록해 둔 신뢰 설정이 한 번에 무효가 된다.
-  ./scripts/generate-cert.sh
+  ./bin/generate-cert.sh
 
   if grep -q '^HTTPS_ENABLED=' .env; then
     sed -i.bak 's/^HTTPS_ENABLED=.*/HTTPS_ENABLED=true/' .env && rm -f .env.bak
@@ -173,5 +173,5 @@ printf "%s단, 같은 네트워크의 누구나 이 컴퓨터에서 명령을 �
 
 if [ "$WANT_HTTPS" -eq 0 ]; then
   printf "%s폰/태블릿에서 쓸 계획이라면 HTTPS 를 고려하세요 (평문이면 로그인 토큰이 노출됩니다):%s\n" "$DIM" "$NC"
-  printf "%s  ./scripts/generate-cert.sh  →  .env 에 HTTPS_ENABLED=true%s\n\n" "$DIM" "$NC"
+  printf "%s  ./bin/generate-cert.sh  →  .env 에 HTTPS_ENABLED=true%s\n\n" "$DIM" "$NC"
 fi
