@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next';
 import {
   Activity,
   BadgeCheck,
+  BatteryMedium,
   CircleHelp,
   Coins,
   Cpu,
   Gauge,
+  PieChart,
   Package,
   Plus,
   Search,
@@ -419,6 +421,7 @@ function ModelsContent({
 }
 
 function CostContent({ data }: { data: CostCommandData }) {
+  const { t } = useTranslation();
   const used = Number(data.tokenUsage?.used ?? 0);
   const total = Number(data.tokenUsage?.total ?? 0);
   const model = data.model || 'Unknown';
@@ -426,19 +429,45 @@ function CostContent({ data }: { data: CostCommandData }) {
   const hasBreakdown =
     typeof data.tokenBreakdown?.input === 'number' ||
     typeof data.tokenBreakdown?.output === 'number';
+  // 윈도우가 사용량보다 작게 보고되면(모르는 모델 + 낡은 CONTEXT_WINDOW) 잔량을
+  // 계산할 수 없다. 그때는 "-1,234 남음" 같은 거짓 숫자 대신 행 자체를 뺀다.
+  const hasWindow = total > 0 && total >= used;
+  const remaining = hasWindow
+    ? Number(data.tokenUsage?.remaining ?? Math.max(0, total - used))
+    : 0;
+  const usedPercent = hasWindow && total > 0 ? (used / total) * 100 : 0;
+  // 한 자리 소수까지: 1M 윈도우에서는 1%가 10,000 토큰이라 정수 반올림으로는
+  // 초반 사용량이 전부 "0%"로 보인다.
+  const usedPercentLabel = `${usedPercent >= 10 ? usedPercent.toFixed(0) : usedPercent.toFixed(1)}%`;
+  const gaugeTone = usedPercent >= 90
+    ? 'bg-destructive'
+    : usedPercent >= 70
+      ? 'bg-amber-500'
+      : 'bg-primary';
+  // 레이블을 조심해서 붙인다. 여기 숫자는 세션 누적 사용량이 아니라 마지막
+  // 요청 하나가 컨텍스트 창을 얼마나 차지했는지다. "Total tokens used" 라고
+  // 써 두었더니 CLI 의 /usage 가 보여주는 요금제 소진율과 같은 값으로 읽혀서,
+  // 4% 와 44% 가 왜 다르냐는 질문이 나왔다. 둘은 아예 다른 축이다.
   const usageRows = [
-    { label: 'Total tokens used', value: formatNumber(used), icon: Activity },
+    {
+      label: t('chat:misc.contextUsed', { defaultValue: 'Context used' }),
+      value: formatNumber(used),
+      icon: Activity,
+      emphasized: false,
+    },
     ...(hasBreakdown
       ? [
           {
-            label: 'Input tokens',
+            label: t('chat:misc.promptTokens', { defaultValue: 'Prompt (incl. cache)' }),
             value: formatNumber(Number(data.tokenBreakdown?.input ?? 0)),
             icon: TerminalSquare,
+            emphasized: false,
           },
           {
-            label: 'Output tokens',
+            label: t('chat:misc.lastReplyTokens', { defaultValue: 'Last reply' }),
             value: formatNumber(Number(data.tokenBreakdown?.output ?? 0)),
             icon: Coins,
+            emphasized: false,
           },
         ]
       : [
@@ -446,14 +475,30 @@ function CostContent({ data }: { data: CostCommandData }) {
             label: 'Breakdown',
             value: 'Unavailable',
             icon: TerminalSquare,
+            emphasized: false,
           },
         ]),
-    // Only when it is consistent with what was actually used. The window comes
-    // from the CONTEXT_WINDOW setting, which cannot know whether a session is
-    // running a 200K or a 1M variant of the same model name — and a row reading
-    // "used 404,009 / window 160,000" is worse than no row at all.
-    ...(total > used
-      ? [{ label: 'Context window', value: formatNumber(total), icon: Gauge }]
+    ...(hasWindow
+      ? [
+          {
+            label: t('chat:misc.contextWindowUsage', { defaultValue: 'Context window' }),
+            value: formatNumber(total),
+            icon: Gauge,
+            emphasized: false,
+          },
+          {
+            label: t('chat:misc.tokensRemaining', { defaultValue: 'Remaining' }),
+            value: formatNumber(remaining),
+            icon: BatteryMedium,
+            emphasized: true,
+          },
+          {
+            label: t('chat:misc.contextUsedPercent', { defaultValue: 'Context filled' }),
+            value: usedPercentLabel,
+            icon: PieChart,
+            emphasized: false,
+          },
+        ]
       : []),
   ];
 
@@ -474,11 +519,74 @@ function CostContent({ data }: { data: CostCommandData }) {
                 </span>
                 <span className="truncate text-sm font-medium text-foreground">{row.label}</span>
               </div>
-              <span className="shrink-0 font-mono text-sm font-semibold text-foreground">{row.value}</span>
+              <span
+                className={
+                  row.emphasized
+                    ? 'shrink-0 font-mono text-sm font-semibold text-primary'
+                    : 'shrink-0 font-mono text-sm font-semibold text-foreground'
+                }
+              >
+                {row.value}
+              </span>
             </div>
           );
         })}
       </div>
+
+      {hasWindow && (
+        <div className="rounded-2xl border border-border/70 bg-background/75 p-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              {t('chat:misc.contextWindowUsage', { defaultValue: 'Context window' })}
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {formatNumber(used)} / {formatNumber(total)}
+            </span>
+          </div>
+          <div
+            className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-valuenow={used}
+            aria-label={t('chat:misc.contextWindowUsage', { defaultValue: 'Context window' })}
+          >
+            <div
+              className={`h-full rounded-full transition-[width] duration-500 ${gaugeTone}`}
+              style={{ width: `${Math.min(100, Math.max(used > 0 ? 1 : 0, usedPercent))}%` }}
+            />
+          </div>
+          <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+            {t('chat:misc.tokensRemainingHint', {
+              defaultValue: '{{remaining}} tokens left ({{percent}} used)',
+              remaining: formatNumber(remaining),
+              percent: usedPercentLabel,
+            })}
+          </p>
+          {/*
+            이 한 줄이 없으면 CLI 의 /usage 화면과 같은 값으로 오해된다.
+            거기 "4% used" 는 요금제 소진율이고, 여기 퍼센트는 대화가 컨텍스트
+            창을 얼마나 채웠는지다. 둘이 크게 달라도 정상이다.
+          */}
+          <p className="mt-1 text-[11px] leading-4 text-muted-foreground/70">
+            {t('chat:misc.contextUsageDisclaimer', {
+              defaultValue:
+                'This is how full the conversation is — not your plan usage. Check /usage in the CLI for that.',
+            })}
+          </p>
+          {/*
+            "언제 초기화되냐"는 질문이 나오는 자리다. CLI 의 사용량 화면에는
+            리셋 시각이 찍히지만, 그건 요금제 이야기고 컨텍스트는 시간이 지나도
+            비워지지 않는다. 비우는 방법을 알려 주는 편이 실제로 쓸모 있다.
+          */}
+          <p className="mt-1 text-[11px] leading-4 text-muted-foreground/70">
+            {t('chat:misc.contextResetHint', {
+              defaultValue:
+                'It does not reset on a timer — compact the conversation or start a new one to clear it.',
+            })}
+          </p>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
         <div className="grid gap-3 sm:grid-cols-2">

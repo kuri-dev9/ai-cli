@@ -5,6 +5,7 @@ import type { WebSocket } from 'ws';
 import { sessionsDb } from '@/modules/database/index.js';
 import { providerModelsService, sessionsService } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
+import type { ChatRunOrigin } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import {
   getGlobalImageAssetsDir,
@@ -61,6 +62,40 @@ export function filterImagesToUploadStore(
   assetsRootOverride?: string,
 ): ChatAttachmentDescriptor[] {
   return filterAttachmentsToUploadStore(images, assetsRootOverride);
+}
+
+/**
+ * 이 실행 하나의 결과를 텔레그램으로도 보내 달라는 표시.
+ *
+ * 웹에서 시작한 실행은 기본적으로 조용하다(브라우저에서 대화할 때마다 폰이
+ * 울리면 알림이 소음이 된다). 한 번만 받고 싶을 때 입력 맨 앞에 붙인다.
+ */
+export const TELEGRAM_RELAY_PREFIX = '/bot';
+
+const TELEGRAM_RELAY_PREFIX_PATTERN = /^\/bot(?:\s+|$)/i;
+
+/**
+ * 프롬프트에서 `/bot` 접두어를 떼어 내고, 붙어 있었는지 알려준다.
+ *
+ * 판정은 반드시 서버에서 한다 — 접두어를 화면에서만 떼면 다른 클라이언트(또는
+ * 손으로 만든 websocket 프레임)에서 온 `/bot` 이 그대로 모델에게 흘러간다.
+ *
+ * 뒤에 내용이 없는 `/bot` 하나만 온 경우는 접두어로 보지 않는다. 그렇게 보면
+ * 빈 프롬프트로 한 턴이 시작되는데, 사용자가 원한 것은 명령을 고르던 중이거나
+ * 오타였을 가능성이 훨씬 높다.
+ */
+export function parseTelegramRelayPrefix(raw: string): { content: string; relayRequested: boolean } {
+  const text = raw.trimStart();
+  const match = TELEGRAM_RELAY_PREFIX_PATTERN.exec(text);
+  if (!match) {
+    return { content: raw, relayRequested: false };
+  }
+
+  const rest = text.slice(match[0].length);
+  if (!rest.trim()) {
+    return { content: raw, relayRequested: false };
+  }
+  return { content: rest, relayRequested: true };
 }
 
 /** Application boundary for dispatching provider runs and approvals. */
@@ -214,8 +249,13 @@ async function dispatchRun(
   dependencies: ChatWebSocketDependencies,
   extraRuntimeOptions: AnyRecord = {},
   beforeRun?: (run: NonNullable<ReturnType<typeof chatRunRegistry.startRun>>) => void | Promise<void>,
+  origin: ChatRunOrigin = 'web',
 ): Promise<{ started: boolean; error: string | null }> {
   const provider = session.provider as LLMProvider;
+
+  // 접두어는 실행을 등록하기 전에 뗀다. 등록할 때 "이 실행만 중계" 표시를
+  // 같이 남겨야 하고, 프로바이더에게는 접두어를 뗀 본문만 가야 한다.
+  const relay = parseTelegramRelayPrefix(typeof data.content === 'string' ? data.content : '');
 
   const run = chatRunRegistry.startRun({
     appSessionId: sessionId,
@@ -223,6 +263,8 @@ async function dispatchRun(
     providerSessionId: session.provider_session_id,
     connection: ws,
     userId,
+    origin,
+    relayRequested: relay.relayRequested,
   });
 
   if (!run) {
@@ -238,7 +280,7 @@ async function dispatchRun(
   }
 
   const clientOptions = (data.options ?? {}) as AnyRecord;
-  const command = typeof data.content === 'string' ? data.content : '';
+  const command = relay.content;
 
   // Record what this turn runs with so reopening the session later restores the
   // same model and reasoning effort, and so the resume path has a
@@ -560,6 +602,12 @@ export async function runDetachedChatTurn(
      * land mid-run, so the timer outranks whatever is running.
      */
     interruptActiveRun?: boolean;
+    /**
+     * 이 턴을 누가 시작시켰는지. 텔레그램에서 온 것만 `telegram` 이고, 예약·
+     * 대기열처럼 타이머가 미는 것은 기본값 `web` 이다 — 사람이 텔레그램에서
+     * 답을 기다리고 있는 실행만 무조건 회신하기 위해서다.
+     */
+    origin?: ChatRunOrigin;
   },
   dependencies: ChatWebSocketDependencies,
 ): Promise<{ started: boolean; error: string | null }> {
@@ -597,6 +645,9 @@ export async function runDetachedChatTurn(
     session,
     { sessionId: input.sessionId, content: input.content, options: input.options ?? {} },
     dependencies,
+    {},
+    undefined,
+    input.origin ?? 'web',
   );
 }
 

@@ -54,7 +54,8 @@
     "sections": {
       "appearance": "外観",
       "toolDisplay": "ツール表示",
-      "inputSettings": "入力設定"
+      "inputSettings": "入力設定",
+      "telegramRelay": "Telegram notifications"
     },
     "darkMode": "ダークモード",
     "showRawParameters": "生パラメータを表示",
@@ -67,6 +68,15 @@
       "openPanel": "設定パネルを開く",
       "draggingStatus": "ドラッグ中...",
       "toggleAndMove": "クリックで切替、ドラッグで移動"
+    },
+    "telegramRelay": {
+      "label": "Notify me about this session",
+      "description": "While this is on, finished runs in this session are sent to Telegram. Replies to work you started from Telegram always arrive regardless of this toggle. For a single run, prefix your message with /bot.",
+      "needsSession": "Open a session first.",
+      "loading": "Checking Telegram notification settings...",
+      "needsToken": "Save a bot token in Settings > Telegram first.",
+      "bridgeDisabled": "The Telegram bridge is turned off. Enable it in settings.",
+      "bridgeStopped": "The Telegram bridge is not connected. Check the token and chat ids in settings."
     }
   },
   "terminalShortcuts": {

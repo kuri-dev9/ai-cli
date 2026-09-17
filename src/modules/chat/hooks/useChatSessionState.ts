@@ -1000,6 +1000,79 @@ export function useChatSessionState({
     }
   }, [chatMessages.length, isActive, isLoadingMoreMessages, isUserScrolledUp, scrollToBottom]);
 
+  /**
+   * 답변이 길어지는 동안에도 바닥을 따라간다.
+   *
+   * 위의 효과는 `chatMessages.length` 에만 반응한다. 그런데 스트리밍 중에는
+   * 메시지 개수가 늘지 않고 마지막 메시지 하나가 길어질 뿐이라, 답이 화면
+   * 아래로 자라는 내내 스크롤이 멈춰 있었다 — 입력창에 가려 결과가 나오고
+   * 있는지조차 보이지 않는다. 높이 변화를 직접 관찰해야 잡히는 움직임이다.
+   */
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!isActive || !container || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const content = container.firstElementChild ?? container;
+    const observer = new ResizeObserver(() => {
+      // 사용자가 위를 보고 있으면 절대 끌어내리지 않는다.
+      if (isUserScrolledUpRef.current) {
+        return;
+      }
+      if (isLoadingMoreRef.current || pendingScrollRestoreRef.current || searchScrollActiveRef.current) {
+        return;
+      }
+      scrollToBottom();
+    });
+
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [isActive, scrollToBottom]);
+
+  /**
+   * 휠을 위로 굴리는 즉시 따라가기를 멈춘다.
+   *
+   * `scroll` 이벤트만으로는 사용자가 올린 것인지 우리가 내린 것인지 구분할 수
+   * 없다. 답이 자라는 속도가 빠르면 사용자가 위로 올려도 곧바로 다시 끌려
+   * 내려가서, 읽던 자리를 붙잡을 수 없었다. 휠 방향은 의도가 분명하다.
+   */
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!isActive || !container) {
+      return;
+    }
+
+    const handleWheelUp = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        isUserScrolledUpRef.current = true;
+        setIsUserScrolledUp(true);
+      }
+    };
+
+    // 모바일에서는 휠이 없다. 손가락을 아래로 끌면(= 위로 스크롤) 같은 의도다.
+    let touchStartY = 0;
+    const handleTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? 0;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const currentY = event.touches[0]?.clientY ?? 0;
+      if (currentY - touchStartY > 8) {
+        isUserScrolledUpRef.current = true;
+        setIsUserScrolledUp(true);
+      }
+    };
+
+    container.addEventListener('wheel', handleWheelUp, { passive: true });
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    container.addEventListener('touchmove', handleTouchMove, { passive: true });
+    return () => {
+      container.removeEventListener('wheel', handleWheelUp);
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, [isActive]);
+
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;

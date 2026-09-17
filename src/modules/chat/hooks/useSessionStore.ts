@@ -853,6 +853,24 @@ export function useSessionStore() {
   }, [notify]);
 
   /**
+   * Drop the in-progress streaming preview without promoting it to a message.
+   *
+   * Used when a provider follows its token deltas with the finished assistant
+   * message (Claude does; Cursor and OpenCode send deltas only). That message
+   * carries the transcript anchor the preview never had, so finalizing the
+   * preview instead would leave two bubbles holding the same reply.
+   */
+  const discardStreaming = useCallback((sessionId: string) => {
+    const slot = storeRef.current.get(sessionId);
+    if (!slot) return;
+    const streamId = `__streaming_${sessionId}`;
+    if (!slot.realtimeMessages.some(m => m.id === streamId)) return;
+    slot.realtimeMessages = slot.realtimeMessages.filter(m => m.id !== streamId);
+    recomputeMergedIfNeeded(slot);
+    notify(sessionId);
+  }, [notify]);
+
+  /**
    * Get merged messages for a session (for rendering).
    */
   const getMessages = useCallback((sessionId: string): NormalizedMessage[] => {
@@ -876,11 +894,12 @@ export function useSessionStore() {
     isStale,
     updateStreaming,
     finalizeStreaming,
+    discardStreaming,
     getMessages,
     getSessionSlot,
   }), [
     fetchFromServer, fetchMore, appendRealtime, truncateAt, refreshLatestFromServer,
-    setActiveSession, isStale, updateStreaming, finalizeStreaming,
+    setActiveSession, isStale, updateStreaming, finalizeStreaming, discardStreaming,
     getMessages, getSessionSlot,
   ]);
 }

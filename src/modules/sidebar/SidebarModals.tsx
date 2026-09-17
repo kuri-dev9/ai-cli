@@ -9,6 +9,7 @@ import { VersionUpgradeModal } from '@/modules/version-upgrade';
 import type { InstallMode, PendingSidebarDeletion, Project, ReleaseInfo, SettingsProject } from '@/shared/types';
 import { normalizeProjectForSettings } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import { ProjectCreationWizard } from '@/modules/project-creation-wizard';
+import { ProjectSettingsModal } from '@/modules/project-settings';
 
 type SidebarModalsProps = {
   projects: Project[];
@@ -18,6 +19,10 @@ type SidebarModalsProps = {
   showNewProject: boolean;
   onCloseNewProject: () => void;
   onProjectCreated: () => void;
+  /** null 이면 프로젝트 설정 모달이 닫혀 있다. */
+  projectSettingsTarget: Project | null;
+  onCloseProjectSettings: () => void;
+  onProjectSettingsSaved: () => Promise<void> | void;
   pendingDeletion: PendingSidebarDeletion | null;
   onCancelDeletion: () => void;
   onConfirmDeleteProject: (deleteData?: boolean) => void;
@@ -53,6 +58,9 @@ export default function SidebarModals({
   showNewProject,
   onCloseNewProject,
   onProjectCreated,
+  projectSettingsTarget,
+  onCloseProjectSettings,
+  onProjectSettingsSaved,
   pendingDeletion,
   onCancelDeletion,
   onConfirmDeleteProject,
@@ -78,6 +86,16 @@ export default function SidebarModals({
           <ProjectCreationWizard
             onClose={onCloseNewProject}
             onProjectCreated={onProjectCreated}
+          />,
+          document.body,
+        )}
+
+      {projectSettingsTarget &&
+        ReactDOM.createPortal(
+          <ProjectSettingsModal
+            project={projectSettingsTarget}
+            onClose={onCloseProjectSettings}
+            onSaved={onProjectSettingsSaved}
           />,
           document.body,
         )}

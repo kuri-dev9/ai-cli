@@ -70,7 +70,8 @@
     "sections": {
       "appearance": "Appearance",
       "toolDisplay": "Tool Display",
-      "inputSettings": "Input Settings"
+      "inputSettings": "Input Settings",
+      "telegramRelay": "Telegram notifications"
     },
     "darkMode": "Dark Mode",
     "showRawParameters": "Show raw parameters",
@@ -84,6 +85,15 @@
       "openPanel": "Open settings panel",
       "draggingStatus": "Dragging...",
       "toggleAndMove": "Click to toggle, drag to move"
+    },
+    "telegramRelay": {
+      "label": "Notify me about this session",
+      "description": "While this is on, finished runs in this session are sent to Telegram. Replies to work you started from Telegram always arrive regardless of this toggle. For a single run, prefix your message with /bot.",
+      "needsSession": "Open a session first.",
+      "loading": "Checking Telegram notification settings...",
+      "needsToken": "Save a bot token in Settings > Telegram first.",
+      "bridgeDisabled": "The Telegram bridge is turned off. Enable it in settings.",
+      "bridgeStopped": "The Telegram bridge is not connected. Check the token and chat ids in settings."
     }
   },
   "terminalShortcuts": {
@@ -111,6 +121,7 @@
     "tasks": "Tasks",
     "browser": "Browser",
     "notifications": "Notifications",
+    "telegram": "Telegram",
     "plugins": "Plugins",
     "about": "About"
   },
@@ -144,6 +155,65 @@
       "actionRequired": "Action required",
       "stop": "Run stopped",
       "error": "Run failed"
+    }
+  },
+  "telegramSettings": {
+    "sectionTitle": "Telegram bridge",
+    "sectionDescription": "Talk to your sessions from a Telegram bot. Set the bot token and the allowed chat ids here — no .env editing required.",
+    "enableLabel": "Enable bridge",
+    "enableDescription": "Turn this off to stop polling Telegram without clearing the stored token.",
+    "enableAriaLabel": "Enable Telegram bridge",
+    "fromEnvironment": "Configured from the environment (.env)",
+    "save": "Save",
+    "saving": "Saving...",
+    "unsaved": "You have unsaved changes",
+    "loadFailed": "Failed to load the Telegram settings",
+    "saveFailed": "Failed to save the Telegram settings",
+    "status": {
+      "prefix": "Status",
+      "checking": "Checking...",
+      "noToken": "Enter a bot token",
+      "noChatIds": "Add a chat id to start the bridge",
+      "disabled": "Bridge is turned off",
+      "running": "Connected",
+      "stopped": "Not connected"
+    },
+    "token": {
+      "title": "Bot token",
+      "description": "The token Telegram's @BotFather gives you when you create a bot. A stored token is only ever shown masked.",
+      "label": "Bot token",
+      "placeholder": "123456789:AA...",
+      "saved": "Saved",
+      "clear": "Clear"
+    },
+    "test": {
+      "button": "Test connection",
+      "testing": "Testing...",
+      "success": "Connected:",
+      "failed": "Could not connect"
+    },
+    "chatIds": {
+      "title": "Allowed chat ids",
+      "description": "Only messages from these chat ids are handled. The bridge stays off while this list is empty.",
+      "placeholder": "e.g. 12345678 (comma separated)",
+      "add": "Add",
+      "remove": "Remove chat id {{id}}",
+      "empty": "No chat ids yet.",
+      "invalid": "Chat ids must be numbers.",
+      "help": "Not sure about your chat id? Send the bot any message, then hit Test connection and read the chat id from the server log.",
+      "discover": {
+        "button": "Find my chat id",
+        "loading": "Looking...",
+        "disabled": "Save a bot token first to look up chat ids.",
+        "resultsTitle": "Chats that messaged the bot",
+        "hint": "Click yours to add it to the list above.",
+        "group": "Group",
+        "added": "That chat id is already on the list.",
+        "empty": "Send the bot any message first, then press this again.",
+        "bridgeRunning": "The bridge is running, so the list cannot be read. Turn the toggle above off for a moment and try again.",
+        "failed": "Could not look up chat ids",
+        "select": "Add chat id {{id}}"
+      }
     }
   },
   "appearanceSettings": {

@@ -300,6 +300,11 @@ export type ChatMessage = {
    */
   transcriptAnchorId?: string;
   /**
+   * 이 메시지가 앱 바깥에서 들어왔을 때의 통로. 브라우저에서 친 메시지에는
+   * 없다. 기록에 작은 배지로 표시된다.
+   */
+  source?: 'telegram';
+  /**
    * Set on the optimistic echo of a message being sent as a replacement for an
    * already-sent one, naming the anchor it replaces. Local to this client.
    */
@@ -449,6 +454,11 @@ export type NormalizedMessage = {
   role?: 'user' | 'assistant';
   content?: string;
   /**
+   * 이 메시지가 앱 바깥에서 들어왔을 때의 통로. 브라우저에서 친 메시지에는
+   * 없다. 기록을 나중에 볼 때 밖에서 급히 시킨 것인지 구분하려고 붙인다.
+   */
+  source?: 'telegram';
+  /**
    * Mirrors optional transcript metadata from the server.
    *
    * These fields are currently used by Claude history normalization so local
@@ -534,6 +544,8 @@ export type CostCommandData = {
   tokenUsage?: {
     used?: number;
     total?: number;
+    /** 컨텍스트 윈도우에 남은 여유분. 서버가 `total - used`로 계산해 보낸다. */
+    remaining?: number;
   };
   tokenBreakdown?: {
     input?: number;
@@ -1064,6 +1076,36 @@ export type GithubTokenCredential = {
   is_active: boolean;
 };
 
+/**
+ * Where a clone lands relative to the folder the user picked.
+ *
+ * 'direct' 는 고른 폴더 자체가 저장소 루트가 된다(기본값). 'subdirectory' 는 그
+ * 아래에 저장소 이름으로 폴더를 하나 더 만든다 — 예전 동작이고, 고른 폴더에
+ * 이미 소스가 있을 때 사용자가 고를 수 있는 선택지로만 남아 있다.
+ */
+export type CloneTargetMode = 'direct' | 'subdirectory';
+
+/** clone 대상 폴더 한 곳의 상태. `/api/projects/clone-preflight` 가 돌려준다. */
+export type CloneTargetInspection = {
+  path: string;
+  exists: boolean;
+  isDirectory: boolean;
+  isEmpty: boolean;
+  entryCount: number;
+  sampleEntries: string[];
+  hasGitRepository: boolean;
+  registeredProjectName: string | null;
+};
+
+/** clone 을 시작하기 전에 확인한 대상 폴더 상태 전체. */
+export type CloneTargetPreflightResult = {
+  repositoryName: string;
+  direct: CloneTargetInspection;
+  subdirectory: CloneTargetInspection | null;
+  requiresConfirmation: boolean;
+  recommendedTarget: CloneTargetMode;
+};
+
 /** The full set of user-entered values carried across the project-creation wizard's steps, owned by ProjectCreationWizard and passed down to each step. */
 export type WizardFormState = {
   workspacePath: string;
@@ -1071,6 +1113,10 @@ export type WizardFormState = {
   tokenMode: TokenMode;
   selectedGithubToken: string;
   newGithubToken: string;
+  /** 고른 폴더가 비어 있지 않을 때 사용자가 확인 화면에서 바꿀 수 있다. */
+  cloneTarget: CloneTargetMode;
+  /** clone 을 건너뛰고 폴더만 프로젝트로 등록한다. */
+  skipClone: boolean;
 };
 
 // ---------------------------
@@ -1137,7 +1183,7 @@ export type AgentContext = {
 };
 
 /** Identifier of a top-level section in the settings dialog; use it whenever a tab is stored, compared or requested so deep links, the sidebar and the command palette all agree on the same set of names. */
-export type SettingsMainTab = 'agents' | 'appearance' | 'git' | 'api' | 'voice' | 'tasks' | 'browser' | 'notifications' | 'plugins' | 'about';
+export type SettingsMainTab = 'agents' | 'appearance' | 'git' | 'api' | 'voice' | 'tasks' | 'browser' | 'notifications' | 'telegram' | 'plugins' | 'about';
 
 /** The coding-agent CLI a settings screen is configuring, aliasing LLMProvider so agent-scoped settings read as being about an agent rather than a chat model. */
 export type AgentProvider = LLMProvider;
@@ -1191,6 +1237,58 @@ export type CodeEditorSettingsState = {
   showMinimap: boolean;
   lineNumbers: boolean;
   fontSize: string;
+};
+
+/** 텔레그램 브리지 설정을 설정 화면이 읽는 형태. 서버가 `GET/PUT /api/telegram/settings` 로 돌려주는 것과 같은 모양이며, `botToken` 은 언제나 마스킹된 값이다(평문은 프론트로 오지 않는다). */
+export type TelegramSettingsState = {
+  /** 꺼 두면 토큰이 있어도 브리지를 켜지 않는다. */
+  enabled: boolean;
+  /** 마스킹된 토큰(`123456:••••••••`). 저장된 토큰이 없으면 빈 문자열. */
+  botToken: string;
+  /** 저장된 토큰이 있는지. `botToken` 이 마스킹 값이라 길이로 판단할 수 없어 서버가 따로 알려준다. */
+  hasToken: boolean;
+  /** 브리지가 메시지를 받아들이는 chat id 화이트리스트. 비어 있으면 서버가 브리지를 켜지 않는다. */
+  allowedChatIds: number[];
+  /** 값이 `.env` 에서 왔는지. 화면에 "환경변수로 설정된 값" 배지를 띄울 때 쓴다. */
+  fromEnvironment: boolean;
+  /** 지금 폴링 중인지. 저장 직후 브리지가 재시작되므로 저장 응답의 값이 최신이다. */
+  running: boolean;
+  /** 마지막 연결 확인에서 받아 둔 봇 이름. 확인한 적이 없으면 null. */
+  botUsername: string | null;
+};
+
+/** `PUT /api/telegram/settings` 에 올리는 변경분. 사용자가 건드린 항목만 담는다 — 특히 토큰 입력칸을 건드리지 않았으면 `botToken` 은 아예 넣지 않는다. */
+export type TelegramSettingsUpdate = {
+  botToken?: string;
+  allowedChatIds?: number[];
+  enabled?: boolean;
+};
+
+/** `POST /api/telegram/test` 의 응답. 성공하면 봇 이름이, 실패하면 이유가 온다. */
+export type TelegramTestResult = {
+  ok: boolean;
+  botUsername?: string | null;
+  error?: string;
+};
+
+/** `GET /api/telegram/discover-chats` 가 돌려주는 대화 하나. 봇이 받아 둔 메시지에서 뽑아낸 것이라, 봇에게 말을 건 적이 있는 상대만 나온다. */
+export type TelegramDiscoveredChat = {
+  /** 화이트리스트에 넣을 값. 그룹이면 음수다. */
+  chatId: number;
+  /** 사람 이름(성+이름) 또는 그룹 제목. 알 수 없으면 빈 문자열. */
+  name: string;
+  /** `@` 없이. username 을 설정하지 않은 계정이면 빈 문자열. */
+  username: string;
+  /** 이 대화의 마지막 메시지(앞부분만). 목록에서 자기 것을 알아보는 단서다. */
+  lastText: string;
+  /** 개인 대화가 아니라 그룹·채널인지. */
+  isGroup: boolean;
+};
+
+/** `GET /api/telegram/discover-chats` 의 응답. `bridgeRunning` 이 true 면 브리지가 폴링을 붙들고 있어 목록을 읽지 못한 것이므로, 목록이 비어 있어도 "메시지를 보내세요"가 아니라 "브리지를 끄세요"를 안내해야 한다. */
+export type TelegramChatDiscovery = {
+  chats: TelegramDiscoveredChat[];
+  bridgeRunning: boolean;
 };
 
 // ---------------------------
@@ -1297,6 +1395,8 @@ export type SidebarProjectListProps = SessionRowActions & {
   onStartEditingProject: (project: Project) => void;
   onCancelEditingProject: () => void;
   onSaveProjectName: (projectId: string, nextName: string) => void;
+  /** 이름과 홈 경로를 한 화면에서 고치는 프로젝트 설정 모달을 연다. */
+  onOpenProjectSettings: (project: Project) => void;
   onDeleteProject: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onNewSession: (project: Project) => void;

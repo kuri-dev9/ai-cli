@@ -311,3 +311,63 @@ test('startRun rejects a second concurrent run for the same session', async () =
     assert.ok(third);
   });
 });
+
+test('a flood of token deltas does not push tool calls out of the replay window', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-deltas', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-deltas',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+
+    // The events a reconnecting client cannot rebuild from the preview alone.
+    run.writer.send({ kind: 'text', role: 'user', provider: 'claude', sessionId: 'x', content: 'the prompt' });
+    run.writer.send({ kind: 'tool_use', provider: 'claude', sessionId: 'x', toolId: 'toolu_1', toolName: 'Read' });
+    run.writer.send({ kind: 'tool_result', provider: 'claude', sessionId: 'x', toolId: 'toolu_1', content: 'file body' });
+
+    // Enough deltas to overrun the buffer several times over.
+    for (let i = 0; i < 6000; i++) {
+      run.writer.send({ kind: 'stream_delta', provider: 'claude', sessionId: 'x', content: `d${i}` });
+    }
+
+    const replayed = chatRunRegistry.replayEvents('app-run-deltas', 0);
+    const kinds = replayed.map((event) => event.kind);
+    assert.equal(kinds.includes('text'), true, 'the prompt was evicted');
+    assert.equal(kinds.includes('tool_use'), true, 'the tool call was evicted');
+    assert.equal(kinds.includes('tool_result'), true, 'the tool result was evicted');
+
+    // Deltas absorb the whole overflow, and the newest ones are the survivors.
+    const deltas = replayed.filter((event) => event.kind === 'stream_delta');
+    assert.equal(deltas.length, replayed.length - 3);
+    assert.equal(deltas[deltas.length - 1].content, 'd5999');
+  });
+});
+
+test('once no delta is left the buffer falls back to dropping its oldest event', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-nodeltas', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-nodeltas',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+
+    for (let i = 0; i < 5200; i++) {
+      run.writer.send({ kind: 'tool_use', provider: 'claude', sessionId: 'x', toolId: `toolu_${i}`, toolName: 'Read' });
+    }
+
+    const replayed = chatRunRegistry.replayEvents('app-run-nodeltas', 0);
+    assert.equal(replayed.length, 5000);
+    assert.equal(replayed[0].toolId, 'toolu_200');
+    assert.equal(replayed[replayed.length - 1].toolId, 'toolu_5199');
+  });
+});

@@ -34,7 +34,7 @@
 별도 이름을 쓰는 것이 안전하다 — 실수로 우리 저장소에 push 하지 않게 된다.
 
 ```bash
-cd /Users/kuri/proj/vscode/claude_web
+cd /Users/kuri/proj/vscode/ai-cli
 
 git remote add upstream https://github.com/siteboon/claudecodeui.git
 git fetch upstream --depth 50

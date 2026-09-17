@@ -45,19 +45,37 @@ function TokenUsageSummary({ usage, onClick }: TokenUsageSummaryProps) {
   const inputTokens = readUsageNumber(usage?.inputTokens ?? breakdown?.input);
   const outputTokens = readUsageNumber(usage?.outputTokens ?? breakdown?.output);
   const usedTokens = readUsageNumber(usage?.used) || inputTokens + outputTokens;
+  // 윈도우가 사용량보다 작게 잡힌 세션(모르는 모델 + 낡은 설정)에서는 잔량을
+  // 말할 수 없으므로 총량 없이 사용량만 보여준다.
+  const contextWindow = readUsageNumber(usage?.total);
+  const hasWindow = contextWindow > 0 && contextWindow >= usedTokens;
+  const remainingTokens = hasWindow ? contextWindow - usedTokens : 0;
 
   return (
     <button
       type="button"
       onClick={onClick}
       className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-background/70 px-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-primary/25 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:gap-2 sm:px-2.5"
-      title={t('chat:misc.tokensUsed', { count: usedTokens })}
+      title={
+        hasWindow
+          ? `${t('chat:misc.tokensRemainingHint', {
+              defaultValue: '{{remaining}} tokens left ({{percent}} used)',
+              remaining: remainingTokens.toLocaleString(),
+              percent: `${Math.round((usedTokens / contextWindow) * 100)}%`,
+            })}\n${t('chat:misc.contextUsageDisclaimer', {
+              defaultValue: 'This is how full the conversation is — not your plan usage.',
+            })}`
+          : t('chat:misc.tokensUsed', { count: usedTokens })
+      }
       aria-label={t('chat:misc.showTokenUsage')}
     >
       <span className="grid h-5 w-5 place-items-center rounded-md bg-primary/10 text-primary">
         <ActivityIcon className="h-3.5 w-3.5" />
       </span>
       <span className="font-medium text-foreground">{formatTokenCount(usedTokens)}</span>
+      {hasWindow && (
+        <span className="text-muted-foreground/70">/ {formatTokenCount(contextWindow)}</span>
+      )}
       <span className="hidden text-muted-foreground/70 sm:inline">
         {t('chat:misc.tokensLabel', { count: usedTokens })}
       </span>

@@ -284,6 +284,12 @@ function mapCliOptionsToSDK(options = {}) {
     preset: 'claude_code'
   };
 
+  // Without this the SDK only yields whole `assistant` messages, so a reply
+  // lands in one lump after it is fully generated. Turning it on adds
+  // `stream_event` wrappers carrying the raw Anthropic token deltas, which
+  // the normalizer turns into `stream_delta` for the live preview bubble.
+  sdkOptions.includePartialMessages = true;
+
   sdkOptions.settingSources = ['project', 'user', 'local'];
 
   // The SDK resumes with the provider-native session id, never the app id.

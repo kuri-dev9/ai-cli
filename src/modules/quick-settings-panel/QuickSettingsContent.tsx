@@ -4,6 +4,7 @@ import {
   Languages,
   Mic,
   Moon,
+  Send,
   Sun,
   type LucideIcon,
 } from 'lucide-react';
@@ -15,6 +16,7 @@ import { SETTING_ROW_CLASS } from '@/shared/constants';
 import type { PreferenceToggleKey, QuickSettingsPreferences } from '@/shared/types';
 import QuickSettingsSection from '@/modules/quick-settings-panel/QuickSettingsSection';
 import QuickSettingsToggleRow from '@/modules/quick-settings-panel/QuickSettingsToggleRow';
+import type { TelegramSessionNotificationsState } from '@/modules/quick-settings-panel/hooks/useTelegramSessionNotifications';
 
 /** Declarative description of one quick settings toggle row - its preference key, translation key and icon - so the rows can be rendered from a list instead of hand-written. */
 type PreferenceToggleItem = {
@@ -53,15 +55,49 @@ type QuickSettingsContentProps = {
   isDarkMode: boolean;
   preferences: QuickSettingsPreferences;
   onPreferenceChange: (key: PreferenceToggleKey, value: boolean) => void;
+  /** 지금 열려 있는 세션. 없으면 텔레그램 알림 토글은 잠긴다. */
+  activeSessionId: string | null;
+  telegramNotifications: TelegramSessionNotificationsState;
 };
+
+/**
+ * 텔레그램 알림 토글을 왜 못 켜는지.
+ *
+ * `null` 이면 켤 수 있다는 뜻이다. 잠긴 토글만 두고 이유를 말하지 않으면
+ * 사용자는 알림이 고장 났다고 생각한다.
+ */
+function readTelegramBlockReason(
+  activeSessionId: string | null,
+  telegram: TelegramSessionNotificationsState,
+): string | null {
+  if (!activeSessionId) {
+    return 'quickSettings.telegramRelay.needsSession';
+  }
+  if (telegram.isLoading) {
+    return 'quickSettings.telegramRelay.loading';
+  }
+  if (!telegram.hasToken) {
+    return 'quickSettings.telegramRelay.needsToken';
+  }
+  if (!telegram.bridgeEnabled) {
+    return 'quickSettings.telegramRelay.bridgeDisabled';
+  }
+  if (!telegram.available) {
+    return 'quickSettings.telegramRelay.bridgeStopped';
+  }
+  return null;
+}
 
 /** Rendered by QuickSettingsPanelView to show the drawer's appearance, tool display and input preference rows. */
 export default function QuickSettingsContent({
   isDarkMode,
   preferences,
   onPreferenceChange,
+  activeSessionId,
+  telegramNotifications,
 }: QuickSettingsContentProps) {
   const { t } = useTranslation('settings');
+  const telegramBlockReason = readTelegramBlockReason(activeSessionId, telegramNotifications);
   const inputSettingToggles = preferences.voiceEnabled
     ? INPUT_SETTING_TOGGLES
     : INPUT_SETTING_TOGGLES.filter(({ key }) => key !== 'voiceEnabled');
@@ -103,6 +139,21 @@ export default function QuickSettingsContent({
         {renderToggleRows(inputSettingToggles)}
         <p className="ml-3 text-xs text-muted-foreground">
           {t('quickSettings.sendByCtrlEnterDescription')}
+        </p>
+      </QuickSettingsSection>
+
+      <QuickSettingsSection title={t('quickSettings.sections.telegramRelay')}>
+        <QuickSettingsToggleRow
+          label={t('quickSettings.telegramRelay.label')}
+          icon={Send}
+          checked={telegramNotifications.enabled}
+          disabled={telegramBlockReason !== null}
+          onCheckedChange={telegramNotifications.setEnabled}
+        />
+        <p className="ml-3 text-xs text-muted-foreground">
+          {telegramBlockReason
+            ? t(telegramBlockReason)
+            : t('quickSettings.telegramRelay.description')}
         </p>
       </QuickSettingsSection>
     </div>

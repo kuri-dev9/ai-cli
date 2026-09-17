@@ -23,6 +23,7 @@ function ProjectMainRegion({
     newSessionTrigger,
     registerOptimisticSession,
     handleProjectSelect,
+    handleNewSession,
     refreshProjectsSilently,
   } = useProjectMainState();
 
@@ -65,6 +66,7 @@ function ProjectMainRegion({
       externalMessageUpdate={externalMessageUpdate}
       newSessionTrigger={newSessionTrigger}
       onProjectSelect={handleProjectSelect}
+      onNewSession={handleNewSession}
       onProjectsRefresh={handleProjectsRefresh}
     />
   );

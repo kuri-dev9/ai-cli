@@ -71,7 +71,7 @@ type ChatComposerProps = {
   onClearInput: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
-  queuedDraft: QueuedDraft | null;
+  queuedDrafts: QueuedDraft[];
   /** Set while the composer is replacing an already-sent message. */
   isEditingSentMessage: boolean;
   onCancelEditMessage: () => void;
@@ -79,8 +79,8 @@ type ChatComposerProps = {
   scheduledMessages: ScheduledMessage[];
   onScheduleMessage: (scheduledFor: Date) => void;
   onCancelScheduledMessage: (id: string) => void;
-  onEditQueuedDraft: () => void;
-  onDeleteQueuedDraft: () => void;
+  onEditQueuedDraft: (index: number) => void;
+  onDeleteQueuedDraft: (index: number) => void;
   attachedFiles: File[];
   onRemoveAttachment: (index: number) => void;
   fileErrors: Map<string, string>;
@@ -146,7 +146,7 @@ export default function ChatComposer({
   onClearInput,
   onSubmit,
   isDragActive,
-  queuedDraft,
+  queuedDrafts,
   isEditingSentMessage,
   onCancelEditMessage,
   scheduledMessages,
@@ -251,18 +251,22 @@ export default function ChatComposer({
   const hasPendingPermissions = pendingPermissionRequests.length > 0;
   const hasActivityIndicator = Boolean(activity && !hasPendingPermissions);
 
-  const hasQueuedDraft = Boolean(queuedDraft);
+  const hasQueuedDraft = queuedDrafts.length > 0;
   const canQueueDraft = isLoading && Boolean(input.trim() || attachedFiles.length > 0);
+  // 대기열에 이미 있어도 "업데이트"가 아니다 — 뒤에 한 건 더 붙는다.
   const submitHint = canQueueDraft
     ? hasQueuedDraft
-      ? t('input.hintText.updateQueued', { defaultValue: 'Enter to update queued message' })
+      ? t('input.hintText.queueAnother', {
+          defaultValue: 'Enter to add to the queue ({{count}} waiting)',
+          count: queuedDrafts.length,
+        })
       : t('input.hintText.queue', { defaultValue: 'Enter to queue your next message' })
     : sendByCtrlEnter
       ? t('input.hintText.ctrlEnter')
       : t('input.hintText.enter');
   const submitAriaLabel = canQueueDraft
     ? hasQueuedDraft
-      ? t('input.queue.update', { defaultValue: 'Update queued message' })
+      ? t('input.queue.addAnother', { defaultValue: 'Add to the queue' })
       : t('input.queue.sendNext', { defaultValue: 'Queue next message' })
     : isLoading
       ? t('input.stop')
@@ -309,16 +313,17 @@ export default function ChatComposer({
         </div>
       )}
 
-      {queuedDraft && (
+      {queuedDrafts.map((draft, index) => (
         <QueuedMessageCard
-          content={queuedDraft.content}
-          attachmentCount={
-            queuedDraft.uploadedAttachments?.length ?? queuedDraft.attachments.length
-          }
-          onEdit={onEditQueuedDraft}
-          onDelete={onDeleteQueuedDraft}
+          key={`${index}-${draft.content.slice(0, 32)}`}
+          content={draft.content}
+          attachmentCount={draft.uploadedAttachments?.length ?? draft.attachments.length}
+          position={index + 1}
+          queueLength={queuedDrafts.length}
+          onEdit={() => onEditQueuedDraft(index)}
+          onDelete={() => onDeleteQueuedDraft(index)}
         />
-      )}
+      ))}
 
       {!hasQuestionPanel && <div className="relative mx-auto max-w-[54.25rem]">
         {showFileDropdown && filteredFiles.length > 0 && (

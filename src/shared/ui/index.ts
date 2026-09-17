@@ -18,6 +18,7 @@
  */
 
 export { ActionMenu } from '@/shared/ui/ActionMenu';
+export type { ActionMenuItem } from '@/shared/ui/ActionMenu';
 export { Badge } from '@/shared/ui/Badge';
 export { Button, buttonVariants } from '@/shared/ui/Button';
 export { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/shared/ui/Card';
@@ -28,6 +29,7 @@ export { Dialog, DialogTrigger, DialogContent, DialogTitle } from '@/shared/ui/D
 export { Input } from '@/shared/ui/Input';
 export { LLMProviderLogo } from '@/shared/ui/LLMProviderLogo';
 export { PillBar, Pill } from '@/shared/ui/PillBar';
+export { ConnectionStatusBanner } from '@/shared/ui/ConnectionStatusBanner';
 export { ScrollArea } from '@/shared/ui/ScrollArea';
 export { Shimmer } from '@/shared/ui/Shimmer';
 export { Tooltip } from '@/shared/ui/Tooltip';

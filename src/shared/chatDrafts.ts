@@ -31,8 +31,23 @@ export type StoredQueuedMessage = {
 
 type DraftRecord = {
   text: string;
-  queuedMessage: StoredQueuedMessage | null;
+  /**
+   * 실행 중인 턴 뒤에 줄 서 있는 메시지들. 보낸 순서대로다.
+   *
+   * 예전에는 한 건만 담을 수 있어서, 턴이 도는 동안 두 번째 질문을 보내면
+   * 첫 번째를 조용히 덮어썼다. 나중에 "아까 물어본 거"를 찾으면 흔적도 없던
+   * 이유가 이것이다.
+   */
+  queuedMessages: StoredQueuedMessage[];
 };
+
+/** 저장 포맷: 버전 봉투에 담긴 대기 목록. 서버 DB도 같은 모양으로 읽는다. */
+type StoredQueueEnvelope = {
+  v: 2;
+  items: StoredQueuedMessage[];
+};
+
+const QUEUE_ENVELOPE_VERSION = 2;
 
 /** Fired after any draft changes, from a local write or from a hydrate. */
 export const CHAT_DRAFTS_CHANGED_EVENT = 'chat-drafts:changed';
@@ -46,7 +61,7 @@ const MIRROR_STORAGE_KEY = 'chat-drafts';
  */
 const SERVER_WRITE_DEBOUNCE_MS = 1_000;
 
-const EMPTY_DRAFT: DraftRecord = { text: '', queuedMessage: null };
+const EMPTY_DRAFT: DraftRecord = { text: '', queuedMessages: [] };
 
 const listeners = new Set<() => void>();
 
@@ -59,8 +74,26 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 );
 
 const isEmptyDraft = (draft: DraftRecord): boolean => (
-  draft.text === '' && draft.queuedMessage === null
+  draft.text === '' && draft.queuedMessages.length === 0
 );
+
+/** 저장된 값이 어떤 세대의 포맷이든 대기 목록으로 읽는다. */
+function readQueueValue(value: unknown): StoredQueuedMessage[] {
+  const items = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.items)
+      ? value.items
+      : value
+        ? [value]
+        : [];
+
+  return items.filter(isRecord) as StoredQueuedMessage[];
+}
+
+/** 서버로 보낼 형태. 비어 있으면 null — 서버는 그때 행을 지운다. */
+function toQueuePayload(items: StoredQueuedMessage[]): StoredQueueEnvelope | null {
+  return items.length > 0 ? { v: QUEUE_ENVELOPE_VERSION, items } : null;
+}
 
 function readMirror(): Map<string, DraftRecord> {
   try {
@@ -81,9 +114,7 @@ function readMirror(): Map<string, DraftRecord> {
       }
       restored.set(scope, {
         text: typeof value.text === 'string' ? value.text : '',
-        queuedMessage: isRecord(value.queuedMessage)
-          ? (value.queuedMessage as StoredQueuedMessage)
-          : null,
+        queuedMessages: readQueueValue(value.queuedMessages ?? value.queuedMessage),
       });
     }
     return restored;
@@ -131,7 +162,7 @@ function flushServerWrites(): void {
 
       void api.user.saveDraft(scope, {
         text: draft.text,
-        queuedMessage: draft.queuedMessage,
+        queuedMessage: toQueuePayload(draft.queuedMessages),
       }).catch((error: unknown) => {
         console.error('Failed to save chat draft:', error);
       });
@@ -162,7 +193,7 @@ function updateDraft(scope: string, update: Partial<DraftRecord>): void {
   const current = drafts.get(scope) ?? EMPTY_DRAFT;
   const next: DraftRecord = { ...current, ...update };
 
-  if (next.text === current.text && next.queuedMessage === current.queuedMessage) {
+  if (next.text === current.text && next.queuedMessages === current.queuedMessages) {
     return;
   }
 
@@ -188,12 +219,8 @@ export function writeDraftText(scope: string, text: string): void {
   updateDraft(scope, { text });
 }
 
-export function readQueuedMessage(scope: string): StoredQueuedMessage | null {
-  const queued = drafts.get(scope)?.queuedMessage ?? null;
-  if (!queued) {
-    return null;
-  }
-
+/** 보낼 내용이 있는 항목만 남기고, 첨부 필드를 한 가지 모양으로 맞춘다. */
+function normalizeQueuedMessage(queued: StoredQueuedMessage): StoredQueuedMessage | null {
   const attachments = Array.isArray(queued.attachments)
     ? queued.attachments
     : Array.isArray(queued.images)
@@ -206,16 +233,31 @@ export function readQueuedMessage(scope: string): StoredQueuedMessage | null {
     : null;
 }
 
-export function writeQueuedMessage(scope: string, message: StoredQueuedMessage): void {
-  updateDraft(scope, { queuedMessage: message });
+/** 한 세션의 대기 목록. 보낸 순서 그대로다. */
+export function readQueuedMessages(scope: string): StoredQueuedMessage[] {
+  const queued = drafts.get(scope)?.queuedMessages ?? [];
+  return queued
+    .map(normalizeQueuedMessage)
+    .filter((message): message is StoredQueuedMessage => message !== null);
+}
+
+/** 대기 목록 맨 뒤에 한 건 추가한다. 기존 항목은 그대로 둔다. */
+export function appendQueuedMessage(scope: string, message: StoredQueuedMessage): void {
+  const current = drafts.get(scope)?.queuedMessages ?? [];
+  updateDraft(scope, { queuedMessages: [...current, message] });
   // Queueing is a send-like action, so persist it before the tab can close.
   flushServerWritesNow();
 }
 
-export function clearQueuedMessage(scope: string): void {
-  updateDraft(scope, { queuedMessage: null });
+/** 대기 목록 전체를 갈아끼운다. 순서 변경·수정·부분 삭제가 모두 여기로 온다. */
+export function writeQueuedMessages(scope: string, messages: StoredQueuedMessage[]): void {
+  updateDraft(scope, { queuedMessages: messages });
   // Editing or cancelling must beat the server's next dispatcher poll.
   flushServerWritesNow();
+}
+
+export function clearQueuedMessages(scope: string): void {
+  writeQueuedMessages(scope, []);
 }
 
 /** Subscribes to any draft change; returns the unsubscribe function. */
@@ -262,9 +304,7 @@ export async function hydrateChatDrafts(): Promise<void> {
 
     merged.set(scope, {
       text: typeof draft.text === 'string' ? draft.text : '',
-      queuedMessage: isRecord(draft.queuedMessage)
-        ? (draft.queuedMessage as StoredQueuedMessage)
-        : null,
+      queuedMessages: readQueueValue(draft.queuedMessage),
     });
   }
 

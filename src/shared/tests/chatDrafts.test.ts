@@ -127,13 +127,13 @@ test('hydrate brings in a draft typed on another device', async () => {
 
 test('hydrate removes a mirrored queue after the server claims it', async () => {
   const store = await loadStore();
-  store.writeQueuedMessage('session-a', { content: 'server-owned queue' });
-  assert.equal(store.readQueuedMessage('session-a')?.content, 'server-owned queue');
+  store.appendQueuedMessage('session-a', { content: 'server-owned queue' });
+  assert.equal(store.readQueuedMessages('session-a')[0]?.content, 'server-owned queue');
 
   serverDrafts = [];
   await store.hydrateChatDrafts();
 
-  assert.equal(store.readQueuedMessage('session-a'), null);
+  assert.deepEqual(store.readQueuedMessages('session-a'), []);
 });
 
 test('hydrate does not overwrite a scope the user is typing into right now', async () => {
@@ -161,45 +161,73 @@ test('a queued message round-trips alongside the draft text', async () => {
   const store = await loadStore();
 
   store.writeDraftText('session-a', 'still editing');
-  store.writeQueuedMessage('session-a', { content: 'send this next', attachments: [] });
+  store.appendQueuedMessage('session-a', { content: 'send this next', attachments: [] });
 
   assert.equal(store.readDraftText('session-a'), 'still editing');
-  assert.deepEqual(store.readQueuedMessage('session-a'), {
+  assert.deepEqual(store.readQueuedMessages('session-a'), [{
     content: 'send this next',
     attachments: [],
-  });
+  }]);
   assert.equal(savedDrafts.length, 1, 'queue actions persist without waiting for the draft debounce');
   assert.deepEqual(savedDrafts, [{
     scope: 'session-a',
     text: 'still editing',
-    queuedMessage: { content: 'send this next', attachments: [] },
+    queuedMessage: { v: 2, items: [{ content: 'send this next', attachments: [] }] },
   }]);
+});
+
+test('queueing a second message keeps the first one', async () => {
+  const store = await loadStore();
+
+  store.appendQueuedMessage('session-a', { content: 'first' });
+  store.appendQueuedMessage('session-a', { content: 'second' });
+
+  assert.deepEqual(
+    store.readQueuedMessages('session-a').map((message) => message.content),
+    ['first', 'second'],
+  );
+});
+
+test('a queue written by the old single-message build still reads back', async () => {
+  serverDrafts = [{
+    scope: 'session-a',
+    text: '',
+    queuedMessage: { content: 'queued before the upgrade', attachments: [] },
+  }];
+
+  const store = await loadStore();
+  await store.hydrateChatDrafts();
+
+  assert.deepEqual(
+    store.readQueuedMessages('session-a').map((message) => message.content),
+    ['queued before the upgrade'],
+  );
 });
 
 test('a queued message with neither text nor attachments reads as absent', async () => {
   const store = await loadStore();
 
-  store.writeQueuedMessage('session-a', { content: '   ', attachments: [] });
+  store.appendQueuedMessage('session-a', { content: '   ', attachments: [] });
 
-  assert.equal(store.readQueuedMessage('session-a'), null);
+  assert.deepEqual(store.readQueuedMessages('session-a'), []);
 });
 
 test('legacy image-only descriptors are still readable as attachments', async () => {
   const store = await loadStore();
 
-  store.writeQueuedMessage('session-a', { content: '', images: [{ name: 'shot.png' }] });
+  store.appendQueuedMessage('session-a', { content: '', images: [{ name: 'shot.png' }] });
 
-  assert.deepEqual(store.readQueuedMessage('session-a')?.attachments, [{ name: 'shot.png' }]);
+  assert.deepEqual(store.readQueuedMessages('session-a')[0]?.attachments, [{ name: 'shot.png' }]);
 });
 
-test('clearing the queued message leaves the draft text alone', async () => {
+test('clearing the queue leaves the draft text alone', async () => {
   const store = await loadStore();
   store.writeDraftText('session-a', 'keep me');
-  store.writeQueuedMessage('session-a', { content: 'queued' });
+  store.appendQueuedMessage('session-a', { content: 'queued' });
 
-  store.clearQueuedMessage('session-a');
+  store.clearQueuedMessages('session-a');
 
-  assert.equal(store.readQueuedMessage('session-a'), null);
+  assert.deepEqual(store.readQueuedMessages('session-a'), []);
   assert.equal(store.readDraftText('session-a'), 'keep me');
 });
 

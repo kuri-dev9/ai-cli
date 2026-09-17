@@ -1,5 +1,11 @@
 import { api } from '@/shared/api';
-import type { FolderSuggestion, GithubTokenCredential, TokenMode } from '@/shared/types';
+import type {
+  CloneTargetMode,
+  CloneTargetPreflightResult,
+  FolderSuggestion,
+  GithubTokenCredential,
+  TokenMode,
+} from '@/shared/types';
 
 type CredentialsResponse = {
   credentials?: GithubTokenCredential[];
@@ -50,6 +56,7 @@ type CloneWorkspaceParams = {
   tokenMode: TokenMode;
   selectedGithubToken: string;
   newGithubToken: string;
+  cloneTarget: CloneTargetMode;
 };
 
 type CloneProgressHandlers = {
@@ -133,6 +140,30 @@ export const createFolderInFilesystem = async (folderPath: string) => {
   return data.path || folderPath;
 };
 
+type ClonePreflightResponse = {
+  success?: boolean;
+  data?: CloneTargetPreflightResult;
+  error?: string | { message?: string };
+};
+
+/**
+ * clone 을 시작하기 전에 대상 폴더에 무엇이 들어 있는지 물어본다.
+ *
+ * 폴더에 이미 소스가 있으면 wizard 가 사용자에게 어떻게 할지 먼저 묻는다.
+ */
+export const fetchClonePreflight = async (workspacePath: string, githubUrl: string) => {
+  const response = await api.cloneProjectPreflight(workspacePath.trim(), githubUrl.trim());
+  const data = await parseJson<ClonePreflightResponse>(response);
+
+  if (!response.ok || !data.data) {
+    const errorMessage =
+      typeof data.error === 'string' ? data.error : data.error?.message;
+    throw new Error(errorMessage || 'Failed to inspect the target folder');
+  }
+
+  return data.data;
+};
+
 export const createProjectRequest = async (payload: CreateProjectPayload) => {
   const response = await api.createProject(payload);
   const data = await parseJson<CreateProjectResponse>(response);
@@ -150,12 +181,14 @@ const buildCloneProgressUrl = ({
   tokenMode,
   selectedGithubToken,
   newGithubToken,
+  cloneTarget,
 }: CloneWorkspaceParams) =>
   api.cloneProjectProgressUrl({
     path: workspacePath.trim(),
     githubUrl: githubUrl.trim(),
     githubTokenId: tokenMode === 'stored' ? selectedGithubToken : null,
     newGithubToken: tokenMode === 'new' ? newGithubToken.trim() : null,
+    cloneTarget,
   });
 
 export const cloneWorkspaceWithProgress = (

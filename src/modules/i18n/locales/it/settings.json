@@ -54,7 +54,8 @@
     "sections": {
       "appearance": "Aspetto",
       "toolDisplay": "Visualizzazione strumenti",
-      "inputSettings": "Impostazioni input"
+      "inputSettings": "Impostazioni input",
+      "telegramRelay": "Telegram notifications"
     },
     "darkMode": "Modalità scura",
     "showRawParameters": "Mostra parametri grezzi",
@@ -67,6 +68,15 @@
       "openPanel": "Apri pannello impostazioni",
       "draggingStatus": "Trascinamento...",
       "toggleAndMove": "Clicca per attivare/disattivare, trascina per spostare"
+    },
+    "telegramRelay": {
+      "label": "Notify me about this session",
+      "description": "While this is on, finished runs in this session are sent to Telegram. Replies to work you started from Telegram always arrive regardless of this toggle. For a single run, prefix your message with /bot.",
+      "needsSession": "Open a session first.",
+      "loading": "Checking Telegram notification settings...",
+      "needsToken": "Save a bot token in Settings > Telegram first.",
+      "bridgeDisabled": "The Telegram bridge is turned off. Enable it in settings.",
+      "bridgeStopped": "The Telegram bridge is not connected. Check the token and chat ids in settings."
     }
   },
   "terminalShortcuts": {

@@ -33,6 +33,8 @@ type WorkspaceMainProps = {
   newSessionTrigger: number;
   /** Switches the app to another project — used by the git panel's Worktrees view. */
   onProjectSelect: (project: Project) => void;
+  /** Starts a fresh chat in the open project, from the header's new-chat button. */
+  onNewSession: (project: Project) => void;
   /** Silently re-syncs the sidebar project list after worktree projects change. */
   onProjectsRefresh: () => void;
 };
@@ -55,6 +57,7 @@ function WorkspaceMain({
   newSessionTrigger,
   onProjectSelect,
   onProjectsRefresh,
+  onNewSession,
 }: WorkspaceMainProps) {
   const preferences = useUiPreferences();
   const { showRawParameters, showThinking, sendByCtrlEnter } = preferences;
@@ -66,6 +69,13 @@ function WorkspaceMain({
 
   const shouldShowTasksTab = Boolean(tasksEnabled && isTaskMasterInstalled);
   const shouldShowBrowserTab = browserUseEnabled;
+
+  // 헤더는 프로젝트를 모르는 채로 버튼만 그린다. 여기서 현재 프로젝트를 묶어 준다.
+  const handleNewSessionInProject = useCallback(() => {
+    if (selectedProject) {
+      onNewSession(selectedProject);
+    }
+  }, [onNewSession, selectedProject]);
 
   const {
     editingFile,
@@ -138,6 +148,7 @@ function WorkspaceMain({
         shouldShowBrowserTab={shouldShowBrowserTab}
         isMobile={isMobile}
         onMenuClick={onMenuClick}
+        onNewSession={handleNewSessionInProject}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

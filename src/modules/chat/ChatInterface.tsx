@@ -8,6 +8,7 @@ import PermissionContext from '@/modules/chat/context/PermissionContext';
 import { api } from '@/shared/api';
 import type {
   ChatMessage,
+  LLMProvider,
   Project,
   ProjectSession,
   SessionEstablishedContext,
@@ -79,7 +80,14 @@ function ChatInterface({
 
   const sessionStore = useSessionStore();
   const streamTimerRef = useRef<number | null>(null);
-  const accumulatedStreamRef = useRef('');
+  /**
+   * 세션별 스트리밍 버퍼.
+   *
+   * 예전에는 문자열 하나였다. 그래서 보고 있지 않은 세션의 토큰 조각은 이
+   * 버퍼를 타지 못하고 조각 그대로 하나씩 대화에 쌓였고, 그 세션으로 돌아오면
+   * 한 문장이 여러 블록으로 토막 나 보였다. 세션마다 따로 모아야 한다.
+   */
+  const accumulatedStreamRef = useRef(new Map<string, { text: string; provider: LLMProvider }>());
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
@@ -93,7 +101,8 @@ function ChatInterface({
       clearTimeout(streamTimerRef.current);
       streamTimerRef.current = null;
     }
-    accumulatedStreamRef.current = '';
+    // 버퍼는 비우지 않는다. 새 세션을 열었다고 다른 세션이 받고 있던 답을
+    // 중간부터 잘라버릴 이유가 없고, 각 버퍼는 그 세션이 끝날 때 정리된다.
   }, []);
 
   const {
@@ -208,7 +217,7 @@ function ChatInterface({
     isDragActive,
     openAttachmentPicker,
     handleSubmit,
-    queuedDraft,
+    queuedDrafts,
     editQueuedDraft,
     deleteQueuedDraft,
     handleVoiceTranscript,
@@ -518,7 +527,7 @@ function ChatInterface({
           onClearInput={handleClearInput}
           onSubmit={handleSubmit}
           isDragActive={isDragActive}
-          queuedDraft={queuedDraft}
+          queuedDrafts={queuedDrafts}
           onEditQueuedDraft={editQueuedDraft}
           onDeleteQueuedDraft={deleteQueuedDraft}
           attachedFiles={attachedFiles}

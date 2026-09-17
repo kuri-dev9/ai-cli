@@ -51,7 +51,12 @@
     "clearSearch": "검색 지우기",
     "openCommandPalette": "명령 팔레트 열기",
     "attentionRequiredIndicator": "세션에 주의가 필요합니다",
-    "lastActivity": "마지막 대화"
+    "lastActivity": "마지막 대화",
+    "createNew": "새 채팅 또는 프로젝트",
+    "newChatInProject": "{{projectName}} 에서 새 채팅 시작",
+    "newChatNeedsProject": "채팅을 시작하려면 먼저 프로젝트를 여세요",
+    "projectNeedsAttention": "이 프로젝트에 확인할 대화가 있습니다",
+    "projectProcessing": "이 프로젝트에서 작업이 돌고 있습니다"
   },
   "navigation": {
     "chat": "채팅",
@@ -161,5 +166,16 @@
   },
   "identity": {
     "openProfile": "{{name}} 프로필 열기"
+  },
+  "groups": {
+    "create": "새 그룹",
+    "namePlaceholder": "그룹 이름",
+    "ungrouped": "그룹 없음",
+    "rename": "그룹 이름 변경",
+    "delete": "그룹 삭제 (프로젝트는 그대로 남습니다)",
+    "moveUp": "그룹 위로",
+    "moveDown": "그룹 아래로",
+    "field": "그룹",
+    "fieldHelp": "그룹은 사이드바 정리 방식만 바꿉니다 — 실제 폴더는 옮기지 않습니다."
   }
 }

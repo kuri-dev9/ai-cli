@@ -51,9 +51,9 @@ const renderRow = (lastActivity: string) => render(
     onToggleProject: noop,
     onProjectSelect: noop,
     onToggleStarProject: noop,
-    onStartEditingProject: noop,
     onCancelEditingProject: noop,
     onSaveProjectName: noop,
+    onOpenProjectSettings: noop,
     onDeleteProject: noop,
     onSessionSelect: noop,
     onDeleteSession: noop,
@@ -82,10 +82,20 @@ test('전체 경로는 행 툴팁으로 남는다', () => {
   assert.equal(row?.getAttribute('title'), PROJECT.fullPath);
 });
 
-test('세션 개수 옆에 마지막 대화 시각이 온다', () => {
+test('대화 개수는 프로젝트 이름과 같은 줄에 온다', () => {
+  const { container } = renderRow('2026-09-05T10:00:00.000Z');
+  const nameRow = container.querySelector('[title="4 sessions"]')?.parentElement;
+
+  assert.equal(nameRow?.textContent?.includes(PROJECT.displayName), true);
+  assert.equal(nameRow?.textContent?.includes('4'), true);
+});
+
+test('둘째 줄에는 개수 없이 마지막 대화 시각만 남는다', () => {
   const { container } = renderRow('2026-09-05T10:00:00.000Z');
 
-  assert.match(container.textContent ?? '', /4\s*·\s*2hr/);
+  // 경과 시간 · 절대 시각. 그 앞에 개수가 붙던 `4 · 2hr` 형태는 사라졌다.
+  assert.doesNotMatch(container.textContent ?? '', /4\s*·\s*2hr/);
+  assert.match(container.textContent ?? '', /2hr\s*·\s*2026-09-05/);
 });
 
 test('시각을 모르면 개수만 남는다', () => {

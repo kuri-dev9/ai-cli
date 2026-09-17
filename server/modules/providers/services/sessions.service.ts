@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { messageSourcesDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
@@ -482,10 +482,15 @@ export const sessionsService = {
 
     return {
       ...result,
-      messages: result.messages.map((message) => ({
-        ...message,
+      // 앱 바깥(텔레그램)에서 들어온 메시지에 출처를 붙인다. 표시가 없는
+      // 메시지는 그대로 둔다 — 대부분은 브라우저에서 친 것이다.
+      messages: messageSourcesDb.annotateMessageSources(
         sessionId,
-      })),
+        result.messages.map((message) => ({
+          ...message,
+          sessionId,
+        })),
+      ),
     };
   },
 

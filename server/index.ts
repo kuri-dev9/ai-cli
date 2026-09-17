@@ -16,7 +16,7 @@ import {
     initializeSessionsWatcher,
     providerRuntimeService,
 } from '@/modules/providers/index.js';
-import { createWebSocketServer } from '@/modules/websocket/index.js';
+import { createWebSocketServer, initializeRunStateBroadcast } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -49,6 +49,7 @@ import {
     initializeScheduledMessageDispatcher,
     scheduledMessagesRoutes,
 } from './modules/scheduled-messages/index.js';
+import { closeTelegramBridge, initializeTelegramBridge, telegramRoutes } from './modules/telegram-bridge/index.js';
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
@@ -233,6 +234,9 @@ app.use('/api/agent', agentRoutes);
 
 app.use('/api/voice', authenticateToken, voiceRoutes);
 
+// Telegram Bridge API Routes (protected)
+app.use('/api/telegram', authenticateToken, telegramRoutes);
+
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(APP_ROOT, 'public')));
 
@@ -402,6 +406,12 @@ async function startServer() {
             // Sends anything that came due while the server was not running,
             // then keeps polling.
             initializeScheduledMessageDispatcher(providerRuntimeService);
+            // 설정이 있을 때만 켜진다. 텔레그램 쪽으로 나가는 연결만 쓰므로
+            // 인바운드 포트는 열지 않는다.
+            initializeTelegramBridge(providerRuntimeService);
+            // 브라우저 밖에서 시작된 턴(텔레그램·예약 메시지)도 열려 있는
+            // 화면에 "돌고 있음"이 보이게 한다.
+            initializeRunStateBroadcast();
 
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {
@@ -409,10 +419,14 @@ async function startServer() {
             });
         });
 
-        await closeSessionsWatcher();
-        closeScheduledMessageDispatcher();
         // Clean up plugin processes on shutdown
         const shutdownRuntimeServices = async () => {
+            // 이 두 줄은 종료 핸들러 바깥에 있어서 서버가 뜨자마자 실행됐다.
+            // 그 시점에는 감시자도 디스패처도 아직 시작 전이라 아무 일도 하지
+            // 않았고, 정작 종료할 때는 둘 다 정리되지 않은 채로 남았다.
+            await closeSessionsWatcher();
+            closeScheduledMessageDispatcher();
+            closeTelegramBridge();
             try {
                 await browserUseService.stopAllSessions();
             } catch (err) {

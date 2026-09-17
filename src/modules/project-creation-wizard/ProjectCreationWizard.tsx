@@ -8,9 +8,19 @@ import StepReview from '@/modules/project-creation-wizard/StepReview';
 import WizardFooter from '@/modules/project-creation-wizard/WizardFooter';
 import WizardProgress from '@/modules/project-creation-wizard/WizardProgress';
 import { useGithubTokens } from '@/modules/project-creation-wizard/hooks/useGithubTokens';
-import { cloneWorkspaceWithProgress, createProjectRequest } from '@/modules/project-creation-wizard/utils/workspaceApi';
+import {
+  cloneWorkspaceWithProgress,
+  createProjectRequest,
+  fetchClonePreflight,
+} from '@/modules/project-creation-wizard/utils/workspaceApi';
 import { isCloneWorkflow, shouldShowGithubAuthentication } from '@/modules/project-creation-wizard/utils/pathUtils';
-import type { TokenMode, WizardFormState, WizardStep } from '@/shared/types';
+import type {
+  CloneTargetMode,
+  CloneTargetPreflightResult,
+  TokenMode,
+  WizardFormState,
+  WizardStep,
+} from '@/shared/types';
 
 type ProjectCreationWizardProps = {
   onClose: () => void;
@@ -23,6 +33,8 @@ const initialFormState: WizardFormState = {
   tokenMode: 'stored',
   selectedGithubToken: '',
   newGithubToken: '',
+  cloneTarget: 'direct',
+  skipClone: false,
 };
 
 /** Rendered by the sidebar module's modal layer to create a new project or clone one from GitHub. */
@@ -36,6 +48,8 @@ export default function ProjectCreationWizard({
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cloneProgress, setCloneProgress] = useState('');
+  const [preflight, setPreflight] = useState<CloneTargetPreflightResult | null>(null);
+  const [isInspectingTarget, setIsInspectingTarget] = useState(false);
 
   const shouldLoadTokens =
     step === 1 && shouldShowGithubAuthentication(formState.githubUrl);
@@ -65,22 +79,59 @@ export default function ProjectCreationWizard({
     [updateField],
   );
 
-  const handleNext = useCallback(() => {
+  const handleNext = useCallback(async () => {
     setError(null);
 
-    if (step === 1) {
-      if (!formState.workspacePath.trim()) {
-        setError(t('projectWizard.errors.providePath'));
-        return;
-      }
-      setStep(2);
+    if (step !== 1) {
+      return;
     }
-  }, [formState.workspacePath, step, t]);
+
+    if (!formState.workspacePath.trim()) {
+      setError(t('projectWizard.errors.providePath'));
+      return;
+    }
+
+    if (!isCloneWorkflow(formState.githubUrl)) {
+      setPreflight(null);
+      setStep(2);
+      return;
+    }
+
+    // clone 은 대상 폴더를 건드리기 전에 그 안에 무엇이 있는지 먼저 확인한다.
+    setIsInspectingTarget(true);
+    try {
+      const inspection = await fetchClonePreflight(formState.workspacePath, formState.githubUrl);
+      setPreflight(inspection);
+      // 지정한 폴더 자체가 저장소 루트다. 폴더가 비어 있지 않으면 확인 화면이
+      // 선택지를 띄우고, 사용자가 고를 때까지 'direct' 인 채로 진행이 막힌다.
+      setFormState((previous) => ({ ...previous, cloneTarget: 'direct', skipClone: false }));
+      setStep(2);
+    } catch (inspectionError) {
+      setError(
+        inspectionError instanceof Error
+          ? inspectionError.message
+          : t('projectWizard.errors.failedToInspect'),
+      );
+    } finally {
+      setIsInspectingTarget(false);
+    }
+  }, [formState.githubUrl, formState.workspacePath, step, t]);
 
   const handleBack = useCallback(() => {
     setError(null);
+    // 경로나 URL 이 바뀌면 조사 결과가 더 이상 맞지 않는다.
+    setPreflight(null);
+    setFormState((previous) => ({ ...previous, cloneTarget: 'direct', skipClone: false }));
     setStep((previousStep) => (previousStep > 1 ? ((previousStep - 1) as WizardStep) : previousStep));
   }, []);
+
+  const handleCloneTargetChange = useCallback(
+    (choice: { cloneTarget: CloneTargetMode; skipClone: boolean }) => {
+      setError(null);
+      setFormState((previous) => ({ ...previous, ...choice }));
+    },
+    [],
+  );
 
   const handleCreate = useCallback(async () => {
     setIsCreating(true);
@@ -88,7 +139,7 @@ export default function ProjectCreationWizard({
     setCloneProgress('');
 
     try {
-      const shouldCloneRepository = isCloneWorkflow(formState.githubUrl);
+      const shouldCloneRepository = isCloneWorkflow(formState.githubUrl) && !formState.skipClone;
 
       if (shouldCloneRepository) {
         const project = await cloneWorkspaceWithProgress(
@@ -98,6 +149,7 @@ export default function ProjectCreationWizard({
             tokenMode: formState.tokenMode,
             selectedGithubToken: formState.selectedGithubToken,
             newGithubToken: formState.newGithubToken,
+            cloneTarget: formState.cloneTarget,
           },
           {
             onProgress: setCloneProgress,
@@ -127,9 +179,15 @@ export default function ProjectCreationWizard({
   }, [formState, onClose, onProjectCreated, t]);
 
   const shouldCloneRepository = useMemo(
-    () => isCloneWorkflow(formState.githubUrl),
-    [formState.githubUrl],
+    () => isCloneWorkflow(formState.githubUrl) && !formState.skipClone,
+    [formState.githubUrl, formState.skipClone],
   );
+
+  // 폴더가 비어 있지 않으면 사용자가 어떻게 할지 고르기 전에는 진행할 수 없다.
+  const isBlockedOnCloneTargetChoice =
+    Boolean(preflight?.requiresConfirmation)
+    && !formState.skipClone
+    && formState.cloneTarget !== 'subdirectory';
 
   return (
     <div className="fixed bottom-0 left-0 right-0 top-0 z-[60] flex items-center justify-center bg-black/50 p-0 backdrop-blur-sm sm:p-4">
@@ -177,7 +235,7 @@ export default function ProjectCreationWizard({
               onNewGithubTokenChange={(newGithubToken) =>
                 updateField('newGithubToken', newGithubToken)
               }
-              onAdvanceToConfirm={() => setStep(2)}
+              onAdvanceToConfirm={handleNext}
             />
           )}
 
@@ -187,6 +245,9 @@ export default function ProjectCreationWizard({
               selectedTokenName={selectedTokenName}
               isCreating={isCreating}
               cloneProgress={cloneProgress}
+              preflight={preflight}
+              isInspectingTarget={isInspectingTarget}
+              onCloneTargetChange={handleCloneTargetChange}
             />
           )}
         </div>
@@ -194,6 +255,8 @@ export default function ProjectCreationWizard({
         <WizardFooter
           step={step}
           isCreating={isCreating}
+          isBusy={isCreating || isInspectingTarget}
+          isNextDisabled={isBlockedOnCloneTargetChoice}
           isCloneWorkflow={shouldCloneRepository}
           onClose={onClose}
           onBack={handleBack}

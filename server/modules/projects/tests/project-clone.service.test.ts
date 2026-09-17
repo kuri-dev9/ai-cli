@@ -14,7 +14,9 @@ function buildDependencies(overrides: Partial<NonNullable<TestDependencies>> = {
     validatePath: async () => ({ valid: true, resolvedPath: '/workspace/root' }),
     ensureDirectory: async () => undefined,
     pathExists: async () => false,
+    readDirectory: async () => [],
     removePath: async () => undefined,
+    clearDirectory: async () => undefined,
     getGithubTokenById: async () => ({ github_token: 'token-value' }),
     spawnGitClone: () => {
       throw new Error('spawnGitClone should be overridden in this test');
@@ -136,7 +138,7 @@ test('startCloneProject rejects when selected github token does not exist', asyn
   );
 });
 
-test('startCloneProject completes and emits complete payload when git exits successfully', async () => {
+test('startCloneProject clones into the chosen folder itself by default', async () => {
   const gitProcess = createMockGitProcess();
   const progressMessages: string[] = [];
   let completePayload: { project: Record<string, unknown>; message: string } | null = null;
@@ -170,9 +172,9 @@ test('startCloneProject completes and emits complete payload when git exits succ
   gitProcess.emit('close', 0);
   await operation.waitForCompletion;
 
-  assert.ok(progressMessages.some((message) => message.includes("Cloning into 'repo'")));
-  assert.equal(capturedCustomName, 'repo');
-  assert.equal(path.basename(capturedProjectPath), 'repo');
+  assert.ok(progressMessages.some((message) => message.includes("Cloning into 'root'")));
+  assert.equal(capturedCustomName, 'root');
+  assert.equal(capturedProjectPath, '/workspace/root');
   assert.notEqual(completePayload, null);
   const resolvedCompletePayload = completePayload as unknown as {
     project: Record<string, unknown>;
@@ -180,4 +182,155 @@ test('startCloneProject completes and emits complete payload when git exits succ
   };
   assert.equal(resolvedCompletePayload.message, 'Repository cloned successfully');
   assert.equal((resolvedCompletePayload.project.projectId as string) || '', 'project-1');
+});
+
+test('startCloneProject clones into a repo-named subdirectory when asked to', async () => {
+  const gitProcess = createMockGitProcess();
+  let capturedProjectPath = '';
+  let capturedCustomName = '';
+
+  const operation = await startCloneProject(
+    {
+      workspacePath: '/workspace/root',
+      githubUrl: 'https://github.com/example/repo.git',
+      userId: 1,
+      cloneTarget: 'subdirectory',
+    },
+    {
+      onProgress: () => undefined,
+      onComplete: () => undefined,
+    },
+    buildDependencies({
+      spawnGitClone: () => gitProcess as any,
+      registerProject: async (projectPath, customName) => {
+        capturedProjectPath = projectPath;
+        capturedCustomName = customName;
+        return { project: { projectId: 'project-1', path: projectPath } };
+      },
+    }),
+  );
+
+  gitProcess.emit('close', 0);
+  await operation.waitForCompletion;
+
+  assert.equal(capturedProjectPath, path.join('/workspace/root', 'repo'));
+  assert.equal(capturedCustomName, 'repo');
+});
+
+test('startCloneProject refuses to clone directly into a folder that already has files', async () => {
+  await assert.rejects(
+    async () =>
+      startCloneProject(
+        {
+          workspacePath: '/workspace/root',
+          githubUrl: 'https://github.com/example/repo.git',
+          userId: 1,
+        },
+        {
+          onProgress: () => undefined,
+          onComplete: () => undefined,
+        },
+        buildDependencies({
+          readDirectory: async () => ['main.py', 'README.md'],
+        }),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, 'CLONE_TARGET_NOT_EMPTY');
+      return true;
+    },
+  );
+});
+
+test('startCloneProject still rejects a subdirectory clone when that subdirectory exists', async () => {
+  await assert.rejects(
+    async () =>
+      startCloneProject(
+        {
+          workspacePath: '/workspace/root',
+          githubUrl: 'https://github.com/example/repo.git',
+          userId: 1,
+          cloneTarget: 'subdirectory',
+        },
+        {
+          onProgress: () => undefined,
+          onComplete: () => undefined,
+        },
+        buildDependencies({
+          pathExists: async () => true,
+        }),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, 'CLONE_TARGET_ALREADY_EXISTS');
+      return true;
+    },
+  );
+});
+
+test('a failed direct clone empties the folder but never deletes the folder the user chose', async () => {
+  const gitProcess = createMockGitProcess();
+  const removedPaths: string[] = [];
+  const clearedPaths: string[] = [];
+
+  const operation = await startCloneProject(
+    {
+      workspacePath: '/workspace/root',
+      githubUrl: 'https://github.com/example/repo.git',
+      userId: 1,
+    },
+    {
+      onProgress: () => undefined,
+      onComplete: () => undefined,
+    },
+    buildDependencies({
+      spawnGitClone: () => gitProcess as any,
+      removePath: async (targetPath) => {
+        removedPaths.push(targetPath);
+      },
+      clearDirectory: async (targetPath) => {
+        clearedPaths.push(targetPath);
+      },
+    }),
+  );
+
+  gitProcess.emit('close', 128);
+  await assert.rejects(async () => operation.waitForCompletion);
+
+  assert.deepEqual(removedPaths, []);
+  assert.deepEqual(clearedPaths, ['/workspace/root']);
+});
+
+test('a failed subdirectory clone removes the subdirectory it created', async () => {
+  const gitProcess = createMockGitProcess();
+  const removedPaths: string[] = [];
+  const clearedPaths: string[] = [];
+
+  const operation = await startCloneProject(
+    {
+      workspacePath: '/workspace/root',
+      githubUrl: 'https://github.com/example/repo.git',
+      userId: 1,
+      cloneTarget: 'subdirectory',
+    },
+    {
+      onProgress: () => undefined,
+      onComplete: () => undefined,
+    },
+    buildDependencies({
+      spawnGitClone: () => gitProcess as any,
+      removePath: async (targetPath) => {
+        removedPaths.push(targetPath);
+      },
+      clearDirectory: async (targetPath) => {
+        clearedPaths.push(targetPath);
+      },
+    }),
+  );
+
+  gitProcess.emit('close', 128);
+  await assert.rejects(async () => operation.waitForCompletion);
+
+  assert.deepEqual(removedPaths, [path.join('/workspace/root', 'repo')]);
+  assert.deepEqual(clearedPaths, []);
 });

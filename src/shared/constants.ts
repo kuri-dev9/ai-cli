@@ -8,6 +8,7 @@ import {
   MonitorPlay,
   Palette,
   Plug,
+  Send,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -62,6 +63,7 @@ export const SETTINGS_MAIN_TABS: SettingsMainTabMeta[] = [
   { id: 'tasks', label: 'Tasks', keywords: 'tasks taskmaster', icon: ListChecks },
   { id: 'browser', label: 'Browser', keywords: 'browser playwright chromium automation', icon: MonitorPlay },
   { id: 'notifications', label: 'Notifications', keywords: 'notifications alerts push', icon: Bell },
+  { id: 'telegram', label: 'Telegram', keywords: 'telegram bot bridge chat', icon: Send },
   { id: 'plugins', label: 'Plugins', keywords: 'plugins extensions integrations', icon: Plug },
   { id: 'about', label: 'About', keywords: 'about version info', icon: Info },
 ];

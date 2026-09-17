@@ -4,7 +4,9 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useDeviceSettings } from '@/shared/hooks/useDeviceSettings';
 import { useUiPreferences, useSetUiPreference } from '@/shared/context/UiPreferencesContext';
 import { useTheme } from '@/shared/context/ThemeContext';
+import { useProjectActiveSessionState } from '@/modules/project-workspace';
 import { useQuickSettingsDrag } from '@/modules/quick-settings-panel/hooks/useQuickSettingsDrag';
+import { useTelegramSessionNotifications } from '@/modules/quick-settings-panel/hooks/useTelegramSessionNotifications';
 import type { PreferenceToggleKey, QuickSettingsPreferences } from '@/shared/types';
 import QuickSettingsContent from '@/modules/quick-settings-panel/QuickSettingsContent';
 import QuickSettingsHandle from '@/modules/quick-settings-panel/QuickSettingsHandle';
@@ -17,6 +19,10 @@ function QuickSettingsPanelView() {
   const { isDarkMode } = useTheme();
   const preferences = useUiPreferences();
   const setPreference = useSetUiPreference();
+  // 텔레그램 알림은 세션 단위로 켠다 — "지금 돌리는 이 작업만 알려 달라"가
+  // 실제로 원하는 것이고, 전역 스위치는 다시 모든 세션을 울리게 만든다.
+  const { activeSessionId } = useProjectActiveSessionState();
+  const telegramNotifications = useTelegramSessionNotifications(activeSessionId);
   const {
     isDragging,
     handleStyle,
@@ -76,6 +82,8 @@ function QuickSettingsPanelView() {
             isDarkMode={isDarkMode}
             preferences={quickSettingsPreferences}
             onPreferenceChange={handlePreferenceChange}
+            activeSessionId={activeSessionId}
+            telegramNotifications={telegramNotifications}
           />
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { access, mkdir, rm } from 'node:fs/promises';
+import { access, mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 // cross-spawn: drop-in spawn with Windows .cmd/PATHEXT resolution.
@@ -9,12 +9,22 @@ import { createProject } from '@/modules/projects/services/project-management.se
 import type { WorkspacePathValidationResult } from '@/shared/types.js';
 import { AppError, validateWorkspacePath } from '@/shared/utils.js';
 
+export type CloneTargetMode = 'direct' | 'subdirectory';
+
 type CloneProjectInput = {
   workspacePath: string;
   githubUrl: string;
   githubTokenId?: number | null;
   newGithubToken?: string | null;
   userId: number | string;
+  /**
+   * 'direct' 는 사용자가 지정한 폴더 자체를 저장소 루트로 쓴다(기본값).
+   * 'subdirectory' 는 지정 폴더 아래에 저장소 이름으로 하위 폴더를 만든다.
+   *
+   * 예전 동작은 'subdirectory' 뿐이어서 `/work/Liberty-Life` 를 고르면
+   * `/work/Liberty-Life/Liberty-Life` 가 생겼다. 이제 기본값이 'direct' 다.
+   */
+  cloneTarget?: CloneTargetMode;
 };
 
 type CloneCompletePayload = {
@@ -39,7 +49,11 @@ type CloneProjectDependencies = {
   validatePath: (requestedPath: string) => Promise<WorkspacePathValidationResult>;
   ensureDirectory: (directoryPath: string) => Promise<void>;
   pathExists: (targetPath: string) => Promise<boolean>;
+  /** 대상 폴더의 항목 이름 목록. 폴더가 없으면 빈 배열. */
+  readDirectory: (targetPath: string) => Promise<string[]>;
   removePath: (targetPath: string) => Promise<void>;
+  /** 폴더 자체는 남기고 안의 항목만 지운다. 'direct' clone 실패 정리에 쓴다. */
+  clearDirectory: (targetPath: string) => Promise<void>;
   getGithubTokenById: (
     tokenId: number,
     userId: number,
@@ -61,6 +75,18 @@ async function defaultPathExists(targetPath: string): Promise<boolean> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return false;
+    }
+
+    throw error;
+  }
+}
+
+async function defaultReadDirectory(targetPath: string): Promise<string[]> {
+  try {
+    return await readdir(targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
     }
 
     throw error;
@@ -96,6 +122,17 @@ function resolveCloneFailureMessage(lastError: string, sanitizedError: string): 
   return 'Git clone failed';
 }
 
+/**
+ * `https://github.com/owner/repo.git` → `repo`.
+ *
+ * 저장소 이름은 폴더 이름과 진행 메시지 양쪽에 쓰이므로 preflight 검사와
+ * 동일한 규칙을 써야 한다.
+ */
+export function resolveRepositoryName(githubUrl: string): string {
+  const sanitizedGithubUrl = githubUrl.trim().replace(/\/+$/, '').replace(/\.git$/, '');
+  return sanitizedGithubUrl.split('/').pop() || 'repository';
+}
+
 function resolveErrorMessage(error: unknown): string {
   if (error instanceof AppError) {
     return error.message;
@@ -114,8 +151,15 @@ const defaultDependencies: CloneProjectDependencies = {
     await mkdir(directoryPath, { recursive: true });
   },
   pathExists: defaultPathExists,
+  readDirectory: defaultReadDirectory,
   removePath: async (targetPath: string): Promise<void> => {
     await rm(targetPath, { recursive: true, force: true });
+  },
+  clearDirectory: async (targetPath: string): Promise<void> => {
+    const entries = await defaultReadDirectory(targetPath);
+    await Promise.all(
+      entries.map((entry) => rm(path.join(targetPath, entry), { recursive: true, force: true })),
+    );
   },
   getGithubTokenById: async (
     tokenId: number,
@@ -211,18 +255,35 @@ export async function startCloneProject(
     githubToken = input.newGithubToken.trim();
   }
 
-  const sanitizedGithubUrl = normalizedGithubUrl.replace(/\/+$/, '').replace(/\.git$/, '');
-  const repoName = sanitizedGithubUrl.split('/').pop() || 'repository';
-  const clonePath = path.join(absolutePath, repoName);
+  const repoName = resolveRepositoryName(normalizedGithubUrl);
+  const cloneTarget: CloneTargetMode = input.cloneTarget === 'subdirectory' ? 'subdirectory' : 'direct';
+  const clonePath = cloneTarget === 'subdirectory' ? path.join(absolutePath, repoName) : absolutePath;
+  const projectName = path.basename(clonePath) || repoName;
 
-  if (await dependencies.pathExists(clonePath)) {
-    throw new AppError(
-      `Directory "${repoName}" already exists. Please choose a different location or remove the existing directory.`,
-      {
-        code: 'CLONE_TARGET_ALREADY_EXISTS',
-        statusCode: 409,
-      },
-    );
+  if (cloneTarget === 'subdirectory') {
+    if (await dependencies.pathExists(clonePath)) {
+      throw new AppError(
+        `Directory "${repoName}" already exists. Please choose a different location or remove the existing directory.`,
+        {
+          code: 'CLONE_TARGET_ALREADY_EXISTS',
+          statusCode: 409,
+        },
+      );
+    }
+  } else {
+    // git clone 은 비어 있지 않은 폴더에는 실패한다. 실패한 git 메시지를 그대로
+    // 흘리는 대신 여기서 막아, 클라이언트가 선택지를 제시할 수 있게 한다.
+    const existingEntries = await dependencies.readDirectory(clonePath);
+    if (existingEntries.length > 0) {
+      throw new AppError(
+        `Directory "${projectName}" is not empty. Clone into an empty folder, clone into a subdirectory, or register this folder as a project without cloning.`,
+        {
+          code: 'CLONE_TARGET_NOT_EMPTY',
+          statusCode: 409,
+          details: `${existingEntries.length} existing entries in ${clonePath}`,
+        },
+      );
+    }
   }
 
   let cloneUrl = normalizedGithubUrl;
@@ -237,7 +298,7 @@ export async function startCloneProject(
     }
   }
 
-  handlers.onProgress(`Cloning into '${repoName}'...`);
+  handlers.onProgress(`Cloning into '${projectName}'...`);
   const gitProcess = dependencies.spawnGitClone(cloneUrl, clonePath);
   let lastError = '';
 
@@ -260,7 +321,7 @@ export async function startCloneProject(
     gitProcess.on('close', async (code) => {
       if (code === 0) {
         try {
-          const createdProject = await dependencies.registerProject(clonePath, repoName);
+          const createdProject = await dependencies.registerProject(clonePath, projectName);
           handlers.onComplete({
             project: createdProject.project,
             message: 'Repository cloned successfully',
@@ -281,7 +342,12 @@ export async function startCloneProject(
       const errorMessage = resolveCloneFailureMessage(lastError, sanitizedError);
 
       try {
-        await dependencies.removePath(clonePath);
+        if (cloneTarget === 'subdirectory') {
+          await dependencies.removePath(clonePath);
+        } else {
+          // 'direct' 는 사용자가 직접 고른 폴더다. 폴더는 남기고 git 이 남긴 내용만 지운다.
+          await dependencies.clearDirectory(clonePath);
+        }
       } catch (cleanupError) {
         dependencies.logError('Failed to clean up after clone failure:', cleanupError);
       }

@@ -4,7 +4,7 @@ import { renderHook } from '@testing-library/react';
 import { test } from 'vitest';
 
 import { useChatRealtimeHandlers } from '@/modules/chat/hooks/useChatRealtimeHandlers';
-import type { ServerEvent, ProjectSession } from '@/shared/types';
+import type { ServerEvent, ProjectSession, LLMProvider } from '@/shared/types';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
 
 /**
@@ -32,7 +32,7 @@ const renderHandlers = () => {
     pendingPermissionRequests: [],
     setPendingPermissionRequests: () => {},
     streamTimerRef: { current: null },
-    accumulatedStreamRef: { current: '' },
+    accumulatedStreamRef: { current: new Map<string, { text: string; provider: LLMProvider }>() },
     lastSeqRef: { current: new Map() },
     statusCheckSentAtRef: { current: new Map() },
     requestLatestMessages: async () => {},

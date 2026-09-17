@@ -6,6 +6,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { resolveContextWindow } from '@/modules/providers/services/context-window.service.js';
 import type { AnyRecord } from '@/shared/types.js';
 import { AppError, getOpenCodeDatabasePath } from '@/shared/utils.js';
 
@@ -41,6 +42,8 @@ type TokenUsageResult = {
     input: number;
     output: number;
   };
+  /** 사용량을 보고한 턴이 실제로 돌린 모델. 컨텍스트 윈도우 판별에 쓴다. */
+  model?: string;
   unsupported?: boolean;
   message?: string;
 };
@@ -202,6 +205,7 @@ export function summarizeClaudeTokenUsage(
   let outputTokens = 0;
   let cacheReadTokens = 0;
   let cacheCreationTokens = 0;
+  let model = '';
 
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
@@ -241,22 +245,25 @@ export function summarizeClaudeTokenUsage(
     cacheCreationTokens = rowCacheCreationTokens;
     inputTokens = rowInputTokens;
     outputTokens = rowOutputTokens;
+    // 이 턴을 실제로 돌린 모델. `CONTEXT_WINDOW` 설정 하나로는 200K짜리와
+    // 1M짜리를 구분할 수 없어서, 트랜스크립트가 적어둔 이름을 우선으로 쓴다.
+    model = typeof entry.message?.model === 'string' ? entry.message.model : '';
     break;
   }
 
-  const parsedContextWindow = Number.parseInt(configuredContextWindow ?? '', 10);
-  const contextWindow = Number.isFinite(parsedContextWindow) ? parsedContextWindow : 160_000;
   const cacheTokens = cacheReadTokens + cacheCreationTokens;
+  const used = inputTokens + outputTokens;
 
   return {
-    used: inputTokens + outputTokens,
-    total: contextWindow,
+    used,
+    total: resolveContextWindow({ model, configured: configuredContextWindow, used }),
     inputTokens,
     outputTokens,
     cacheReadTokens,
     cacheCreationTokens,
     cacheTokens,
     breakdown: { input: inputTokens, output: outputTokens },
+    ...(model ? { model } : {}),
   };
 }
 

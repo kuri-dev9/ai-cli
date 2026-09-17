@@ -60,6 +60,41 @@ const isPromiseLike = (value: unknown): value is Promise<unknown> =>
 const isSkillCommand = (command: SlashCommand) =>
   command.type === 'skill' || command.metadata?.type === 'skill';
 
+/**
+ * 결과를 텔레그램으로도 받고 싶은 한 번의 실행에 붙이는 접두어.
+ *
+ * 목록에 넣어 두는 이유는 단순하다 — 이 입력창은 `/` 를 치면 명령 목록을
+ * 띄우는데, 거기 없는 `/bot` 만 동작하면 "되는지 안 되는지 알 수 없는 숨은
+ * 기능"이 된다.
+ *
+ * 고르면 실행하지 않고 입력창에 남는다(스킬과 같은 동작). 접두어 뒤에 할 말을
+ * 이어서 써야 하기 때문이다. 접두어를 실제로 떼는 것은 서버다 — 화면에서만
+ * 떼면 다른 경로로 들어온 `/bot` 이 모델에게 그대로 흘러간다.
+ */
+export const BOT_RELAY_COMMAND: SlashCommand = {
+  name: '/bot',
+  description: '이 대화를 텔레그램으로 넘깁니다 — 결과가 오고, 답장하면 이어집니다',
+  namespace: 'builtin',
+  type: 'prefix',
+  metadata: { type: 'builtin' },
+};
+
+/**
+ * 이 명령이 "실행"되는 것인지, 입력창에 남아 프롬프트의 일부가 되는 것인지.
+ *
+ * 스킬과 `/bot` 은 후자다. 고르면 입력창에 꽂히고, 뒤에 할 말을 이어 쓴 다음
+ * 보통 메시지처럼 전송된다.
+ *
+ * 메뉴에서 고르는 경로와 전송하는 경로가 이 판정을 **같이** 써야 한다. 한때
+ * 전송 쪽만 `type !== 'skill'` 로 좁게 보다가, `/bot` 을 보낼 때마다 커스텀 명령
+ * 실행 API 로 넘어가 "Command path is required" 로 끝났다 — 실행할 파일이 없는
+ * 명령이니 당연한 결과였다.
+ */
+export const isPromptPrefixCommand = (command: SlashCommand) =>
+  isSkillCommand(command) || command.type === 'prefix';
+
+const insertsIntoInput = isPromptPrefixCommand;
+
 const dedupeProviderSkills = (skills: ProviderSkill[]): ProviderSkill[] => {
   const seenCommands = new Set<string>();
 
@@ -184,6 +219,7 @@ export function useSlashCommands({
         const skillCommands = dedupeProviderSkills(skillsData?.data?.skills || [])
           .map(mapSkillToSlashCommand);
         const allCommands: SlashCommand[] = [
+          BOT_RELAY_COMMAND,
           ...((data.builtIn || []) as SlashCommand[]).map((command) => ({
             ...command,
             type: 'built-in',
@@ -208,7 +244,9 @@ export function useSlashCommands({
       } catch (error) {
         console.error('Error fetching slash commands:', error);
         if (!cancelled) {
-          setSlashCommands([]);
+          // 목록을 못 읽어도 `/bot` 은 남긴다 — 서버 목록과 무관하게 동작하고,
+          // 여기서 빠지면 알림을 한 번 받는 방법이 화면에서 사라진다.
+          setSlashCommands([BOT_RELAY_COMMAND]);
         }
       }
     };
@@ -308,7 +346,7 @@ export function useSlashCommands({
 
   const selectCommandFromKeyboard = useCallback(
     (command: SlashCommand) => {
-      if (isSkillCommand(command)) {
+      if (insertsIntoInput(command)) {
         insertCommandIntoInput(command);
         return;
       }
@@ -330,7 +368,7 @@ export function useSlashCommands({
       }
 
       trackCommandUsage(command);
-      if (isSkillCommand(command)) {
+      if (insertsIntoInput(command)) {
         insertCommandIntoInput(command);
         return;
       }

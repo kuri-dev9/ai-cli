@@ -95,7 +95,8 @@
     "createProjectDesktop": "Create a new project by clicking the folder icon in the sidebar",
     "newSession": "New Session",
     "untitledSession": "Untitled Session",
-    "projectFiles": "Project Files"
+    "projectFiles": "Project Files",
+    "startNewSession": "Start a new chat"
   },
   "fileTree": {
     "loading": "Loading files...",
@@ -159,10 +160,10 @@
       "existingPlaceholder": "/path/to/existing/workspace",
       "newPlaceholder": "/path/to/new/workspace",
       "existingHelp": "Full path to your existing workspace directory",
-      "newHelp": "Full path to your workspace directory",
+      "newHelp": "Full path to your project folder. This exact folder becomes the project root — nothing extra is created inside it.",
       "githubUrl": "GitHub URL (Optional)",
       "githubPlaceholder": "https://github.com/username/repository",
-      "githubHelp": "Optional: provide a GitHub URL to clone a repository",
+      "githubHelp": "Optional: provide a GitHub URL to clone a repository into the folder above.",
       "githubAuth": "GitHub Authentication (Optional)",
       "githubAuthHelp": "Only required for private repositories. Public repos can be cloned without authentication.",
       "loadingTokens": "Loading stored tokens...",
@@ -190,9 +191,10 @@
       "noAuthentication": "No authentication",
       "sshKey": "SSH Key",
       "existingInfo": "The workspace will be added to your project list and will be available for Claude/Cursor sessions.",
-      "newWithClone": "The repository will be cloned from this folder.",
+      "newWithClone": "The repository will be cloned into this folder itself.",
       "newEmpty": "The workspace will be added to your project list and will be available for Claude/Cursor sessions.",
-      "cloningRepository": "Cloning repository..."
+      "cloningRepository": "Cloning repository...",
+      "cloneInto": "Clone Into:"
     },
     "buttons": {
       "cancel": "Cancel",
@@ -206,7 +208,33 @@
       "selectType": "Please select whether you have an existing workspace or want to create a new one",
       "providePath": "Please provide a workspace path",
       "failedToCreate": "Failed to create workspace",
-      "failedToCreateFolder": "Failed to create folder"
+      "failedToCreateFolder": "Failed to create folder",
+      "failedToInspect": "Failed to check the target folder"
+    },
+    "cloneTarget": {
+      "inspecting": "Checking the target folder...",
+      "notEmptyTitle_one": "This folder already contains {{count}} item.",
+      "notEmptyTitle_other": "This folder already contains {{count}} items.",
+      "alreadyGitRepository": "It already looks like a git working copy (.git found).",
+      "skipTitle": "Keep these files — add the folder as a project without cloning",
+      "skipDescription": "Nothing is downloaded and nothing is overwritten. The existing source stays exactly as it is.",
+      "subdirectoryTitle": "Clone into a \"{{repositoryName}}\" subfolder instead",
+      "subdirectoryDescription": "Creates {{path}} and clones there. The existing files are left untouched.",
+      "subdirectoryTaken": "{{path}} already exists, so this option is unavailable.",
+      "cancelHint": "Or go back and pick an empty folder."
+    },
+    "projectSettings": {
+      "title": "Project Settings",
+      "displayName": "Project Name",
+      "displayNameHelp": "Shown in the sidebar. It does not rename the folder on disk.",
+      "path": "Project Path",
+      "pathHelp": "The folder this project points at. Changing it repoints the project — the folder itself is not moved, so move it yourself first.",
+      "pathWarning": "Existing conversations stay attached to this project, but new sessions run in the new folder.",
+      "save": "Save",
+      "saving": "Saving...",
+      "saved": "Saved",
+      "cancel": "Cancel",
+      "failedToSave": "Failed to save the project settings"
     }
   },
   "notifications": {
@@ -349,5 +377,10 @@
     "closeLoginModal": "Close login modal",
     "pluginLoadFailed": "Plugin failed to load: {{error}}"
   },
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "connection": {
+    "offline": "Disconnected from the server",
+    "retrying": "reconnecting",
+    "restored": "Reconnected"
+  }
 }

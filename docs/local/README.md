@@ -6,7 +6,7 @@
 
 ## 이게 뭔가
 
-`/Users/kuri/proj/vscode/claude_web` 은 **AI-CLI** 다. Claude Code CLI를 브라우저
+`/Users/kuri/proj/vscode/ai-cli` 은 **AI-CLI** 다. Claude Code CLI를 브라우저
 GUI로 감싸주는 앱으로, 오픈소스 **CloudCLI UI**(구 claudecodeui)를 클론해 수정한 것이다.
 
 - upstream: https://github.com/siteboon/claudecodeui
@@ -31,7 +31,7 @@ GUI로 감싸주는 앱으로, 오픈소스 **CloudCLI UI**(구 claudecodeui)를
 ## 빠른 실행
 
 ```bash
-cd /Users/kuri/proj/vscode/claude_web
+cd /Users/kuri/proj/vscode/ai-cli
 npm run server           # http://localhost:3001
 ```
 

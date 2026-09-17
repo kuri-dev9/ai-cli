@@ -1,8 +1,10 @@
-import { memo, useEffect, useRef } from 'react';
-import { Check, ChevronDown, ChevronRight, Edit3, Star, Trash2, X } from 'lucide-react';
+import { memo, useEffect, useMemo, useRef } from 'react';
+import type { DragEvent } from 'react';
+import { Check, ChevronDown, ChevronRight, Settings2, Star, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button } from '@/shared/ui';
+import { resolveProjectActivity } from '@/modules/sidebar/utils/projectActivity';
 import { cn } from '@/shared/utils';
 import type { LLMProvider, MCPServerStatus, Project, ProjectSession, SessionWithProvider } from '@/shared/types';
 import { formatAbsoluteDateTime, formatCompactAge, getTaskIndicatorStatus } from '@/modules/sidebar/utils/sidebarProjectFormatting';
@@ -40,9 +42,11 @@ type SidebarProjectItemProps = {
   onToggleProject: (projectName: string) => void;
   onProjectSelect: (project: Project) => void;
   onToggleStarProject: (projectName: string) => void;
-  onStartEditingProject: (project: Project) => void;
   onCancelEditingProject: () => void;
   onSaveProjectName: (projectId: string, nextName: string) => void;
+  onOpenProjectSettings: (project: Project) => void;
+  /** 그룹 사이로 끌어 옮길 때 목록 쪽에서 드래그 데이터를 채운다. */
+  onDragStartProject?: (event: DragEvent<HTMLElement>, projectId: string) => void;
   onDeleteProject: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onDeleteSession: (sessionId: string, sessionTitle: string) => void;
@@ -97,9 +101,10 @@ function SidebarProjectItem({
   onToggleProject,
   onProjectSelect,
   onToggleStarProject,
-  onStartEditingProject,
   onCancelEditingProject,
   onSaveProjectName,
+  onOpenProjectSettings,
+  onDragStartProject,
   onDeleteProject,
   onSessionSelect,
   onDeleteSession,
@@ -125,6 +130,17 @@ function SidebarProjectItem({
   const lastActivityTooltip = t('tooltips.lastActivity');
   const sessionCountLabel = `${sessionCountDisplay} session${totalSessionCount === 1 ? '' : 's'}`;
   const taskStatus = getTaskIndicatorStatus(project, mcpServerStatus);
+
+  // 색은 세션 줄과 같은 약속을 쓴다 — 손이 필요한 쪽이 amber, 그냥 돌고 있는
+  // 쪽이 green 이다.
+  const projectActivity = useMemo(
+    () => resolveProjectActivity(sessions, attentionSessionIds, activeSessions),
+    [sessions, attentionSessionIds, activeSessions],
+  );
+
+  const projectActivityLabel = projectActivity === 'attention'
+    ? t('tooltips.projectNeedsAttention', { defaultValue: '이 프로젝트에 확인할 대화가 있습니다' })
+    : t('tooltips.projectProcessing', { defaultValue: '이 프로젝트에서 작업이 돌고 있습니다' });
   const mobileRenameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -167,7 +183,12 @@ function SidebarProjectItem({
   };
 
   return (
-    <div className={cn('md:space-y-1', isDeleting && 'opacity-50 pointer-events-none')}>
+    <div
+      // 행 전체가 드래그 손잡이다. 그룹 머리글 위에 놓으면 그 그룹으로 옮겨진다.
+      draggable={Boolean(onDragStartProject) && !isEditing}
+      onDragStart={(event) => onDragStartProject?.(event, project.projectId)}
+      className={cn('md:space-y-1', isDeleting && 'opacity-50 pointer-events-none')}
+    >
       <div className="md:group group">
         {isCompact && (
         <div>
@@ -237,7 +258,20 @@ function SidebarProjectItem({
                   ) : (
                     <>
                       <div className="flex min-w-0 flex-1 items-center justify-between">
-                        <h3 className="truncate text-sm font-normal text-foreground">{project.displayName}</h3>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          {projectActivity && (
+                            <span
+                              role="status"
+                              aria-label={projectActivityLabel}
+                              title={projectActivityLabel}
+                              className={cn(
+                                'h-2 w-2 shrink-0 animate-pulse rounded-full',
+                                projectActivity === 'attention' ? 'bg-amber-500' : 'bg-green-500',
+                              )}
+                            />
+                          )}
+                          <h3 className="truncate text-sm font-normal text-foreground">{project.displayName}</h3>
+                        </div>
                         {tasksEnabled && (
                           <TaskIndicator
                             status={taskStatus}
@@ -308,10 +342,10 @@ function SidebarProjectItem({
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 active:scale-90 dark:border-primary/30 dark:bg-primary/20"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onStartEditingProject(project);
+                        onOpenProjectSettings(project);
                       }}
                     >
-                      <Edit3 className="h-4 w-4 text-primary" />
+                      <Settings2 className="h-4 w-4 text-primary" />
                     </button>
 
                     <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/30">
@@ -391,15 +425,41 @@ function SidebarProjectItem({
               ) : (
                 <div>
                   {/* 이름 위에서도 경로를 볼 수 있게 두 줄로 묶는다 — 행 툴팁이 여기서는 가려진다. */}
-                  <div
-                    className="truncate text-sm font-normal text-foreground"
-                    title={
-                      project.fullPath && project.fullPath !== project.displayName
-                        ? `${project.displayName}\n${project.fullPath}`
-                        : project.displayName
-                    }
-                  >
-                    {project.displayName}
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      {projectActivity && (
+                        <span
+                          role="status"
+                          aria-label={projectActivityLabel}
+                          title={projectActivityLabel}
+                          className={cn(
+                            'h-2 w-2 shrink-0 animate-pulse rounded-full',
+                            projectActivity === 'attention' ? 'bg-amber-500' : 'bg-green-500',
+                          )}
+                        />
+                      )}
+                      <div
+                        className="truncate text-sm font-normal text-foreground"
+                        title={
+                          project.fullPath && project.fullPath !== project.displayName
+                            ? `${project.displayName}\n${project.fullPath}`
+                            : project.displayName
+                        }
+                      >
+                        {project.displayName}
+                      </div>
+                    </div>
+                    {/*
+                      대화 개수는 이름 바로 옆이 제자리다. 둘째 줄 맨 앞에 두었을
+                      때는 옆의 경과 시간과 붙어 읽혀서 무슨 숫자인지 알아보기
+                      어려웠다.
+                    */}
+                    <span
+                      className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
+                      title={sessionCountLabel}
+                    >
+                      {sessionCountDisplay}
+                    </span>
                   </div>
                   {/*
                     예전에는 여기에 `...proj/vscode/QueryForge` 처럼 중간이 잘린 경로가
@@ -408,22 +468,16 @@ function SidebarProjectItem({
                     전체 경로는 행 전체의 툴팁으로 남아 있다.
                   */}
                   <div className="text-xs text-muted-foreground">
-                    {sessionCountDisplay}
                     {lastActivityAge && (
-                      <>
-                        <span aria-hidden>{' · '}</span>
-                        <span className="tabular-nums" title={lastActivityTooltip}>
-                          {lastActivityAge}
-                        </span>
-                      </>
+                      <span className="tabular-nums" title={lastActivityTooltip}>
+                        {lastActivityAge}
+                      </span>
                     )}
+                    {lastActivityAge && lastActivityAt && <span aria-hidden>{' · '}</span>}
                     {lastActivityAt && (
-                      <>
-                        <span aria-hidden>{' · '}</span>
-                        <span className="tabular-nums" title={lastActivityTooltip}>
-                          {lastActivityAt}
-                        </span>
-                      </>
+                      <span className="tabular-nums" title={lastActivityTooltip}>
+                        {lastActivityAt}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -459,11 +513,13 @@ function SidebarProjectItem({
                   className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-accent group-hover:opacity-100"
                   onClick={(event) => {
                     event.stopPropagation();
-                    onStartEditingProject(project);
+                    onOpenProjectSettings(project);
                   }}
-                  title={t('tooltips.renameProject')}
+                  title={t('tooltips.projectSettings', {
+                    defaultValue: 'Project settings (name and path)',
+                  })}
                 >
-                  <Edit3 className="h-3 w-3" />
+                  <Settings2 className="h-3 w-3" />
                 </div>
                 <div
                   className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-red-50 group-hover:opacity-100 dark:hover:bg-red-900/20"

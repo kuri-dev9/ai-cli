@@ -12,7 +12,8 @@ type WorkspacePathFieldProps = {
   value: string;
   disabled?: boolean;
   onChange: (path: string) => void;
-  onAdvanceToConfirm: () => void;
+  /** 폴더 브라우저에서 바로 다음 단계로 넘어가는 흐름이 없으면 생략한다. */
+  onAdvanceToConfirm?: () => void;
 };
 
 /** Rendered by StepConfiguration to enter the workspace path with folder autocompletion and a browse button. */
@@ -76,7 +77,7 @@ export default function WorkspacePathField({
       onChange(selectedPath);
       setShowFolderBrowser(false);
       if (advanceToConfirm) {
-        onAdvanceToConfirm();
+        onAdvanceToConfirm?.();
       }
     },
     [onAdvanceToConfirm, onChange],

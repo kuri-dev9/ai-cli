@@ -95,7 +95,8 @@
     "createProjectDesktop": "사이드바의 폴더 아이콘을 클릭하여 새 프로젝트를 생성하세요",
     "newSession": "새 세션",
     "untitledSession": "제목 없는 세션",
-    "projectFiles": "프로젝트 파일"
+    "projectFiles": "프로젝트 파일",
+    "startNewSession": "새 채팅 시작"
   },
   "fileTree": {
     "loading": "파일 로딩 중...",
@@ -159,10 +160,10 @@
       "existingPlaceholder": "/path/to/existing/workspace",
       "newPlaceholder": "/path/to/new/workspace",
       "existingHelp": "기존 워크스페이스 디렉토리의 전체 경로",
-      "newHelp": "워크스페이스 디렉토리의 전체 경로",
+      "newHelp": "프로젝트 폴더의 전체 경로. 지정한 이 폴더가 그대로 프로젝트 루트가 되며, 안에 폴더를 더 만들지 않습니다.",
       "githubUrl": "GitHub URL (선택사항)",
       "githubPlaceholder": "https://github.com/username/repository",
-      "githubHelp": "선택사항: 저장소를 clone하려면 GitHub URL을 입력하세요",
+      "githubHelp": "선택사항: 위 폴더에 clone 할 GitHub URL 을 입력하세요.",
       "githubAuth": "GitHub 인증 (선택사항)",
       "githubAuthHelp": "비공개 저장소에만 필요합니다. 공개 저장소는 인증 없이 clone할 수 있습니다.",
       "loadingTokens": "저장된 토큰 로딩 중...",
@@ -190,9 +191,10 @@
       "noAuthentication": "인증 없음",
       "sshKey": "SSH 키",
       "existingInfo": "워크스페이스가 프로젝트 목록에 추가되며 Claude/Cursor 세션에서 사용할 수 있습니다.",
-      "newWithClone": "이 폴더에 저장소가 clone됩니다.",
+      "newWithClone": "지정한 폴더 자체에 저장소를 clone 합니다.",
       "newEmpty": "워크스페이스가 프로젝트 목록에 추가되며 Claude/Cursor 세션에서 사용할 수 있습니다.",
-      "cloningRepository": "저장소 clone 중..."
+      "cloningRepository": "저장소 clone 중...",
+      "cloneInto": "Clone 위치:"
     },
     "buttons": {
       "cancel": "취소",
@@ -206,7 +208,32 @@
       "selectType": "기존 워크스페이스를 사용할지 새로 생성할지 선택해주세요",
       "providePath": "워크스페이스 경로를 입력해주세요",
       "failedToCreate": "워크스페이스 생성 실패",
-      "failedToCreateFolder": "폴더 생성 실패"
+      "failedToCreateFolder": "폴더 생성 실패",
+      "failedToInspect": "대상 폴더 확인 실패"
+    },
+    "cloneTarget": {
+      "inspecting": "대상 폴더를 확인하는 중...",
+      "notEmptyTitle_other": "이 폴더에는 이미 {{count}}개의 항목이 있습니다.",
+      "alreadyGitRepository": "이미 git 작업 폴더로 보입니다 (.git 발견).",
+      "skipTitle": "기존 파일을 그대로 두고, clone 없이 프로젝트로만 등록",
+      "skipDescription": "아무것도 내려받지 않고 덮어쓰지도 않습니다. 기존 소스가 그대로 유지됩니다.",
+      "subdirectoryTitle": "대신 \"{{repositoryName}}\" 하위 폴더에 clone",
+      "subdirectoryDescription": "{{path}} 를 만들어 그 안에 clone 합니다. 기존 파일은 건드리지 않습니다.",
+      "subdirectoryTaken": "{{path}} 가 이미 있어 이 선택지는 쓸 수 없습니다.",
+      "cancelHint": "또는 뒤로 가서 비어 있는 폴더를 지정하세요."
+    },
+    "projectSettings": {
+      "title": "프로젝트 설정",
+      "displayName": "프로젝트 이름",
+      "displayNameHelp": "사이드바에 표시되는 이름입니다. 디스크의 폴더 이름은 바뀌지 않습니다.",
+      "path": "프로젝트 경로",
+      "pathHelp": "이 프로젝트가 가리키는 폴더입니다. 경로만 바꿀 뿐 폴더를 옮기지는 않으니, 폴더는 먼저 직접 옮겨두세요.",
+      "pathWarning": "기존 대화 기록은 이 프로젝트에 그대로 남고, 새 세션부터 새 폴더에서 실행됩니다.",
+      "save": "저장",
+      "saving": "저장 중...",
+      "saved": "저장됨",
+      "cancel": "취소",
+      "failedToSave": "프로젝트 설정 저장 실패"
     }
   },
   "notifications": {
@@ -349,5 +376,10 @@
     "closeLoginModal": "로그인 모달 닫기",
     "pluginLoadFailed": "플러그인을 불러오지 못했습니다: {{error}}"
   },
-  "cancel": "취소"
+  "cancel": "취소",
+  "connection": {
+    "offline": "서버와 연결이 끊겼습니다",
+    "retrying": "다시 연결하는 중",
+    "restored": "다시 연결되었습니다"
+  }
 }

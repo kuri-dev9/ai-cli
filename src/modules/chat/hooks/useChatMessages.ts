@@ -195,6 +195,8 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       // Carried through so a rendered user bubble can address its own
       // transcript row when the user edits or forks from it.
       transcriptAnchorId: msg.transcriptAnchorId,
+      // 앱 바깥(텔레그램)에서 들어온 메시지임을 버블에 표시하기 위해 함께 옮긴다.
+      source: msg.source,
     };
 
     switch (msg.kind) {

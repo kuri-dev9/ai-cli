@@ -3,6 +3,11 @@ export { providerSkillsService } from './services/skills.service.js';
 export { providerMcpService } from './services/mcp.service.js';
 export { providerRuntimeService } from './services/provider-runtime.service.js';
 
+// resolveContextWindow: used by Commands so /cost can report how much of the
+// context window is left, which needs the model's real window rather than the
+// one-size-fits-all CONTEXT_WINDOW setting.
+export { resolveContextWindow } from './services/context-window.service.js';
+
 // providerModelsService: used by Commands to list models and resolve the active session model.
 export { providerModelsService } from './services/provider-models.service.js';
 

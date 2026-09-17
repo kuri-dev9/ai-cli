@@ -1,7 +1,8 @@
 import express from 'express';
 
-import { createProject, updateProjectDisplayName } from '@/modules/projects/services/project-management.service.js';
+import { createProject, updateProjectDisplayName, updateProjectPath } from '@/modules/projects/services/project-management.service.js';
 import { startCloneProject } from '@/modules/projects/services/project-clone.service.js';
+import { inspectCloneTarget } from '@/modules/projects/services/project-clone-preflight.service.js';
 import { getProjectTaskMaster } from '@/modules/projects/services/projects-has-taskmaster.service.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 import { getArchivedProjectsWithSessions, getProjectSessionsPage, getProjectsWithSessions } from '@/modules/projects/services/projects-with-sessions-fetch.service.js';
@@ -153,6 +154,22 @@ router.post(
   }),
 );
 
+/**
+ * clone 을 시작하기 전에 대상 폴더 상태를 알려준다.
+ *
+ * 지정한 폴더에 이미 소스가 있으면 클라이언트가 이 결과로 사용자에게
+ * 어떻게 할지 물어본 뒤 `clone-progress` 를 호출한다.
+ */
+router.get(
+  '/clone-preflight',
+  asyncHandler(async (req, res) => {
+    const workspacePath = readQueryStringValue(req.query.path);
+    const githubUrl = readQueryStringValue(req.query.githubUrl);
+    const preflight = await inspectCloneTarget({ workspacePath, githubUrl });
+    res.json(createApiSuccessResponse(preflight));
+  }),
+);
+
 router.get('/clone-progress', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -179,6 +196,8 @@ router.get('/clone-progress', async (req, res) => {
     const githubUrl = readQueryStringValue(queryParams.githubUrl);
     const githubTokenId = readOptionalNumericQueryValue(queryParams.githubTokenId);
     const newGithubToken = readQueryStringValue(queryParams.newGithubToken) || null;
+    const requestedCloneTarget = readQueryStringValue(queryParams.cloneTarget).trim();
+    const cloneTarget = requestedCloneTarget === 'subdirectory' ? 'subdirectory' : 'direct';
 
     const authenticatedUser = (req as typeof req & { user?: AuthenticatedUser }).user;
     const userId = authenticatedUser?.id;
@@ -196,6 +215,7 @@ router.get('/clone-progress', async (req, res) => {
         githubTokenId,
         newGithubToken,
         userId,
+        cloneTarget,
       },
       {
         onProgress: (message) => {
@@ -237,6 +257,25 @@ router.put('/:projectId/rename', (req, res) => {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to rename project' });
   }
 });
+
+/**
+ * Repoints the project at another folder. DB 경로만 바꾸고 폴더는 옮기지 않는다.
+ */
+router.put(
+  '/:projectId/path',
+  asyncHandler(async (req, res) => {
+    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId : '';
+    const requestBody = req.body as { path?: unknown; syncDisplayName?: unknown };
+    const newPath = typeof requestBody.path === 'string' ? requestBody.path : '';
+    const { project } = await updateProjectPath({
+      projectId,
+      newPath,
+      syncDisplayName: requestBody.syncDisplayName !== false,
+    });
+
+    res.json(createApiSuccessResponse({ project }));
+  }),
+);
 
 router.post(
   '/:projectId/toggle-star',

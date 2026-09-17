@@ -24,7 +24,14 @@ type UseChatRealtimeHandlersArgs = {
   pendingPermissionRequests: PendingPermissionRequest[];
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   streamTimerRef: MutableRefObject<number | null>;
-  accumulatedStreamRef: MutableRefObject<string>;
+  /**
+   * 세션 id → 지금까지 모인 스트리밍 텍스트와 그 세션의 provider.
+   *
+   * provider 를 같이 들고 다니는 이유는, flush 할 때 보고 있는 세션의 provider
+   * 를 다른 세션 것에도 붙여 버리면 Codex 세션의 답이 Claude 것으로 기록되기
+   * 때문이다.
+   */
+  accumulatedStreamRef: MutableRefObject<Map<string, { text: string; provider: LLMProvider }>>;
   /**
    * Highest live `seq` observed per session. Essential for reconnect catch-up:
    * `chat.subscribe` sends this value as `lastSeq` so the server replays only
@@ -98,7 +105,34 @@ export function useChatRealtimeHandlers({
       }
 
       const activeViewSessionId = activeViewSessionIdRef.current;
-      const sid = (typeof msg.sessionId === 'string' && msg.sessionId) || activeViewSessionId;
+      const stampedSessionId = typeof msg.sessionId === 'string' && msg.sessionId ? msg.sessionId : null;
+      const sid = stampedSessionId || activeViewSessionId;
+
+      /*
+       * 세션 이름표가 없는 프레임을 "지금 보고 있는 세션" 것으로 떠넘기지 않는다.
+       *
+       * 이 폴백은 세션이 하나일 때만 안전했다. 두 세션이 동시에 돌면, 이름표가
+       * 빠진 프레임이 도착하는 순간 남의 답변이 내 대화창에 그려진다 — 주식
+       * 프로젝트의 답이 웹 UI 대화 한가운데 끼어드는 식으로. 어느 세션 것인지
+       * 모르는 내용은 엉뚱한 곳에 그리느니 버리는 편이 낫다.
+       *
+       * 상태·권한·게이트웨이 이벤트는 대화 내용을 만들지 않으므로 폴백을 그대로
+       * 둔다. 세션 id 가 아직 없는 새 대화의 첫 프레임이 여기에 해당한다.
+       */
+      const CONTENT_KINDS = new Set([
+        'text',
+        'stream_delta',
+        'stream_end',
+        'thinking',
+        'tool_use',
+        'tool_result',
+        'error',
+        'task_notification',
+      ]);
+      if (!stampedSessionId && CONTENT_KINDS.has(msg.kind)) {
+        console.warn('[Chat] Dropped an unlabeled content frame', { kind: msg.kind });
+        return;
+      }
 
       // Record replay progress for every sequenced live event.
       if (sid && typeof msg.seq === 'number') {
@@ -154,6 +188,20 @@ export function useChatRealtimeHandlers({
           return;
         }
 
+        case 'run_state': {
+          // 브라우저 밖에서 시작된 턴(텔레그램·예약 메시지)의 실행 여부 알림.
+          // 이 경로는 화면이 요청하지 않은 턴이라 `chat_subscribed` 의 stale
+          // 가드를 쓰지 않는다 — 비교할 "내가 보낸 요청 시각"이 없다.
+          if (!sid) return;
+
+          if (msg.isProcessing) {
+            onSessionProcessing?.(sid);
+          } else {
+            onSessionIdle?.(sid);
+          }
+          return;
+        }
+
         case 'protocol_error': {
           console.error('[Chat] Protocol error:', msg.code, msg.error);
           if (sid) {
@@ -188,19 +236,27 @@ export function useChatRealtimeHandlers({
       // --- Streaming: buffer for performance ---
       if (msg.kind === 'stream_delta') {
         const text = (msg.content as string) || '';
-        if (!text) return;
-        accumulatedStreamRef.current += text;
+        if (!text || !sid) return;
+
+        // 보고 있는 세션이든 아니든 똑같이 이 버퍼로 모은다. 예전에는 비활성
+        // 세션의 조각만 `appendRealtime` 으로 흘려보냈는데, 그러면 조각 하나가
+        // 곧 메시지 하나가 되어 "Now the / textarea height / cap and ..." 처럼
+        // 한 문장이 여러 블록으로 쪼개진 채 남았다.
+        const buffered = accumulatedStreamRef.current.get(sid);
+        accumulatedStreamRef.current.set(sid, {
+          text: (buffered?.text ?? '') + text,
+          // 프레임이 스스로 밝힌 provider 가 가장 정확하다.
+          provider: (msg.provider as LLMProvider) ?? buffered?.provider ?? provider,
+        });
+
         if (!streamTimerRef.current) {
           streamTimerRef.current = window.setTimeout(() => {
             streamTimerRef.current = null;
-            if (sid) {
-              sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
+            // 한 타이머로 모든 세션을 한꺼번에 flush 한다.
+            for (const [bufferedSessionId, entry] of accumulatedStreamRef.current) {
+              sessionStore.updateStreaming(bufferedSessionId, entry.text, entry.provider);
             }
           }, 100);
-        }
-        // Also route to store for non-active sessions
-        if (sid && sid !== activeViewSessionId) {
-          sessionStore.appendRealtime(sid, msg as unknown as NormalizedMessage);
         }
         return;
       }
@@ -211,13 +267,29 @@ export function useChatRealtimeHandlers({
           streamTimerRef.current = null;
         }
         if (sid) {
-          if (accumulatedStreamRef.current) {
-            sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
+          const pending = accumulatedStreamRef.current.get(sid);
+          if (pending?.text) {
+            sessionStore.updateStreaming(sid, pending.text, pending.provider);
           }
           sessionStore.finalizeStreaming(sid);
+          accumulatedStreamRef.current.delete(sid);
         }
-        accumulatedStreamRef.current = '';
         return;
+      }
+
+      // Claude sends token deltas *and* then the finished assistant message, so
+      // the preview bubble the deltas built is about to be superseded by the
+      // real one. Drop it rather than finalizing it, and stop the pending flush
+      // so a late timer cannot resurrect it after the real message lands.
+      // Providers that stream deltas without a follow-up message never reach
+      // here with an assistant text, and keep the stream_end path above.
+      if (sid && msg.kind === 'text' && msg.role === 'assistant') {
+        if (streamTimerRef.current) {
+          clearTimeout(streamTimerRef.current);
+          streamTimerRef.current = null;
+        }
+        accumulatedStreamRef.current.delete(sid);
+        sessionStore.discardStreaming(sid);
       }
 
       // --- All other messages: route to store ---
@@ -240,11 +312,14 @@ export function useChatRealtimeHandlers({
             clearTimeout(streamTimerRef.current);
             streamTimerRef.current = null;
           }
-          if (sid && accumulatedStreamRef.current) {
-            sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
-            sessionStore.finalizeStreaming(sid);
+          if (sid) {
+            const pending = accumulatedStreamRef.current.get(sid);
+            if (pending?.text) {
+              sessionStore.updateStreaming(sid, pending.text, pending.provider);
+              sessionStore.finalizeStreaming(sid);
+            }
+            accumulatedStreamRef.current.delete(sid);
           }
-          accumulatedStreamRef.current = '';
 
           // `complete` is the unified terminal event — every provider run ends
           // with exactly one, regardless of success, failure, or abort. The

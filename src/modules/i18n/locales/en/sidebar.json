@@ -51,7 +51,12 @@
     "clearSearch": "Clear search",
     "openCommandPalette": "Open command palette",
     "attentionRequiredIndicator": "Session needs attention",
-    "lastActivity": "Last conversation"
+    "lastActivity": "Last conversation",
+    "createNew": "New chat or project",
+    "newChatInProject": "Start a new chat in {{projectName}}",
+    "newChatNeedsProject": "Open a project first to start a chat",
+    "projectNeedsAttention": "A conversation in this project needs your attention",
+    "projectProcessing": "Work is running in this project"
   },
   "navigation": {
     "chat": "Chat",
@@ -161,5 +166,16 @@
   },
   "identity": {
     "openProfile": "Open {{name}}'s profile"
+  },
+  "groups": {
+    "create": "New group",
+    "namePlaceholder": "Group name",
+    "ungrouped": "Ungrouped",
+    "rename": "Rename group",
+    "delete": "Delete group (projects are kept)",
+    "moveUp": "Move group up",
+    "moveDown": "Move group down",
+    "field": "Group",
+    "fieldHelp": "Groups only change how the sidebar is organized — no folders are moved."
   }
 }

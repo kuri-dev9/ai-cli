@@ -123,7 +123,8 @@
       "ctrlEnter": "Ctrl+Enter로 전송 • Shift+Enter로 줄바꿈 • Tab으로 모드 변경 • /로 슬래시 명령어",
       "enter": "Enter로 전송 • Shift+Enter로 줄바꿈 • Tab으로 모드 변경 • /로 슬래시 명령어",
       "queue": "Enter로 다음 메시지 대기열에 추가",
-      "updateQueued": "Enter로 대기 중인 메시지 업데이트"
+      "updateQueued": "Enter로 대기 중인 메시지 업데이트",
+      "queueAnother": "Enter로 대기열에 추가 ({{count}}건 대기 중)"
     },
     "clickToChangeMode": "클릭하여 권한 모드 변경 (또는 입력창에서 Tab)",
     "showAllCommands": "모든 명령어 보기",
@@ -135,7 +136,9 @@
       "label": "대기 중",
       "willSend": "완료되면 전송됩니다",
       "edit": "대기 중인 메시지 편집",
-      "delete": "대기 중인 메시지 삭제"
+      "delete": "대기 중인 메시지 삭제",
+      "willSendInOrder": "순서대로 전송됩니다",
+      "addAnother": "대기열에 추가"
     }
   },
   "composer": {
@@ -265,7 +268,10 @@
   },
   "message": {
     "editAndResend": "수정 후 다시 보내기",
-    "forkFromHere": "여기서 분기"
+    "forkFromHere": "여기서 분기",
+    "source": {
+      "telegram": "텔레그램"
+    }
   },
   "export": {
     "trigger": "대화 내보내기",
@@ -340,7 +346,7 @@
       "modelsSubtitle": "이 프로바이더가 사용할 모델을 선택하세요.",
       "costEyebrow": "세션 텔레메트리",
       "costTitle": "토큰 사용량",
-      "costSubtitle": "이 세션의 입력, 출력, 총 토큰 수입니다.",
+      "costSubtitle": "이 대화가 컨텍스트 창을 얼마나 쓰고 있는지입니다.",
       "statusEyebrow": "런타임 상태",
       "statusTitle": "시스템 상태",
       "statusSubtitle": "버전, 프로바이더, 런타임, 환경 정보를 한눈에 확인하세요.",
@@ -354,6 +360,16 @@
     "tokensLabel_one": "토큰",
     "tokensLabel_other": "토큰",
     "escClosesModal": "Esc 키를 누르면 모달이 닫힙니다.",
-    "close": "닫기"
+    "close": "닫기",
+    "tokensRemaining": "남은 토큰",
+    "tokensUsedPercent": "사용률",
+    "contextWindowUsage": "컨텍스트 윈도우",
+    "tokensRemainingHint": "{{remaining}} 토큰 남음 ({{percent}} 사용)",
+    "contextUsed": "컨텍스트 점유",
+    "promptTokens": "프롬프트 (캐시 포함)",
+    "lastReplyTokens": "마지막 응답",
+    "contextUsedPercent": "컨텍스트 사용률",
+    "contextUsageDisclaimer": "지금 대화가 컨텍스트 창을 얼마나 채웠는지입니다. 요금제 사용량이 아니며, 리셋 시각을 포함한 그 정보는 CLI 의 /usage 에서 확인하세요.",
+    "contextResetHint": "시간이 지나도 초기화되지 않습니다. /compact 로 압축하거나 새 대화를 시작하면 비워집니다."
   }
 }

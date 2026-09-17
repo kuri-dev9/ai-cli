@@ -236,6 +236,30 @@ CREATE TABLE IF NOT EXISTS session_drafts (
  * and the indexer would otherwise rediscover it on its next full scan and hand
  * the session back to the version the user edited away from.
  */
+/**
+ * 어느 메시지가 앱 바깥(지금은 텔레그램)에서 들어왔는지.
+ *
+ * 세션 기록의 실체는 Claude CLI 가 쓰는 `.jsonl` 이라 우리가 거기에 필드를
+ * 끼워 넣을 수 없다. 그렇다고 프롬프트 본문에 표시를 섞으면 모델이 읽는
+ * 글이 사용자가 친 것과 달라진다. 그래서 출처만 이 표에 따로 두고, 기록을
+ * 내려줄 때 붙인다.
+ *
+ * `content_hash` 로 맞춘다 — 턴을 시작하는 시점에는 CLI 가 만들 메시지
+ * uuid 를 알 수 없기 때문이다. 한 번 맞춘 뒤에는 그 uuid 를
+ * `transcript_anchor_id` 에 적어 고정한다. 같은 글을 나중에 브라우저에서
+ * 또 보내도 이미 고정된 표시가 옮겨 붙지 않는다.
+ */
+export const MESSAGE_SOURCES_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS message_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    source TEXT NOT NULL,
+    transcript_anchor_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 export const SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS superseded_provider_sessions (
     provider_session_id TEXT NOT NULL,
@@ -301,6 +325,9 @@ ON provider_models(provider, sort_order, id);
 ${USER_PREFERENCES_TABLE_SCHEMA_SQL}
 
 ${SESSION_DRAFTS_TABLE_SCHEMA_SQL}
+
+${MESSAGE_SOURCES_TABLE_SCHEMA_SQL}
+CREATE INDEX IF NOT EXISTS idx_message_sources_session ON message_sources(session_id);
 
 ${SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL}
 `;

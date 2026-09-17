@@ -7,6 +7,10 @@ import type { WizardStep } from '@/shared/types';
 type WizardFooterProps = {
   step: WizardStep;
   isCreating: boolean;
+  /** 생성 중이거나 대상 폴더를 조사하는 중 — 모든 버튼을 잠근다. */
+  isBusy: boolean;
+  /** 사용자가 아직 고르지 않은 선택이 남아 진행할 수 없는 상태. */
+  isNextDisabled: boolean;
   isCloneWorkflow: boolean;
   onClose: () => void;
   onBack: () => void;
@@ -18,6 +22,8 @@ type WizardFooterProps = {
 export default function WizardFooter({
   step,
   isCreating,
+  isBusy,
+  isNextDisabled,
   isCloneWorkflow,
   onClose,
   onBack,
@@ -28,7 +34,7 @@ export default function WizardFooter({
 
   return (
     <div className="flex items-center justify-between border-t border-gray-200 p-6 dark:border-gray-700">
-      <Button variant="outline" onClick={step === 1 ? onClose : onBack} disabled={isCreating}>
+      <Button variant="outline" onClick={step === 1 ? onClose : onBack} disabled={isBusy}>
         {step === 1 ? (
           t('projectWizard.buttons.cancel')
         ) : (
@@ -39,13 +45,15 @@ export default function WizardFooter({
         )}
       </Button>
 
-      <Button onClick={step === 2 ? onCreate : onNext} disabled={isCreating}>
-        {isCreating ? (
+      <Button onClick={step === 2 ? onCreate : onNext} disabled={isBusy || isNextDisabled}>
+        {isBusy ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            {isCloneWorkflow
-              ? t('projectWizard.buttons.cloning', { defaultValue: 'Cloning...' })
-              : t('projectWizard.buttons.creating')}
+            {!isCreating
+              ? t('projectWizard.cloneTarget.inspecting')
+              : isCloneWorkflow
+                ? t('projectWizard.buttons.cloning', { defaultValue: 'Cloning...' })
+                : t('projectWizard.buttons.creating')}
           </>
         ) : step === 2 ? (
           <>

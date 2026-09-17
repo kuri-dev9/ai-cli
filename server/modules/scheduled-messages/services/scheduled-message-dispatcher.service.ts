@@ -1,7 +1,7 @@
 import { scheduledMessagesDb, sessionDraftsDb } from '@/modules/database/index.js';
 import type { QueuedSessionMessageRecord, ScheduledMessageRow } from '@/modules/database/index.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
-import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
+import type { ChatRunOrigin, ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 
 /**
  * How often due messages are looked for.
@@ -14,11 +14,20 @@ const POLL_INTERVAL_MS = 30_000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let dispatchInFlight = false;
+let unsubscribeRunSettled: (() => void) | null = null;
 
 type StoredQueuedMessage = {
   content: string;
   options: Record<string, unknown>;
   attachments: unknown[];
+  /**
+   * 이 메시지를 대기열에 넣은 곳.
+   *
+   * 텔레그램에서 보낸 글이 작업 중이라 줄을 섰다면, 한참 뒤에 실행되더라도
+   * 결과는 텔레그램으로 돌아가야 한다. 실행하는 시점에는 출처를 알 방법이
+   * 없으므로 넣을 때 적힌 것을 그대로 들고 간다.
+   */
+  origin: ChatRunOrigin;
 };
 
 function readOptions(raw: string): Record<string, unknown> {
@@ -49,7 +58,31 @@ function readQueuedMessage(value: unknown): StoredQueuedMessage | null {
   const options = record.options && typeof record.options === 'object' && !Array.isArray(record.options)
     ? record.options as Record<string, unknown>
     : {};
-  return { content, options, attachments };
+  const origin: ChatRunOrigin = record.origin === 'telegram' ? 'telegram' : 'web';
+  return { content, options, attachments, origin };
+}
+
+/**
+ * Failures that will not get better by waiting.
+ *
+ * Everything else — above all "a run is already in progress", which is what a
+ * lost race looks like — puts the turn back on the queue. Matching on the exact
+ * sentence used to be how the race was detected, and it silently stopped
+ * working: the race actually surfaces the run-reservation error
+ * ("A run **is** already in progress…"), not the pre-check one
+ * ("A run **was** already in progress…"), so a raced message was dropped
+ * instead of retried. The check is inverted now — only a session or provider
+ * that is gone for good is allowed to discard a message.
+ *
+ * Only a deleted session qualifies. An unavailable provider looks permanent but
+ * is not — it comes back with a restart or a settings fix, and the queued turn
+ * should still be there when it does.
+ */
+function isPermanentSendFailure(error: string | null): boolean {
+  if (!error) {
+    return false;
+  }
+  return /no longer exists/i.test(error);
 }
 
 async function sendClaimedQueuedMessage(
@@ -62,28 +95,59 @@ async function sendClaimedQueuedMessage(
     return;
   }
 
-  const result = await runDetachedChatTurn(
-    {
-      sessionId: candidate.sessionId,
-      userId: candidate.userId,
-      content: message.content,
-      options: { ...message.options, attachments: message.attachments },
-    },
-    { runtime },
-  );
-
-  // The registry check and run reservation are separate operations. If a run
-  // wins that tiny race, put the turn back so the next poll tries again.
-  if (!result.started && result.error === 'A run was already in progress for this session.') {
+  let result: { started: boolean; error: string | null };
+  try {
+    result = await runDetachedChatTurn(
+      {
+        sessionId: candidate.sessionId,
+        userId: candidate.userId,
+        content: message.content,
+        options: { ...message.options, attachments: message.attachments },
+        origin: message.origin,
+      },
+      { runtime },
+    );
+  } catch (error) {
+    // A throw is not a verdict on the message. Put it back rather than lose
+    // what the user typed.
     sessionDraftsDb.restoreQueuedMessage(candidate);
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error('[QueuedMessages] Send threw; the turn was put back on the queue', {
+      sessionId: candidate.sessionId,
+      error: reason,
+    });
     return;
   }
+
+  if (!result.started) {
+    if (!isPermanentSendFailure(result.error)) {
+      sessionDraftsDb.restoreQueuedMessage(candidate);
+      return;
+    }
+
+    // Kept out of the retry loop, but never dropped in silence: a message the
+    // user queued and never saw run is exactly the thing worth a log line.
+    console.error('[QueuedMessages] Dropped a queued turn that can never be sent', {
+      sessionId: candidate.sessionId,
+      error: result.error,
+      preview: message.content.slice(0, 120),
+    });
+  }
+
   sessionDraftsDb.deleteEmptyDraft(candidate.userId, candidate.sessionId);
 }
 
-/** Sends every persisted queued turn whose session is currently idle. */
-export async function dispatchQueuedMessages(runtime: ProviderRuntimeGateway): Promise<number> {
-  const candidates = sessionDraftsDb.listQueuedMessages();
+/**
+ * Sends the next queued turn for every idle session (or just `sessionId`).
+ *
+ * One turn per session per pass. The rest follow as each run finishes, which
+ * is what keeps a three-message queue running in the order it was typed.
+ */
+export async function dispatchQueuedMessages(
+  runtime: ProviderRuntimeGateway,
+  sessionId?: string,
+): Promise<number> {
+  const candidates = sessionDraftsDb.listQueuedMessages(sessionId);
   let claimed = 0;
 
   await Promise.all(candidates.map(async (candidate) => {
@@ -191,6 +255,16 @@ export function initializeScheduledMessageDispatcher(runtime: ProviderRuntimeGat
   // Never keep the process alive just to poll for scheduled messages.
   pollTimer.unref?.();
 
+  // The poll is the safety net, not the mechanism. A queued turn goes out the
+  // instant the run in front of it ends — waiting up to 30s for the next poll
+  // is long enough that the user assumes their message was swallowed.
+  unsubscribeRunSettled = chatRunRegistry.onRunSettled((sessionId) => {
+    void dispatchQueuedMessages(runtime, sessionId).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[QueuedMessages] Post-run dispatch failed', { sessionId, error: message });
+    });
+  });
+
   // Catch up on anything that came due while the server was not running.
   poll();
 }
@@ -199,5 +273,9 @@ export function closeScheduledMessageDispatcher(): void {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
+  }
+  if (unsubscribeRunSettled) {
+    unsubscribeRunSettled();
+    unsubscribeRunSettled = null;
   }
 }

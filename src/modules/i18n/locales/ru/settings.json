@@ -54,7 +54,8 @@
     "sections": {
       "appearance": "Внешний вид",
       "toolDisplay": "Отображение инструментов",
-      "inputSettings": "Настройки ввода"
+      "inputSettings": "Настройки ввода",
+      "telegramRelay": "Telegram notifications"
     },
     "darkMode": "Темная тема",
     "showRawParameters": "Показывать сырые параметры",
@@ -67,6 +68,15 @@
       "openPanel": "Открыть панель настроек",
       "draggingStatus": "Перетаскивание...",
       "toggleAndMove": "Нажмите для переключения, перетащите для перемещения"
+    },
+    "telegramRelay": {
+      "label": "Notify me about this session",
+      "description": "While this is on, finished runs in this session are sent to Telegram. Replies to work you started from Telegram always arrive regardless of this toggle. For a single run, prefix your message with /bot.",
+      "needsSession": "Open a session first.",
+      "loading": "Checking Telegram notification settings...",
+      "needsToken": "Save a bot token in Settings > Telegram first.",
+      "bridgeDisabled": "The Telegram bridge is turned off. Enable it in settings.",
+      "bridgeStopped": "The Telegram bridge is not connected. Check the token and chat ids in settings."
     }
   },
   "terminalShortcuts": {

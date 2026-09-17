@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createProject } from '@/modules/projects/services/project-management.service.js';
+import { createProject, updateProjectPath } from '@/modules/projects/services/project-management.service.js';
 import { AppError } from '@/shared/utils.js';
 
 const projectRow = {
@@ -114,4 +114,111 @@ test('createProject returns archived reuse outcome when archived row is reused',
 
   assert.equal(result.outcome, 'reactivated_archived');
   assert.equal(result.project.isArchived, true);
+});
+
+// --- updateProjectPath ---
+
+type UpdatePathDependencies = NonNullable<Parameters<typeof updateProjectPath>[1]>;
+
+function buildUpdatePathDependencies(
+  overrides: Partial<UpdatePathDependencies> = {},
+): UpdatePathDependencies {
+  return {
+    validatePath: async (projectPath: string) => ({ valid: true, resolvedPath: projectPath }),
+    assertDirectoryExists: async () => undefined,
+    getProjectById: () => projectRow,
+    getProjectByPath: () => null,
+    persistProjectPath: () => undefined,
+    persistDisplayName: () => undefined,
+    ...overrides,
+  };
+}
+
+test('updateProjectPath repoints the project and follows the folder name', async () => {
+  let persistedPath = '';
+  let persistedDisplayName: string | null = null;
+
+  const result = await updateProjectPath(
+    { projectId: 'project-1', newPath: '/workspace/moved-project' },
+    buildUpdatePathDependencies({
+      persistProjectPath: (_projectId, projectPath) => {
+        persistedPath = projectPath;
+      },
+      persistDisplayName: (_projectId, displayName) => {
+        persistedDisplayName = displayName;
+      },
+    }),
+  );
+
+  assert.equal(persistedPath, '/workspace/moved-project');
+  assert.equal(persistedDisplayName, 'moved-project');
+  assert.equal(result.project.path, '/workspace/moved-project');
+  assert.equal(result.project.displayName, 'moved-project');
+});
+
+test('updateProjectPath keeps a display name the user chose themselves', async () => {
+  let persistDisplayNameCalled = false;
+
+  const result = await updateProjectPath(
+    { projectId: 'project-1', newPath: '/workspace/moved-project' },
+    buildUpdatePathDependencies({
+      getProjectById: () => ({ ...projectRow, custom_project_name: 'My Nice Name' }),
+      persistDisplayName: () => {
+        persistDisplayNameCalled = true;
+      },
+    }),
+  );
+
+  assert.equal(persistDisplayNameCalled, false);
+  assert.equal(result.project.displayName, 'My Nice Name');
+});
+
+test('updateProjectPath rejects a path another project already uses', async () => {
+  await assert.rejects(
+    async () =>
+      updateProjectPath(
+        { projectId: 'project-1', newPath: '/workspace/other-project' },
+        buildUpdatePathDependencies({
+          getProjectByPath: () => ({ ...projectRow, project_id: 'project-2' }),
+        }),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, 'PROJECT_PATH_ALREADY_USED');
+      assert.equal(error.statusCode, 409);
+      return true;
+    },
+  );
+});
+
+test('updateProjectPath rejects an unknown project', async () => {
+  await assert.rejects(
+    async () =>
+      updateProjectPath(
+        { projectId: 'missing', newPath: '/workspace/moved-project' },
+        buildUpdatePathDependencies({ getProjectById: () => null }),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, 'PROJECT_NOT_FOUND');
+      assert.equal(error.statusCode, 404);
+      return true;
+    },
+  );
+});
+
+test('updateProjectPath is a no-op when the path did not change', async () => {
+  let persistProjectPathCalled = false;
+
+  const result = await updateProjectPath(
+    { projectId: 'project-1', newPath: '/workspace/my-project' },
+    buildUpdatePathDependencies({
+      persistProjectPath: () => {
+        persistProjectPathCalled = true;
+      },
+    }),
+  );
+
+  assert.equal(persistProjectPathCalled, false);
+  assert.equal(result.project.path, '/workspace/my-project');
 });

@@ -4,6 +4,7 @@ import path from "path";
 import express from "express";
 
 import { parseFrontMatter } from "../../shared/frontmatter.js";
+import { resolveContextWindow } from "../providers/index.js";
 
 type CommandsRouterDependencies = {
   fileSystem: typeof import('node:fs/promises');
@@ -269,12 +270,6 @@ Custom commands can be created in:
       Number(
         tokenUsage.used ?? tokenUsage.totalUsed ?? tokenUsage.total_tokens ?? 0,
       ) || 0;
-    const total =
-      Number(
-        tokenUsage.total ??
-          tokenUsage.contextWindow ??
-          0,
-      ) || 0;
     const normalizedInputValue =
       tokenUsage.inputTokens ??
       tokenUsage.input ??
@@ -318,6 +313,21 @@ Custom commands can be created in:
     const hasTokenBreakdown = computedUsed > 0;
     const used = Math.max(reportedUsed, computedUsed);
 
+    // 사용량을 보고한 턴의 모델이 가장 정확하다. `/models`가 아직 아무것도
+    // 정하지 못해 model이 "default"로 오는 세션에서도 잔량을 계산할 수 있다.
+    const usageModel =
+      typeof tokenUsage.model === "string" && tokenUsage.model.trim()
+        ? tokenUsage.model
+        : model;
+    // 이미 계산되어 넘어온 윈도우를 우선 쓰되, 사용량을 담지 못하면
+    // (설정이 낡았거나 1M 세션인데 200K로 잡힌 경우) 한 단계 올린다.
+    const total = resolveContextWindow({
+      model: usageModel,
+      configured: Number(tokenUsage.total ?? tokenUsage.contextWindow ?? 0) || 0,
+      used,
+    });
+    const remaining = Math.max(0, total - used);
+
     return {
       type: "builtin",
       action: "cost",
@@ -325,6 +335,7 @@ Custom commands can be created in:
         tokenUsage: {
           used,
           total,
+          remaining,
         },
         ...(hasTokenBreakdown
           ? {
@@ -335,7 +346,7 @@ Custom commands can be created in:
             }
           : {}),
         provider,
-        model,
+        model: usageModel,
       },
     };
   },

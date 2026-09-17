@@ -31,6 +31,8 @@ export type UserPreferences = {
   githubUsername: string;
   disabledProviders: unknown;
   fontSettings: unknown;
+  /** 사이드바 전용 프로젝트 묶음 — 실제 디렉터리가 아니라 보기 방식이다. */
+  projectGroups: unknown;
 };
 
 export type UserPreferenceKey = keyof UserPreferences;
@@ -77,6 +79,9 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   // Unused: the app font was hard-coded in tailwind.config.js and in component
   // class names until it became a setting, so it has no localStorage predecessor.
   fontSettings: '',
+  // Unused: project groups exist only since they were added as a server-stored
+  // setting, so there is no localStorage copy to carry over.
+  projectGroups: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

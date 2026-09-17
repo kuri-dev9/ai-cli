@@ -10,6 +10,19 @@ import type {
 type ChatRunStatus = 'running' | 'completed';
 
 /**
+ * 이 실행을 누가 시작했는지.
+ *
+ * 텔레그램 브리지가 "결과를 돌려보낼지"를 정하는 유일한 근거다 — 텔레그램에서
+ * 시작한 실행은 사용자가 답을 기다리고 있으므로 무조건 회신하고, 웹에서 시작한
+ * 실행은 명시적으로 켠 경우에만 보낸다. 출처를 모르면 둘을 구분할 수 없어서
+ * 브라우저에서 대화할 때마다 폰이 울린다.
+ *
+ * 타이머(예약·대기열)에서 시작한 실행처럼 사람이 텔레그램으로 부른 것이 아닌
+ * 모든 경우는 `web` 으로 본다. 기본이 조용한 쪽이어야 안전하다.
+ */
+export type ChatRunOrigin = 'web' | 'telegram';
+
+/**
  * One live (or recently finished) provider run for a single app session.
  *
  * State notes — why each mutable field is essential:
@@ -26,6 +39,15 @@ type ChatRunStatus = 'running' | 'completed';
 type ChatRun = {
   appSessionId: string;
   provider: LLMProvider;
+  /** 이 실행을 시작시킨 곳. 기본은 `web`. */
+  origin: ChatRunOrigin;
+  /**
+   * 이 실행 하나만 바깥(텔레그램)으로 중계해 달라는 일회성 요청.
+   *
+   * 웹 입력이 `/bot` 으로 시작할 때 켜진다. 실행마다 따로 들고 있어야 한다 —
+   * 세션에 저장하면 다음 턴까지 따라가서, 한 번만 받으려던 알림이 계속 온다.
+   */
+  relayRequested: boolean;
   providerSessionId: string | null;
   status: ChatRunStatus;
   lastSeq: number;
@@ -44,9 +66,10 @@ const COMPLETED_RUN_RETENTION_MS = 5 * 60 * 1000;
 
 /**
  * Upper bound on buffered events per run so a very long tool-heavy run cannot
- * grow memory unbounded. When exceeded, the oldest events are dropped —
- * a reconnecting client whose `lastSeq` predates the buffer falls back to a
- * REST history refresh, which is always the authoritative source.
+ * grow memory unbounded. When exceeded, the oldest stream deltas are dropped
+ * first and only then the oldest events of any kind — a reconnecting client
+ * whose `lastSeq` predates the buffer falls back to a REST history refresh,
+ * which is always the authoritative source.
  */
 const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
 
@@ -105,14 +128,70 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
     run.status = 'completed';
     run.completedAt = Date.now();
     evictRunLater(run.appSessionId);
+    notifyRunSettled(run.appSessionId);
   }
 
   run.events.push(outbound);
-  if (run.events.length > MAX_BUFFERED_EVENTS_PER_RUN) {
-    run.events.splice(0, run.events.length - MAX_BUFFERED_EVENTS_PER_RUN);
+  while (run.events.length > MAX_BUFFERED_EVENTS_PER_RUN) {
+    // Token deltas are a transient preview: one reply produces thousands of
+    // them, and the finished assistant message that follows carries the same
+    // text. Evicting the oldest delta first keeps prompts, tool calls and tool
+    // results inside the replay window — those a reconnecting client cannot
+    // reconstruct from anything but a REST refresh. Only once no delta is left
+    // does the buffer fall back to dropping its oldest event.
+    const oldestDelta = run.events.findIndex((event) => event.kind === 'stream_delta');
+    run.events.splice(oldestDelta >= 0 ? oldestDelta : 0, 1);
   }
 
   return outbound;
+}
+
+/**
+ * Notified when a session's run reaches its terminal `complete`.
+ *
+ * The queued-message dispatcher listens here so a queued turn goes out the
+ * moment the turn before it ends. Without this it only left on the next poll,
+ * which meant a follow-up could sit for up to half a minute after the session
+ * had already gone idle.
+ */
+const runSettledListeners = new Set<(appSessionId: string) => void>();
+
+/** 반대쪽 신호: 세션에서 턴이 막 시작됐다. 외부 브리지의 "작업 시작" 알림용. */
+const runStartedListeners = new Set<(appSessionId: string) => void>();
+
+function notifyRunStarted(appSessionId: string): void {
+  for (const listener of runStartedListeners) {
+    setImmediate(() => {
+      try {
+        listener(appSessionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[ChatRunRegistry] Run-started listener failed', {
+          appSessionId,
+          error: message,
+        });
+      }
+    });
+  }
+}
+
+function notifyRunSettled(appSessionId: string): void {
+  for (const listener of runSettledListeners) {
+    // Deferred: this fires while the terminal event is still being written, and
+    // a listener that starts the next run synchronously would re-enter the
+    // registry mid-write.
+    setImmediate(() => {
+      try {
+        listener(appSessionId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[ChatRunRegistry] Run-settled listener failed', {
+          appSessionId,
+          error: message,
+        });
+      }
+    });
+  }
 }
 
 /**
@@ -176,6 +255,10 @@ export const chatRunRegistry = {
      */
     connection: RealtimeClientConnection | null;
     userId: string | number | null;
+    /** 생략하면 `web`. 텔레그램에서 시작한 턴만 `telegram` 을 넘긴다. */
+    origin?: ChatRunOrigin;
+    /** 이 실행 하나만 텔레그램으로 중계할지(`/bot` 접두어). */
+    relayRequested?: boolean;
   }): ChatRun | null {
     const existing = runs.get(input.appSessionId);
     if (existing && existing.status === 'running') {
@@ -185,6 +268,8 @@ export const chatRunRegistry = {
     const run: ChatRun = {
       appSessionId: input.appSessionId,
       provider: input.provider,
+      origin: input.origin ?? 'web',
+      relayRequested: input.relayRequested ?? false,
       providerSessionId: input.providerSessionId,
       status: 'running',
       lastSeq: 0,
@@ -206,11 +291,29 @@ export const chatRunRegistry = {
     });
 
     runs.set(input.appSessionId, run);
+    notifyRunStarted(input.appSessionId);
     return run;
   },
 
   getRun(appSessionId: string): ChatRun | undefined {
     return runs.get(appSessionId);
+  },
+
+  /**
+   * 이 세션의 마지막(또는 진행 중) 실행이 어디서 시작됐는지와, `/bot` 처럼
+   * 한 번만 중계해 달라는 요청이 붙어 있었는지.
+   *
+   * 완료 알림을 만드는 쪽이 `onRunSettled` 직후에 묻는다. 그 시점의 실행은
+   * 아직 보존 창(`COMPLETED_RUN_RETENTION_MS`) 안에 있으므로 답이 있다.
+   * 기록이 이미 사라진 세션이면 `null` — 그때는 아무것도 보내지 않는 쪽이
+   * 맞다(출처를 모르는 실행을 웹 실행으로 단정해 조용히 넘기는 것과 같다).
+   */
+  describeRunOrigin(appSessionId: string): { origin: ChatRunOrigin; relayRequested: boolean } | null {
+    const run = runs.get(appSessionId);
+    if (!run) {
+      return null;
+    }
+    return { origin: run.origin, relayRequested: run.relayRequested };
   },
 
   isProcessing(appSessionId: string): boolean {
@@ -299,6 +402,26 @@ export const chatRunRegistry = {
     }
 
     run.writer.sendComplete(opts);
+  },
+
+  /**
+   * Subscribes to "this session's run just finished"; returns the unsubscribe.
+   */
+  onRunSettled(listener: (appSessionId: string) => void): () => void {
+    runSettledListeners.add(listener);
+    return () => {
+      runSettledListeners.delete(listener);
+    };
+  },
+
+  /**
+   * Subscribes to "a run just started on this session"; returns the unsubscribe.
+   */
+  onRunStarted(listener: (appSessionId: string) => void): () => void {
+    runStartedListeners.add(listener);
+    return () => {
+      runStartedListeners.delete(listener);
+    };
   },
 
   /**

@@ -139,6 +139,23 @@ export const projectsDb = {
         `).run(customProjectName, projectId);
     },
 
+    /**
+     * 프로젝트가 가리키는 폴더를 다른 경로로 바꾼다.
+     *
+     * `sessions.project_path` 는 `ON UPDATE CASCADE` 로 따라오므로 세션 기록은
+     * 그대로 유지된다. 실제 폴더를 옮기지는 않는다 — 호출 측이 새 경로가 이미
+     * 존재하는지 확인한 뒤 부른다.
+     */
+    updateProjectPathById(projectId: string, newProjectPath: string): void {
+        const db = getConnection();
+        const normalizedProjectPath = normalizeProjectPath(newProjectPath);
+        db.prepare(`
+            UPDATE projects
+            SET project_path = ?
+            WHERE project_id = ?
+        `).run(normalizedProjectPath, projectId);
+    },
+
     updateProjectIsStarred(projectPath: string, isStarred: boolean): void {
         const db = getConnection();
         const normalizedProjectPath = normalizeProjectPath(projectPath);

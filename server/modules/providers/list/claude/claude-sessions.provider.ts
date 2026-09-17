@@ -680,11 +680,33 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       return [];
     }
 
-    if (raw.type === 'content_block_delta' && raw.delta?.text) {
-      return [createNormalizedMessage({ kind: 'stream_delta', content: raw.delta.text, sessionId, provider: PROVIDER })];
+    // Token-level events arrive from the SDK wrapped as `stream_event`, with the
+    // raw Anthropic event under `.event`. Persisted rows and other callers pass
+    // the bare event, so both shapes resolve to the same branch below.
+    const isStreamEventWrapper = raw.type === 'stream_event';
+    const streamEvent: AnyRecord | null = isStreamEventWrapper ? readObjectRecord(raw.event) : raw;
+    // Subagent deltas carry parent_tool_use_id. Their text belongs inside the
+    // Agent tool card, and splicing it into the main preview bubble would
+    // interleave the subagent's reply with the parent's.
+    const isSubagentStream = isStreamEventWrapper && Boolean(raw.parent_tool_use_id);
+
+    if (streamEvent && !isSubagentStream) {
+      // Only `text_delta` carries `.text`; thinking and tool-input deltas put
+      // their payload on other keys and must not reach the transcript as text.
+      if (streamEvent.type === 'content_block_delta' && streamEvent.delta?.text) {
+        return [createNormalizedMessage({ kind: 'stream_delta', content: streamEvent.delta.text, sessionId, provider: PROVIDER })];
+      }
+      if (streamEvent.type === 'content_block_stop') {
+        return [createNormalizedMessage({ kind: 'stream_end', sessionId, provider: PROVIDER })];
+      }
     }
-    if (raw.type === 'content_block_stop') {
-      return [createNormalizedMessage({ kind: 'stream_end', sessionId, provider: PROVIDER })];
+
+    // Every other partial event (message_start, message_delta, ping, and the
+    // subagent traffic filtered above) has no transcript representation. It has
+    // to stop here, or the assistant/user branches below would read the wrapper
+    // as an empty turn.
+    if (isStreamEventWrapper) {
+      return [];
     }
 
     const messages: NormalizedMessage[] = [];

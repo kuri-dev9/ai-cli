@@ -117,6 +117,8 @@ type SidebarContentProps = {
   onRefresh: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
+  onNewChat: (() => void) | null;
+  activeProjectName: string | null;
   onCollapseSidebar: () => void;
   updateAvailable: boolean;
   restartRequired: boolean;
@@ -164,6 +166,8 @@ export default function SidebarContent({
   onRefresh,
   isRefreshing,
   onCreateProject,
+  onNewChat,
+  activeProjectName,
   onCollapseSidebar,
   updateAvailable,
   restartRequired,
@@ -205,6 +209,8 @@ export default function SidebarContent({
         onRefresh={onRefresh}
         isRefreshing={isRefreshing}
         onCreateProject={onCreateProject}
+        onNewChat={onNewChat}
+        activeProjectName={activeProjectName}
         onCollapseSidebar={onCollapseSidebar}
         t={t}
       />

@@ -17,18 +17,18 @@ import { readUserPreference } from '@/shared/userSettings';
 import type { CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionProcessing, ModelCommandData, QueuedDraft, SessionActivityMap, StatusCommandData,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
 import { grantClaudeToolPermission } from '@/modules/chat/utils/chatPermissions';
 import {
-  clearQueuedMessage,
+  appendQueuedMessage,
   hydrateChatDrafts,
   readDraftText,
-  readQueuedMessage,
+  readQueuedMessages,
   subscribeToChatDrafts,
   writeDraftText,
-  writeQueuedMessage,
+  writeQueuedMessages,
 } from '@/shared/chatDrafts';
 import { escapeRegExp } from '@/modules/chat/utils/chatFormatting';
 import { useFileMentions } from '@/modules/chat/hooks/useFileMentions';
 import { useInputHistory } from '@/modules/chat/hooks/useInputHistory';
-import { useSlashCommands } from '@/modules/chat/hooks/useSlashCommands';
+import { isPromptPrefixCommand, useSlashCommands } from '@/modules/chat/hooks/useSlashCommands';
 
 type UseChatComposerStateArgs = {
   selectedProject: Project | null;
@@ -123,17 +123,58 @@ const uploadAttachmentFiles = async (files: File[]): Promise<unknown[]> => {
 };
 
 
-const restoreQueuedDraft = (sessionKey: string): QueuedDraft | null => {
-  const saved = readQueuedMessage(sessionKey);
-  return saved
-    ? {
-        content: saved.content,
-        attachments: [],
-        uploadedAttachments: saved.attachments ?? saved.images,
-        options: saved.options,
-      }
-    : null;
-};
+/** 입력창이 차지할 수 있는 화면 세로 비율의 상한. */
+const TEXTAREA_MAX_VIEWPORT_RATIO = 0.35;
+
+/** 화면이 아주 낮아도 이 높이까지는 보장한다. */
+const TEXTAREA_MIN_MAX_HEIGHT = 160;
+
+/**
+ * 이 길이를 넘겨 붙여넣은 글은 첨부 파일로 바꾼다.
+ *
+ * 로그나 스택 트레이스를 통째로 붙이면 입력창이 화면을 덮고, 무엇을 붙였는지
+ * 확인하려 스크롤하는 동안 정작 대화가 보이지 않는다. 파일이 되면 한 줄짜리
+ * 칩으로 줄어들고 내용은 그대로 전달된다.
+ */
+const PASTE_TO_FILE_THRESHOLD = 1_500;
+
+/** 길이가 애매해도 줄 수가 많으면 마찬가지로 파일이 낫다. */
+const PASTE_TO_FILE_LINE_THRESHOLD = 25;
+
+/** 붙여넣은 글을 첨부로 돌릴지 판단한다. 임계값을 테스트에서 고정하려고 분리했다. */
+export function shouldConvertPasteToFile(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+  return (
+    text.length > PASTE_TO_FILE_THRESHOLD
+    || text.split('\n').length > PASTE_TO_FILE_LINE_THRESHOLD
+  );
+}
+
+/** 첨부 이름. 칩만 보고도 무엇을 붙였는지 가늠할 수 있게 줄 수를 넣는다. */
+export function buildPastedFileName(text: string): string {
+  return `pasted-${text.split('\n').length}-lines.txt`;
+}
+
+const restoreQueuedDrafts = (sessionKey: string): QueuedDraft[] =>
+  // 브라우저 File 객체는 이 컴포저에서만 살아 있다. 업로드된 기술자만 되살아나고,
+  // 그것만으로도 다른 기기에서 큐를 이어받아 보낼 수 있다.
+  readQueuedMessages(sessionKey).map((saved) => ({
+    content: saved.content,
+    attachments: [],
+    uploadedAttachments: saved.attachments ?? saved.images,
+    options: saved.options,
+  }));
+
+const toStoredQueuedMessage = (draft: QueuedDraft) => ({
+  content: draft.content,
+  options: draft.options,
+  attachments: draft.uploadedAttachments,
+});
+
+const isSendableQueuedDraft = (draft: QueuedDraft): boolean =>
+  Boolean(draft.content.trim() || (draft.uploadedAttachments?.length ?? 0) > 0);
 
 const getNotificationSessionSummary = (
   selectedSession: ProjectSession | null,
@@ -257,15 +298,15 @@ export function useChatComposerState({
     scope: draftScope,
   });
 
-  const [queuedDraft, setQueuedDraft] = useState<QueuedDraft | null>(() => {
+  const [queuedDrafts, setQueuedDrafts] = useState<QueuedDraft[]>(() => {
     if (typeof window === 'undefined' || !sessionKey) {
-      return null;
+      return [];
     }
-    return restoreQueuedDraft(sessionKey);
+    return restoreQueuedDrafts(sessionKey);
   });
-  // Which session the in-memory `queuedDraft` belongs to. On a session switch
+  // Which session the in-memory `queuedDrafts` belong to. On a session switch
   // there is one commit where `sessionKey` already points at the new session
-  // while `queuedDraft` still holds the old session's draft; the persistence
+  // while `queuedDrafts` still holds the old session's queue; the persistence
   // effect must not write across that gap.
   const queuedDraftSessionRef = useRef<string | null>(sessionKey);
 
@@ -501,8 +542,17 @@ export function useChatComposerState({
 
   const resizeTextarea = useCallback((target: HTMLTextAreaElement) => {
     target.style.height = 'auto';
-    const nextHeight = Math.max(22, target.scrollHeight);
+
+    // 입력창은 화면의 이만큼까지만 자란다. 상한이 없을 때는 긴 글을 쓰는 동안
+    // 입력창이 대화를 통째로 덮어버려서, 무엇에 답하고 있었는지 볼 수 없었다.
+    const viewportCap = Math.round(window.innerHeight * TEXTAREA_MAX_VIEWPORT_RATIO);
+    const maxHeight = Math.max(TEXTAREA_MIN_MAX_HEIGHT, viewportCap);
+    const contentHeight = Math.max(22, target.scrollHeight);
+    const nextHeight = Math.min(contentHeight, maxHeight);
+
     target.style.height = `${nextHeight}px`;
+    // 상한에 닿은 뒤로는 입력창 안에서 스크롤된다.
+    target.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
 
     let lineHeight = textareaLineHeightRef.current;
     if (!lineHeight) {
@@ -566,6 +616,21 @@ export function useChatComposerState({
           handleAttachmentFiles(imageFiles);
         }
       }
+
+      // 긴 글은 입력창에 풀어놓지 않고 파일로 받는다. 붙여넣은 내용은 그대로
+      // 전달되지만, 화면에서는 칩 하나만 차지한다.
+      const pastedText = event.clipboardData.getData('text/plain');
+      if (!pastedText) {
+        return;
+      }
+
+      if (!shouldConvertPasteToFile(pastedText)) {
+        return;
+      }
+
+      event.preventDefault();
+      const file = new File([pastedText], buildPastedFileName(pastedText), { type: 'text/plain' });
+      handleAttachmentFiles([file]);
     },
     [handleAttachmentFiles],
   );
@@ -640,7 +705,8 @@ export function useChatComposerState({
         // its files again.
         if (queuedSubmission) {
           queuedDraftSessionRef.current = sessionKey;
-          setQueuedDraft(queuedSubmission);
+          // 맨 앞으로 되돌린다 — 뒤에 줄 서 있는 메시지보다 먼저 보낸 것이므로.
+          setQueuedDrafts((previous) => [queuedSubmission, ...previous]);
           return;
         }
 
@@ -668,12 +734,9 @@ export function useChatComposerState({
         };
         if (queuedSessionKey) {
           // Write the claim ticket synchronously after upload; this closes the
-          // gap before React's persistence effect runs.
-          writeQueuedMessage(queuedSessionKey, {
-            content: durableDraft.content,
-            options: durableDraft.options,
-            attachments: durableDraft.uploadedAttachments,
-          });
+          // gap before React's persistence effect runs. 덧붙이기다 — 앞서
+          // 넣어둔 메시지를 밀어내지 않는다.
+          appendQueuedMessage(queuedSessionKey, toStoredQueuedMessage(durableDraft));
         }
 
         // Recorded under the session the message was queued FOR, and before
@@ -689,7 +752,7 @@ export function useChatComposerState({
         }
 
         queuedDraftSessionRef.current = queuedSessionKey;
-        setQueuedDraft(durableDraft);
+        setQueuedDrafts((previous) => [...previous, durableDraft]);
         setInput('');
         inputValueRef.current = '';
         setAttachedFiles([]);
@@ -724,7 +787,9 @@ export function useChatComposerState({
                 metadata: { type: 'builtin' },
               } as SlashCommand)
             : undefined);
-        if (matchedCommand && matchedCommand.type !== 'skill') {
+        // 스킬과 `/bot` 은 실행 대상이 아니라 프롬프트에 붙는 접두어다. 아래
+        // 일반 전송 경로로 흘려보내야 서버가 접두어를 떼고 모델에게 넘긴다.
+        if (matchedCommand && !isPromptPrefixCommand(matchedCommand)) {
           executeCommand(matchedCommand, isHelpAlias ? '/help' : commandInput);
           recordSentMessage(currentInput);
           setInput('');
@@ -836,8 +901,16 @@ export function useChatComposerState({
         canInterrupt: true,
       });
 
+      // 보낸 직후에는 무조건 바닥으로 데려간다. 위를 보던 중이었어도, 방금
+      // 내가 던진 질문의 답이 어디에 그려지는지는 봐야 한다.
       setIsUserScrolledUp(false);
-      setTimeout(() => scrollToBottom(), 100);
+      // 한 번만 부르면 아직 새 메시지가 그려지기 전이라 헛돈다. 다음 페인트와
+      // 그 뒤 한 번 더 — 그 사이 스트리밍이 시작되면 ResizeObserver 가 이어받는다.
+      requestAnimationFrame(() => {
+        scrollToBottom();
+        requestAnimationFrame(() => scrollToBottom());
+      });
+      setTimeout(() => scrollToBottom(), 120);
 
       // One message shape for every provider. The backend resolves the
       // provider, project path, and provider-native resume id from the
@@ -904,40 +977,52 @@ export function useChatComposerState({
     handleSubmitRef.current = handleSubmit;
   }, [handleSubmit]);
 
-  // The VPS dispatcher owns sending. While the card is visible, periodically
-  // reconcile only its removal so the UI notices when the server claims it.
+  // The VPS dispatcher owns sending. While cards are visible, periodically
+  // reconcile only their removal so the UI notices what the server has claimed.
   useEffect(() => {
-    if (!sessionKey || !queuedDraft) {
+    if (!sessionKey || queuedDrafts.length === 0) {
       return;
     }
     let cancelled = false;
     const reconcile = async () => {
       await hydrateChatDrafts();
-      if (!cancelled && !readQueuedMessage(sessionKey)) {
-        queuedDraftSessionRef.current = sessionKey;
-        setQueuedDraft(null);
+      if (cancelled) {
+        return;
       }
+
+      const pending = readQueuedMessages(sessionKey);
+      if (pending.length >= queuedDrafts.length) {
+        return;
+      }
+
+      // 서버는 큐를 앞에서부터 꺼내간다. 줄어든 만큼을 앞에서 덜어내면 남은
+      // 카드들이 브라우저 File 객체를 그대로 유지한 채 순서도 지킨다.
+      queuedDraftSessionRef.current = sessionKey;
+      setQueuedDrafts((previous) => previous.slice(previous.length - pending.length));
     };
     const timer = setInterval(() => void reconcile(), 5_000);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [queuedDraft, sessionKey]);
+  }, [queuedDrafts, sessionKey]);
 
-  const editQueuedDraft = useCallback(() => {
-    if (!queuedDraft) {
+  /** 대기 중인 한 건을 입력창으로 되가져온다. 큐에서는 빠진다. */
+  const editQueuedDraft = useCallback((index: number) => {
+    const target = queuedDrafts[index];
+    if (!target) {
       return;
     }
-    setQueuedDraft(null);
-    setInput(queuedDraft.content);
-    inputValueRef.current = queuedDraft.content;
-    setAttachedFiles(queuedDraft.attachments);
-    textareaRef.current?.focus();
-  }, [queuedDraft]);
 
-  const deleteQueuedDraft = useCallback(() => {
-    setQueuedDraft(null);
+    setQueuedDrafts((previous) => previous.filter((_, position) => position !== index));
+    setInput(target.content);
+    inputValueRef.current = target.content;
+    setAttachedFiles(target.attachments);
+    textareaRef.current?.focus();
+  }, [queuedDrafts, setInput]);
+
+  const deleteQueuedDraft = useCallback((index: number) => {
+    setQueuedDrafts((previous) => previous.filter((_, position) => position !== index));
   }, []);
 
   // A voice transcript either fills the input (to edit before sending) or, when the
@@ -986,39 +1071,31 @@ export function useChatComposerState({
     writeDraftText(draftScope, inputState.value);
   }, [inputState, draftScope]);
 
-  // Persist the queued draft under its session's key. Must be defined BEFORE
-  // the swap effect below: on a session switch there is one commit where
-  // `sessionKey` already points at the new session while `queuedDraft` (and
-  // the owner ref) still describe the old one — the ref mismatch makes this
-  // effect skip that commit instead of writing/clearing across sessions.
+  // Persist the queue under its session's key. Must be defined BEFORE the swap
+  // effect below: on a session switch there is one commit where `sessionKey`
+  // already points at the new session while `queuedDrafts` (and the owner ref)
+  // still describe the old one — the ref mismatch makes this effect skip that
+  // commit instead of writing/clearing across sessions.
   useEffect(() => {
     if (!sessionKey || queuedDraftSessionRef.current !== sessionKey) {
       return;
     }
-    if (
-      queuedDraft
-      && (queuedDraft.content.trim() || (queuedDraft.uploadedAttachments?.length ?? 0) > 0)
-    ) {
-      writeQueuedMessage(sessionKey, {
-        content: queuedDraft.content,
-        options: queuedDraft.options,
-        attachments: queuedDraft.uploadedAttachments,
-      });
-    } else {
-      clearQueuedMessage(sessionKey);
-    }
-  }, [queuedDraft, sessionKey]);
+    writeQueuedMessages(
+      sessionKey,
+      queuedDrafts.filter(isSendableQueuedDraft).map(toStoredQueuedMessage),
+    );
+  }, [queuedDrafts, sessionKey]);
 
-  // Switching sessions swaps in that session's queued draft. Browser File
-  // objects are local to the mounted composer, while their already-uploaded
-  // descriptors restore from storage and remain sendable.
+  // Switching sessions swaps in that session's queue. Browser File objects are
+  // local to the mounted composer, while their already-uploaded descriptors
+  // restore from storage and remain sendable.
   useEffect(() => {
     queuedDraftSessionRef.current = sessionKey;
     if (!sessionKey) {
-      setQueuedDraft(null);
+      setQueuedDrafts([]);
       return;
     }
-    setQueuedDraft(restoreQueuedDraft(sessionKey));
+    setQueuedDrafts(restoreQueuedDrafts(sessionKey));
   }, [sessionKey]);
 
   useEffect(() => {
@@ -1249,7 +1326,7 @@ export function useChatComposerState({
     isDragActive,
     openAttachmentPicker: open,
     handleSubmit,
-    queuedDraft,
+    queuedDrafts,
     editQueuedDraft,
     deleteQueuedDraft,
     handleVoiceTranscript,

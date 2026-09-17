@@ -4,17 +4,22 @@ import { PencilIcon, XIcon } from 'lucide-react';
 type QueuedMessageCardProps = {
   content: string;
   attachmentCount?: number;
+  /** 대기 순번(1부터). 한 건뿐이면 붙이지 않는다. */
+  position?: number;
+  queueLength?: number;
   onEdit: () => void;
   onDelete: () => void;
 };
 
 /**
- * Rendered by chat's ChatComposer to show the message queued for a busy
+ * Rendered by chat's ChatComposer to show one message queued for a busy
  * session, with edit and delete actions before it is auto-sent.
  */
 export default function QueuedMessageCard({
   content,
   attachmentCount = 0,
+  position,
+  queueLength = 1,
   onEdit,
   onDelete,
 }: QueuedMessageCardProps) {
@@ -28,8 +33,16 @@ export default function QueuedMessageCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-primary/70">
             <span>{t('input.queue.label', { defaultValue: 'Queued' })}</span>
+            {queueLength > 1 && position !== undefined && (
+              <span className="tabular-nums text-primary/60">
+                {position}/{queueLength}
+              </span>
+            )}
             <span className="normal-case text-muted-foreground/60">
-              · {t('input.queue.willSend', { defaultValue: 'Will send when this finishes' })}
+              ·{' '}
+              {queueLength > 1
+                ? t('input.queue.willSendInOrder', { defaultValue: 'Will send in order' })
+                : t('input.queue.willSend', { defaultValue: 'Will send when this finishes' })}
             </span>
           </div>
           <p className="mt-0.5 line-clamp-2 break-words text-sm text-foreground/90">{content}</p>

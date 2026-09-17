@@ -5,6 +5,7 @@ import {
 } from '@/shared/authToken';
 import { IS_PLATFORM } from '@/shared/utils';
 import { readVoiceConfig, voiceConfigHeaders } from '@/shared/voiceConfig';
+import type { TelegramSettingsUpdate } from '@/shared/types';
 
 // Headers are a plain record rather than the full `HeadersInit` union so the
 // defaults below can be merged with a caller's headers by spreading.
@@ -193,12 +194,19 @@ export const api = {
     get(`/api/projects/${encodeURIComponent(projectId)}/taskmaster`),
   renameProject: (projectId: string, displayName: string) =>
     put(`/api/projects/${projectId}/rename`, { displayName }),
+  // Repoints an existing project at a different folder. The folder itself is not moved.
+  updateProjectPath: (projectId: string, projectPath: string) =>
+    put(`/api/projects/${encodeURIComponent(projectId)}/path`, { path: projectPath }),
   restoreProject: (projectId: string) =>
     post(`/api/projects/${encodeURIComponent(projectId)}/restore`),
   // `hardDelete` => server `?force=true` (remove DB row + Claude *.jsonl + sessions rows for path).
   deleteProject: (projectId: string, hardDelete = false) =>
     del(`/api/projects/${projectId}${query({ force: hardDelete })}`),
   createProject: (projectData: unknown) => post('/api/projects/create-project', projectData),
+  // Reports what is already in the clone target folder so the wizard can ask
+  // before git touches a folder that already holds source.
+  cloneProjectPreflight: (projectPath: string, githubUrl: string) =>
+    get(`/api/projects/clone-preflight${query({ path: projectPath, githubUrl })}`),
   migrateLegacyProjectStars: (projectIds: string[]) =>
     post('/api/projects/migrate-legacy-stars', { projectIds }),
   toggleProjectStar: (projectId: string) =>
@@ -496,6 +504,25 @@ export const api = {
         post('/api/settings/push/subscribe', subscription),
       unsubscribe: (endpoint: string) => post('/api/settings/push/unsubscribe', { endpoint }),
     },
+  },
+
+  // 텔레그램 브리지. 봇 토큰과 허용 chat id 는 `.env` 가 아니라 서버 설정에 있어서
+  // 설정 화면이 여기로 읽고 쓴다. `settings` 가 돌려주는 토큰은 항상 마스킹된 값이고,
+  // 평문 토큰이 실릴 수 있는 것은 방금 입력한 값을 확인하는 `test` 뿐이다.
+  telegram: {
+    settings: () => get('/api/telegram/settings'),
+    saveSettings: (settings: TelegramSettingsUpdate) => put('/api/telegram/settings', settings),
+    test: (botToken?: string) => post('/api/telegram/test', botToken ? { botToken } : {}),
+    // 저장된 토큰으로 봇이 받아 둔 메시지를 읽어 chat id 후보를 뽑는다.
+    // 토큰은 보내지 않는다 — 서버가 저장된 것을 쓴다.
+    discoverChats: () => get('/api/telegram/discover-chats'),
+    // 세션 하나의 "이 작업 알림 받기". 켜 둔 동안에는 웹에서 시작한 작업도
+    // 끝나면 텔레그램으로 간다. 텔레그램에서 시작한 작업의 회신은 이 값과
+    // 무관하게 항상 온다.
+    sessionNotifications: (sessionId: string) =>
+      get(`/api/telegram/session-notifications?sessionId=${encodeURIComponent(sessionId)}`),
+    saveSessionNotifications: (sessionId: string, enabled: boolean) =>
+      put('/api/telegram/session-notifications', { sessionId, enabled }),
   },
 
   plugins: {

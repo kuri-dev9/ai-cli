@@ -203,6 +203,8 @@ export type MessageKind =
  */
 export type GatewayEventKind =
   | 'chat_subscribed'
+  /** 소켓 없이 시작된 턴의 실행 여부. 자세한 사정은 run-state-broadcast.service 참고. */
+  | 'run_state'
   | 'session_upserted'
   | 'loading_progress'
   | 'protocol_error';
@@ -280,6 +282,11 @@ export type NormalizedMessage = {
   seq?: number;
   role?: 'user' | 'assistant';
   content?: string;
+  /**
+   * 이 메시지가 앱 바깥에서 들어왔을 때의 통로. 브라우저에서 친 메시지에는
+   * 없다. 기록을 나중에 볼 때 밖에서 급히 시킨 것인지 구분하려고 붙인다.
+   */
+  source?: 'telegram';
   /**
    * Optional display-oriented metadata used by providers that need to expose
    * richer transcript artifacts without introducing a brand-new message kind.

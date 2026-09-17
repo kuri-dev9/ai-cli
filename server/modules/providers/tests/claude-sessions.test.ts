@@ -571,3 +571,94 @@ test('resolving an edit anchor skips rows that are not conversation turns', { co
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+/**
+ * Token-level streaming. The SDK only emits these once `includePartialMessages`
+ * is set, and it wraps every raw Anthropic event as `stream_event`. The bare
+ * (unwrapped) shape is kept working for callers that pass an event directly.
+ */
+test('a wrapped text delta becomes a stream_delta', () => {
+  const normalized = new ClaudeSessionsProvider().normalizeMessage({
+    type: 'stream_event',
+    session_id: SESSION_ID,
+    parent_tool_use_id: null,
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hel' } },
+  }, SESSION_ID);
+
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].kind, 'stream_delta');
+  assert.equal(normalized[0].content, 'Hel');
+});
+
+test('an unwrapped text delta still becomes a stream_delta', () => {
+  const normalized = new ClaudeSessionsProvider().normalizeMessage({
+    type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'lo' },
+  }, SESSION_ID);
+
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].kind, 'stream_delta');
+  assert.equal(normalized[0].content, 'lo');
+});
+
+test('a block stop closes the stream', () => {
+  const normalized = new ClaudeSessionsProvider().normalizeMessage({
+    type: 'stream_event',
+    session_id: SESSION_ID,
+    parent_tool_use_id: null,
+    event: { type: 'content_block_stop', index: 0 },
+  }, SESSION_ID);
+
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].kind, 'stream_end');
+});
+
+test('thinking and tool-input deltas never reach the transcript as text', () => {
+  const provider = new ClaudeSessionsProvider();
+
+  for (const delta of [
+    { type: 'thinking_delta', thinking: 'weighing options' },
+    { type: 'input_json_delta', partial_json: '{"file_pa' },
+    { type: 'signature_delta', signature: 'abc' },
+  ]) {
+    assert.deepEqual(provider.normalizeMessage({
+      type: 'stream_event',
+      session_id: SESSION_ID,
+      parent_tool_use_id: null,
+      event: { type: 'content_block_delta', index: 0, delta },
+    }, SESSION_ID), [], `${delta.type} leaked into the transcript`);
+  }
+});
+
+test('a subagent delta stays out of the main thread', () => {
+  const provider = new ClaudeSessionsProvider();
+
+  assert.deepEqual(provider.normalizeMessage({
+    type: 'stream_event',
+    session_id: SESSION_ID,
+    parent_tool_use_id: AGENT_TOOL_USE_ID,
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'subagent says' } },
+  }, SESSION_ID), []);
+
+  assert.deepEqual(provider.normalizeMessage({
+    type: 'stream_event',
+    session_id: SESSION_ID,
+    parent_tool_use_id: AGENT_TOOL_USE_ID,
+    event: { type: 'content_block_stop', index: 0 },
+  }, SESSION_ID), []);
+});
+
+test('partial events with no transcript shape are dropped, not read as empty turns', () => {
+  const provider = new ClaudeSessionsProvider();
+
+  for (const event of [
+    { type: 'message_start', message: { role: 'assistant', content: [] } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+    { type: 'message_stop' },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    { type: 'ping' },
+  ]) {
+    assert.deepEqual(provider.normalizeMessage({
+      type: 'stream_event', session_id: SESSION_ID, parent_tool_use_id: null, event,
+    }, SESSION_ID), [], `${event.type} produced a message`);
+  }
+});

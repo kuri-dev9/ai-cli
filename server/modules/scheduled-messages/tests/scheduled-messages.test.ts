@@ -117,6 +117,84 @@ test('a queued message stays pending while its session is busy', async () => {
   });
 });
 
+test('every queued message is sent, in the order it was queued', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    // 이전 구현은 큐 자리가 하나라, 두 번째를 넣으면 첫 번째가 사라졌다.
+    sessionDraftsDb.saveDraft(userId, SESSION_ID, {
+      text: '',
+      queuedMessage: {
+        v: 2,
+        items: [
+          { content: 'first question' },
+          { content: 'second question' },
+          { content: 'third question' },
+        ],
+      },
+    });
+
+    const runs: RunCall[] = [];
+    // 한 패스에 한 건 — 세션은 한 번에 한 턴만 돈다.
+    assert.equal(await dispatchQueuedMessages(createRuntime(runs)), 1);
+    assert.equal(await dispatchQueuedMessages(createRuntime(runs)), 1);
+    assert.equal(await dispatchQueuedMessages(createRuntime(runs)), 1);
+    assert.equal(await dispatchQueuedMessages(createRuntime(runs)), 0);
+
+    assert.deepEqual(runs.map((run) => run.command), [
+      'first question',
+      'second question',
+      'third question',
+    ]);
+    assert.equal(sessionDraftsDb.getDrafts(userId).length, 0);
+  });
+});
+
+test('a queue written by the old single-message build is still sent', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    sessionDraftsDb.saveDraft(userId, SESSION_ID, {
+      text: '',
+      queuedMessage: { content: 'queued before the upgrade' },
+    });
+
+    const runs: RunCall[] = [];
+    assert.equal(await dispatchQueuedMessages(createRuntime(runs)), 1);
+    assert.equal(runs[0].command, 'queued before the upgrade');
+  });
+});
+
+test('a send that fails puts the message back at the head of the queue', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    sessionDraftsDb.saveDraft(userId, SESSION_ID, {
+      text: '',
+      queuedMessage: { v: 2, items: [{ content: 'must not vanish' }, { content: 'behind it' }] },
+    });
+
+    // 프로바이더가 잠깐 내려간 상태. 예전에는 이런 실패에서 메시지를 지웠다.
+    const brokenRuntime = { hasRuntime: () => false, run: async () => {}, abort: async () => true } as never;
+    await dispatchQueuedMessages(brokenRuntime);
+
+    const queued = sessionDraftsDb.getDrafts(userId)[0]?.queuedMessage as { items: Array<{ content: string }> };
+    assert.deepEqual(queued.items.map((item) => item.content), ['must not vanish', 'behind it']);
+  });
+});
+
+test('the rest of the queue survives one message being claimed', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    sessionDraftsDb.saveDraft(userId, SESSION_ID, {
+      text: 'still typing this',
+      queuedMessage: { v: 2, items: [{ content: 'one' }, { content: 'two' }] },
+    });
+
+    const runs: RunCall[] = [];
+    await dispatchQueuedMessages(createRuntime(runs));
+
+    const draft = sessionDraftsDb.getDrafts(userId)[0];
+    const queued = draft?.queuedMessage as { items: Array<{ content: string }> };
+    assert.deepEqual(queued.items.map((item) => item.content), ['two']);
+    // 큐를 꺼냈다고 입력창에 쓰던 글까지 지우면 안 된다.
+    assert.equal(draft?.text, 'still typing this');
+  });
+});
+
 test('a due message interrupts a run in progress instead of failing', async () => {
   await withIsolatedDatabase(async (userId) => {
     scheduledMessagesService.schedule({

@@ -1,7 +1,8 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, SquarePen } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Button } from '@/shared/ui';
 import type { AppTab, Project, ProjectSession } from '@/shared/types';
 import { cn } from '@/shared/utils';
 import MobileMenuButton from '@/modules/project-workspace/MobileMenuButton';
@@ -17,6 +18,8 @@ type WorkspaceHeaderProps = {
   shouldShowBrowserTab: boolean;
   isMobile: boolean;
   onMenuClick: () => void;
+  /** 지금 열려 있는 프로젝트에서 새 대화를 시작한다. */
+  onNewSession: () => void;
 };
 
 /** Rendered by WorkspaceMain to show the workspace title alongside the scrollable tab bar. */
@@ -29,6 +32,7 @@ export default function WorkspaceHeader({
   shouldShowBrowserTab,
   isMobile,
   onMenuClick,
+  onNewSession,
 }: WorkspaceHeaderProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -102,6 +106,19 @@ export default function WorkspaceHeader({
             selectedSession={selectedSession}
             shouldShowTasksTab={shouldShowTasksTab}
           />
+
+          {/* 대화를 보고 있는 동안에도 새 대화를 시작할 수 있어야 한다 — 예전에는
+              사이드바에서 프로젝트를 펼치거나 ⌘K 를 열어야만 가능했다. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 flex-shrink-0 rounded-lg p-0 text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+            onClick={onNewSession}
+            title={t('mainContent.startNewSession')}
+            aria-label={t('mainContent.startNewSession')}
+          >
+            <SquarePen className="h-4 w-4" />
+          </Button>
         </div>
 
         <div className="-mx-3 min-w-0 sm:mx-0 sm:flex-1">

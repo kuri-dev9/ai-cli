@@ -123,7 +123,8 @@
       "ctrlEnter": "Ctrl+Enter to send • Shift+Enter for new line • Tab to change modes • / for slash commands",
       "enter": "Enter to send • Shift+Enter for new line • Tab to change modes • / for slash commands",
       "queue": "Enter to queue your next message",
-      "updateQueued": "Enter to update queued message"
+      "updateQueued": "Enter to update queued message",
+      "queueAnother": "Enter to add to the queue ({{count}} waiting)"
     },
     "clickToChangeMode": "Click to change permission mode (or press Tab in input)",
     "showAllCommands": "Show all commands",
@@ -135,7 +136,9 @@
       "label": "Queued",
       "willSend": "Will send when this finishes",
       "edit": "Edit queued message",
-      "delete": "Delete queued message"
+      "delete": "Delete queued message",
+      "willSendInOrder": "Will send in order",
+      "addAnother": "Add to the queue"
     }
   },
   "composer": {
@@ -265,7 +268,10 @@
   },
   "message": {
     "editAndResend": "Edit and resend",
-    "forkFromHere": "Fork from here"
+    "forkFromHere": "Fork from here",
+    "source": {
+      "telegram": "Telegram"
+    }
   },
   "export": {
     "trigger": "Export conversation",
@@ -340,7 +346,7 @@
       "modelsSubtitle": "Pick the model this provider should use.",
       "costEyebrow": "Session telemetry",
       "costTitle": "Token Usage",
-      "costSubtitle": "Input, output, and total token counts for this session.",
+      "costSubtitle": "How much of the context window this conversation is using.",
       "statusEyebrow": "Runtime health",
       "statusTitle": "System Status",
       "statusSubtitle": "Version, provider, runtime, and environment details in one place.",
@@ -354,6 +360,16 @@
     "tokensLabel_one": "token",
     "tokensLabel_other": "tokens",
     "escClosesModal": "Esc closes the modal.",
-    "close": "Close"
+    "close": "Close",
+    "tokensRemaining": "Remaining",
+    "tokensUsedPercent": "Usage",
+    "contextWindowUsage": "Context window",
+    "tokensRemainingHint": "{{remaining}} tokens left ({{percent}} used)",
+    "contextUsed": "Context used",
+    "promptTokens": "Prompt (incl. cache)",
+    "lastReplyTokens": "Last reply",
+    "contextUsedPercent": "Context filled",
+    "contextUsageDisclaimer": "This is how full the conversation is — not your plan usage. For that, including reset times, check /usage in the CLI.",
+    "contextResetHint": "It does not reset on a timer — compact the conversation or start a new one to clear it."
   }
 }
