@@ -26,6 +26,21 @@ const SEARCH_SCROLL_RETRIES = 20;
 const SEARCH_SCROLL_RETRY_DELAY_MS = 150;
 
 /**
+ * 따라가기를 놓는 거리와 다시 붙는 거리.
+ *
+ * 두 값이 달라야 한다. 하나였을 때는 그 선을 스치기만 해도 다시 붙었고,
+ * 답이 자라는 동안에는 바닥이 계속 내려가므로 사용자가 읽으려고 멈춘 자리가
+ * 자꾸 그 선 안으로 들어왔다. 내려오는 길에 우연히 가까워진 것과 바닥까지
+ * 내려간 것은 다른 의도다.
+ *
+ * 놓을 때는 넉넉하게(50px) — 한 줄 늘어났다고 놓아 버리면 안 된다.
+ * 다시 붙을 때는 인색하게(8px) — 진짜 바닥에 닿았을 때만 붙는다. 그래도
+ * 붙이고 싶으면 바닥으로 가는 버튼이 따로 있다.
+ */
+const DETACH_FROM_BOTTOM_PX = 50;
+const REATTACH_TO_BOTTOM_PX = 8;
+
+/**
  * Finds the rendered row for a resolved search target.
  *
  * Only an exact timestamp match counts while retries remain: the widened window
@@ -451,12 +466,18 @@ export function useChatSessionState({
     }
   }, [allMessagesLoaded, scrollToBottom]);
 
-  const isNearBottom = useCallback(() => {
+  /** 바닥까지 남은 거리. 컨테이너가 없으면 `null`. */
+  const readDistanceFromBottom = useCallback((): number | null => {
     const container = scrollContainerRef.current;
-    if (!container) return false;
+    if (!container) return null;
     const { scrollTop, scrollHeight, clientHeight } = container;
-    return scrollHeight - scrollTop - clientHeight < 50;
+    return scrollHeight - scrollTop - clientHeight;
   }, []);
+
+  const isNearBottom = useCallback(() => {
+    const distance = readDistanceFromBottom();
+    return distance !== null && distance < DETACH_FROM_BOTTOM_PX;
+  }, [readDistanceFromBottom]);
 
   const loadOlderMessages = useCallback(
     async (container: HTMLDivElement) => {
@@ -523,8 +544,14 @@ export function useChatSessionState({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const nearBottom = isNearBottom();
-    setIsUserScrolledUp(!nearBottom);
+    // 놓는 선과 붙는 선이 다르다(위 상수 참고). 이전 값을 봐야 어느 선을
+    // 적용할지 알 수 있으므로 함수형 갱신을 쓴다.
+    const distanceFromBottom = readDistanceFromBottom() ?? Number.POSITIVE_INFINITY;
+    setIsUserScrolledUp((wasScrolledUp) => (
+      wasScrolledUp
+        ? distanceFromBottom > REATTACH_TO_BOTTOM_PX
+        : distanceFromBottom >= DETACH_FROM_BOTTOM_PX
+    ));
     scrollPositionRef.current = {
       height: container.scrollHeight,
       top: container.scrollTop,
@@ -557,7 +584,7 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [hasMoreMessages, isActive, isNearBottom, loadOlderMessages]);
+  }, [hasMoreMessages, isActive, loadOlderMessages, readDistanceFromBottom]);
 
   const wasChatActiveRef = useRef(isActive);
   useLayoutEffect(() => {

@@ -34,10 +34,12 @@ written from five places coordinated by refs and timers rather than by one owner
    The append-follow effect, the tab-reactivation branch of the `useLayoutEffect`, and the
    jump-to-bottom button in `ChatInterface.tsx`. Predict from it: if the flag is `true`,
    no automatic scroll happens, and the round arrow button is on screen.
-4. **The flag is only recomputed from an input event.** `handleScroll` runs on `scroll`,
-   `wheel` and `touchmove`, and applies one test — `scrollHeight - scrollTop - clientHeight
-   < 50`. Content that grows *below* the fold does not move `scrollTop`, emits no event, and
-   therefore leaves the flag stale.
+4. **The flag is only recomputed from an input event, and the two directions use
+   different distances.** `handleScroll` runs on `scroll`, `wheel` and `touchmove`, and
+   reads `scrollHeight - scrollTop - clientHeight`. Following is *released* at
+   `DETACH_FROM_BOTTOM_PX = 50` and only *re-taken* at `REATTACH_TO_BOTTOM_PX = 8` — the
+   user has to reach the actual bottom to hand control back. Content that grows *below* the
+   fold does not move `scrollTop`, emits no event, and therefore leaves the flag stale.
 5. **A deferred scroll must re-read intent at fire time.** `isUserScrolledUpRef` mirrors
    the state so a timer armed 50 ms or 200 ms ago can ask whether the user has scrolled
    away since. Adding a timed scroll without that check reintroduces the bug
@@ -129,13 +131,26 @@ then the only way for the user to reach the top pager or the "load all" overlay.
 
 ## Staying at the bottom
 
-**RULE: the user is "at the bottom" when fewer than 50 px of content sit below the fold.**
+**RULE: following is released 50 px from the bottom and only re-taken at 8 px.**
 
-`useChatSessionState.ts` → `isNearBottom` returns
-`scrollHeight - scrollTop - clientHeight < 50`, and `false` when there is no container.
-`handleScroll` calls it on every `scroll`, `wheel` and `touchmove` (after bailing out when
-the Chat tab is inactive), writes `setIsUserScrolledUp(!nearBottom)`, and records the
-current `{height, top}` into `scrollPositionRef` for the tab-reactivation restore. A
+`useChatSessionState.ts` → `readDistanceFromBottom` returns
+`scrollHeight - scrollTop - clientHeight`, or `null` when there is no container.
+`handleScroll` reads it on every `scroll`, `wheel` and `touchmove` (after bailing out when
+the Chat tab is inactive) and flips the flag through a *functional* update, because which
+threshold applies depends on the flag's previous value:
+
+- following (`isUserScrolledUp === false`) → released once the gap reaches
+  `DETACH_FROM_BOTTOM_PX = 50`, so one extra line of streamed text never releases it;
+- released (`true`) → re-taken only once the gap drops to `REATTACH_TO_BOTTOM_PX = 8`.
+
+The gap between the two is the point. With one shared threshold, a bottom that keeps
+moving — every streamed chunk pushes it down — swept past a stationary reader often enough
+that merely scrolling *toward* the bottom yanked the view down before they arrived.
+`isNearBottom` still exists as the 50 px test and has one caller left: the external-update
+refresh decides from it whether to stick.
+
+`handleScroll` also records the current `{height, top}` into `scrollPositionRef` for the
+tab-reactivation restore. A
 separate effect mirrors the state into `isUserScrolledUpRef` — an effect rather than an
 assignment beside each setter, because `setIsUserScrolledUp` is also returned from the hook
 and called by the composer.
@@ -161,8 +176,8 @@ flowchart TD
 
 That is the whole auto-follow. Note what re-runs it. A new **row** re-follows; the 100 ms
 streaming flushes that rewrite an existing row in place do not (see the gotchas). And
-because `isUserScrolledUp` is a dependency, dropping back inside the 50 px band arms one
-more scroll that finishes the trip to the bottom.
+because `isUserScrolledUp` is a dependency, reaching the bottom arms one more scroll that
+finishes the last few pixels.
 
 ### Follow and detached
 
@@ -171,7 +186,7 @@ flowchart LR
   S["Settling — pendingInitialScrollRef is set"] -->|"height stable for 3 frames or 60 frames elapsed"| F["Following — isUserScrolledUp is false"]
   S -->|"a search target was armed for this session"| J["Jumping — searchScrollActiveRef is set"]
   F -->|"input event and the gap from the bottom is 50 px or more"| D["Detached — isUserScrolledUp is true"]
-  D -->|"input event and the gap is under 50 px"| F
+  D -->|"input event and the gap is 8 px or less"| F
   D -->|"jump-to-bottom button"| F
   D -->|"user sends a message"| F
   J -->|"target row centred, then its scroll event fires"| D
@@ -222,7 +237,7 @@ sequenceDiagram
     U->>P: press jump-to-bottom
     P->>P: scrollToBottomAndReset sets scrollTop to scrollHeight
     P->>H: scroll event
-    H->>H: gap is under 50 px, set isUserScrolledUp false
+    H->>H: gap is 8 px or less, set isUserScrolledUp false
 ```
 
 ## Deferred scrolls re-check intent
@@ -558,7 +573,7 @@ a scroll event.
 
 | If you touch | Also check |
 | --- | --- |
-| The 50 px threshold in `isNearBottom` | The follow effect, the tab-reactivation branch and the jump-to-bottom button all read the same flag. |
+| `DETACH_FROM_BOTTOM_PX` or `REATTACH_TO_BOTTOM_PX` | Keep them apart. Collapsing them back into one threshold is the bug `transcriptScrollOwnership.test.tsx` now pins: a moving bottom sweeps past a stationary reader, so scrolling *toward* the bottom re-takes control before they arrive. The follow effect, the tab-reactivation branch and the jump-to-bottom button all read the one flag these two thresholds write. |
 | The `< 100` top zone or the `> 20` lock release | `topLoadLockRef` must still need an explicit move away from the top, or paging runs away. |
 | `chatMessages` shape or identity | The follow effect and the restore/reactivation `useLayoutEffect` are both keyed on `chatMessages.length`; in-place row rewrites are invisible to both. |
 | Anything that adds a deferred scroll | It must re-read `isUserScrolledUpRef` at fire time, or `transcriptScrollOwnership.test.tsx` should fail. |

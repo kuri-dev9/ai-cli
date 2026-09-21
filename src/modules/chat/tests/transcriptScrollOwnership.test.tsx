@@ -203,6 +203,72 @@ describe('deferred scroll-to-bottom', () => {
   });
 });
 
+describe('following the bottom is released and re-taken at different distances', () => {
+  /**
+   * 스트리밍 중에는 바닥이 계속 내려가므로, 읽으려고 멈춘 자리가 가만히 있어도
+   * 바닥과의 거리가 자꾸 바뀐다. 놓는 선과 붙는 선이 같으면 그 선을 스치는
+   * 것만으로 화면이 다시 끌려 내려갔다.
+   */
+  it('stays released until the user reaches the actual bottom', async () => {
+    const messages = new Map<string, NormalizedMessage[]>([
+      [SESSION_A, [buildMessage(0, '2026-01-01T00:00:00.000Z')]],
+    ]);
+    const store = createStore(messages);
+    const { result } = await renderChatSessionState({
+      session: { id: SESSION_A } as ProjectSession,
+      store,
+    });
+
+    const container = createContainer(5000, 500);
+    (result.current.scrollContainerRef as { current: HTMLDivElement | null }).current = container.element;
+
+    const scrollTo = async (distanceFromBottom: number) => {
+      container.element.scrollTop = 5000 - 500 - distanceFromBottom;
+      await act(async () => {
+        await result.current.handleScroll();
+      });
+    };
+
+    await scrollTo(0);
+    expect(result.current.isUserScrolledUp).toBe(false);
+
+    // 위로 올리면 놓는다.
+    await scrollTo(300);
+    expect(result.current.isUserScrolledUp).toBe(true);
+
+    // 바닥 근처까지 내려왔지만 바닥은 아니다. 예전 규칙(50px 하나)이라면
+    // 여기서 다시 붙어서 화면을 끌어내렸다.
+    await scrollTo(30);
+    expect(result.current.isUserScrolledUp).toBe(true);
+
+    // 진짜 바닥에 닿았을 때만 다시 따라간다.
+    await scrollTo(0);
+    expect(result.current.isUserScrolledUp).toBe(false);
+  });
+
+  it('does not release on a few pixels of growth below the fold', async () => {
+    const messages = new Map<string, NormalizedMessage[]>([
+      [SESSION_A, [buildMessage(0, '2026-01-01T00:00:00.000Z')]],
+    ]);
+    const store = createStore(messages);
+    const { result } = await renderChatSessionState({
+      session: { id: SESSION_A } as ProjectSession,
+      store,
+    });
+
+    const container = createContainer(5000, 500);
+    (result.current.scrollContainerRef as { current: HTMLDivElement | null }).current = container.element;
+
+    container.element.scrollTop = 5000 - 500 - 20;
+    await act(async () => {
+      await result.current.handleScroll();
+    });
+
+    // 따라가는 중에 한 줄 자란 정도로는 놓지 않는다 — 놓는 선은 넉넉하다.
+    expect(result.current.isUserScrolledUp).toBe(false);
+  });
+});
+
 describe('search jump ownership', () => {
   it('does not follow the user into the next session', { timeout: 20_000 }, async () => {
     const messages = new Map<string, NormalizedMessage[]>([
