@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Load environment variables before other imports execute.
 import './load-env.js';
+// 같은 이유로 여기 있어야 한다 — import 는 호이스팅되므로, 본문에 적으면 아래
+// 모듈들이 먼저 평가된 뒤에야 설정된다.
+import './configure-network.js';
 import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
