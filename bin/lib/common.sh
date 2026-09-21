@@ -15,7 +15,10 @@ COMMON_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$COMMON_SH_DIR/../.." && pwd)"
 
 LOG_DIR="$PROJECT_ROOT/logs"
-RUN_DIR="$PROJECT_ROOT/run"
+# 숨김 폴더인 이유: 예전 이름은 `run` 이었는데, 쉘에서 `run` 까지 치고 탭을
+# 누르면 `run.sh` 와 붙어서 매번 한 글자를 더 쳐야 했다. 사람이 부르는 이름은
+# `run.sh` 하나여야 한다.
+RUN_DIR="$PROJECT_ROOT/.run"
 
 SERVER_LOG="$LOG_DIR/server.log"
 WATCHDOG_LOG="$LOG_DIR/watchdog.log"
