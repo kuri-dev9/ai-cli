@@ -6,6 +6,11 @@ import test from 'node:test';
 
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 
+// `CLAUDE_CONFIG_DIR` relocates Claude's whole config directory, and it may well
+// be set in the environment running these tests. Clearing it keeps the fixture
+// home authoritative instead of the machine's real Claude root.
+delete process.env.CLAUDE_CONFIG_DIR;
+
 const patchHomeDir = (nextHomeDir: string) => {
   const original = os.homedir;
   (os as any).homedir = () => nextHomeDir;

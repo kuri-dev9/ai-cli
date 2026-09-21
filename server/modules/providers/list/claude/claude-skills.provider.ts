@@ -1,5 +1,4 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import { SkillsProvider } from '@/modules/providers/shared/skills/skills.provider.js';
@@ -11,13 +10,12 @@ import type {
 } from '@/shared/types.js';
 import {
   findProviderSkillMarkdownFiles,
+  getClaudeHomeDirectory,
   readJsonConfig,
   readObjectRecord,
   readOptionalString,
   readProviderSkillMarkdownDefinition,
 } from '@/shared/utils.js';
-
-const getClaudeHomePath = (): string => path.join(os.homedir(), '.claude');
 
 const getClaudePluginName = (pluginId: string): string | null => {
   const normalizedPluginId = pluginId.trim();
@@ -78,12 +76,12 @@ export class ClaudeSkillsProvider extends SkillsProvider {
   async listSkills(options?: ProviderSkillListOptions): Promise<ProviderSkill[]> {
     return [
       ...(await super.listSkills(options)),
-      ...(await this.listPluginSkills(getClaudeHomePath())),
+      ...(await this.listPluginSkills(getClaudeHomeDirectory())),
     ];
   }
 
   protected async getSkillSources(workspacePath: string): Promise<ProviderSkillSource[]> {
-    const claudeHomePath = getClaudeHomePath();
+    const claudeHomePath = getClaudeHomeDirectory();
 
     return [
       {
@@ -102,7 +100,7 @@ export class ClaudeSkillsProvider extends SkillsProvider {
   protected async getGlobalSkillSource(): Promise<ProviderSkillSource> {
     return {
       scope: 'user',
-      rootDir: path.join(getClaudeHomePath(), 'skills'),
+      rootDir: path.join(getClaudeHomeDirectory(), 'skills'),
       commandPrefix: '/',
     };
   }

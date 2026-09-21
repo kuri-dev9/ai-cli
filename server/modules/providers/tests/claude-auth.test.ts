@@ -20,6 +20,11 @@ type CheckCredentialsResult = {
 const checkCredentials = (auth: ClaudeProviderAuth): Promise<CheckCredentialsResult> =>
   (auth as unknown as { checkCredentials: () => Promise<CheckCredentialsResult> }).checkCredentials();
 
+// `CLAUDE_CONFIG_DIR` relocates Claude's whole config directory, and it may well
+// be set in the environment running these tests. Clearing it keeps the fixture
+// home authoritative instead of the machine's real Claude root.
+delete process.env.CLAUDE_CONFIG_DIR;
+
 const ENV_KEYS = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
 
 const withEnv = async (

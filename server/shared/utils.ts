@@ -41,6 +41,99 @@ import type {
 export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
 
 // ---------------------------
+//----------------- CLAUDE CONFIG DIRECTORY UTILITIES ------------
+/**
+ * Expands a leading `~` in a configured path.
+ *
+ * `.env` values and quoted shell assignments both leave the tilde unexpanded,
+ * and joining that literally would create a directory named `~` beside the
+ * process cwd instead of resolving to the home directory.
+ */
+function expandHomePrefix(candidatePath: string, homeDirectory: string): string {
+  if (candidatePath === '~') {
+    return homeDirectory;
+  }
+
+  if (candidatePath.startsWith('~/') || candidatePath.startsWith(`~${path.sep}`)) {
+    return path.join(homeDirectory, candidatePath.slice(2));
+  }
+
+  return candidatePath;
+}
+
+/**
+ * Resolves the directory Claude Code keeps all of its state in: transcripts
+ * under `projects/`, `settings.json`, `.credentials.json`, `plugins/`, and
+ * `skills/`.
+ *
+ * Claude Code relocates that whole directory when `CLAUDE_CONFIG_DIR` is set,
+ * so every read of a Claude artifact must resolve through here rather than
+ * joining `.claude` onto the home directory. The session runtime forwards the
+ * host environment to the CLI subprocess, so the CLI only ever reads and
+ * writes this one root — a session surfaced from any other root would be
+ * listed in the UI but impossible to resume.
+ *
+ * With the variable unset this returns `<home>/.claude`, exactly matching the
+ * hardcoded path it replaces.
+ *
+ * `homeDirectory` exists for the modules that already inject a home directory
+ * as an explicit dependency (CLI status output, token usage, TaskMaster). The
+ * environment is read on every call instead of being captured at module
+ * evaluation, so a caller — or a test fixture — that changes the variable is
+ * honored without re-importing.
+ *
+ * Consumed by the Claude provider modules (session synchronizer, skills,
+ * auth), the providers services (sessions watcher, token usage), the Agent
+ * module, TaskMaster, and the CLI module.
+ */
+export function getClaudeHomeDirectory(homeDirectory: string = os.homedir()): string {
+  const configuredDirectory = process.env.CLAUDE_CONFIG_DIR?.trim();
+  if (!configuredDirectory) {
+    return path.join(homeDirectory, '.claude');
+  }
+
+  // Absolute and normalized, because callers compare stored transcript paths
+  // against this root to decide whether a row still belongs to the index.
+  return path.resolve(expandHomePrefix(configuredDirectory, homeDirectory));
+}
+
+/**
+ * Resolves Claude Code's `.claude.json`, which holds user- and project-scoped
+ * MCP server definitions.
+ *
+ * This file does *not* live inside the config directory by default: it sits at
+ * `<home>/.claude.json`, beside `<home>/.claude` rather than within it. Only
+ * when `CLAUDE_CONFIG_DIR` relocates the config directory does it move inside,
+ * so it cannot simply be joined onto `getClaudeHomeDirectory()`.
+ *
+ * Consumed by the Claude MCP provider and TaskMaster detection.
+ */
+export function getClaudeConfigFilePath(homeDirectory: string = os.homedir()): string {
+  const configuredDirectory = process.env.CLAUDE_CONFIG_DIR?.trim();
+  if (!configuredDirectory) {
+    return path.join(homeDirectory, '.claude.json');
+  }
+
+  return path.join(getClaudeHomeDirectory(homeDirectory), '.claude.json');
+}
+
+/**
+ * Reports whether `candidatePath` sits inside `directoryPath`.
+ *
+ * Used by the session synchronizer to drop indexed sessions whose transcript
+ * belongs to a Claude config directory that is no longer the active one.
+ */
+export function isPathInsideDirectory(candidatePath: string, directoryPath: string): boolean {
+  const relativePath = path.relative(path.resolve(directoryPath), path.resolve(candidatePath));
+  // A dotfile such as `..hidden` is inside the directory even though it starts
+  // with two dots, so only a real `..` traversal segment counts as escaping.
+  return relativePath !== ''
+    && relativePath !== '..'
+    && !relativePath.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativePath);
+}
+
+// ---------------------------
 //----------------- NORMALIZED MESSAGE HELPER INPUT TYPES ------------
 /**
  * Input payload accepted by `createNormalizedMessage`.

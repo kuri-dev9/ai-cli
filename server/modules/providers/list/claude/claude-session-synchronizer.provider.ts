@@ -1,4 +1,3 @@
-import os from 'node:os';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
@@ -7,6 +6,7 @@ import {
   buildLookupMap,
   extractFirstValidJsonlData,
   findFilesRecursivelyCreatedAfter,
+  getClaudeHomeDirectory,
   normalizeSessionName,
   readFileTimestamps,
 } from '@/shared/utils.js';
@@ -23,7 +23,15 @@ type ParsedSession = {
  */
 export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'claude' as const;
-  private readonly claudeHome = path.join(os.homedir(), '.claude');
+
+  /**
+   * Resolved per access rather than captured once, because `CLAUDE_CONFIG_DIR`
+   * decides this root and a field would freeze whatever value existed when the
+   * provider registry was first imported.
+   */
+  private get claudeHome(): string {
+    return getClaudeHomeDirectory();
+  }
 
   /**
    * Returns true when a JSONL file is a subagent transcript or tool result
@@ -31,7 +39,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    *
    * Claude stores subagent transcripts under a `subagents/` directory and
    * tool results under a `tool-results/` directory, e.g.
-   * `~/.claude/projects/<encoded-cwd>/<session-id>/subagents/agent-<id>.jsonl`.
+   * `<claude-home>/projects/<encoded-cwd>/<session-id>/subagents/agent-<id>.jsonl`.
    * Those files repeat the parent session's `sessionId`, so indexing them as
    * standalone sessions overwrites the parent row's `jsonl_path` and corrupts
    * the main session record. The recursive scan in `synchronize()` reaches
@@ -43,7 +51,8 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
   }
 
   /**
-   * Scans ~/.claude/projects and upserts discovered sessions into DB.
+   * Scans the active Claude config directory's `projects/` folder and upserts
+   * discovered sessions into DB.
    */
   async synchronize(since?: Date): Promise<number> {
     const nameMap = await buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');

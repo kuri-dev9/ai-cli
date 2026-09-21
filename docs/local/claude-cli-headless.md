@@ -335,7 +335,9 @@ stdin으로 control message를 보낸다. **SIGINT 불필요.**
 ### 환경변수 함정
 
 - `CLAUDE_CONFIG_DIR` 을 바꾸면 **OAuth 로그인 정보가 딸려가지 않아 인증이 깨진다.**
-  격리하려면 `ANTHROPIC_API_KEY` 를 함께 넣어야 한다.
+  격리하려면 `ANTHROPIC_API_KEY` 를 함께 넣거나, 새 경로에서 `claude /login` 을 한 번
+  더 해서 그쪽 `.credentials.json` 을 만들어야 한다. 자격증명은 루트마다 따로 논다.
+  이 앱은 이 변수를 따라간다 — [`local-changes.md`](./local-changes.md) 의 수정 16 참고.
 - `CLAUDE_CODE_PROJECT_DIR_NAME` 을 쓰면 transcript 저장 위치가 바뀌는데,
   `list_sessions()` 는 derived slug를 찾으므로 **0건을 반환한다.** 둘을 섞어 쓰지 말 것.
 

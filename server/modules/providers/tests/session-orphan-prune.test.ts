@@ -9,6 +9,11 @@ import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/datab
 // Each provider synchronizer resolves `os.homedir()` when the registry module is
 // first imported, so HOME has to point at an empty fixture home *before* that
 // import runs. Otherwise the sync pass walks the developer's real ~/.claude.
+// `CLAUDE_CONFIG_DIR` relocates Claude's whole config directory, and it may well
+// be set in the environment running these tests. Clearing it keeps the fixture
+// home authoritative instead of the machine's real Claude root.
+delete process.env.CLAUDE_CONFIG_DIR;
+
 const fixtureHome = await mkdtemp(path.join(os.tmpdir(), 'session-prune-home-'));
 const previousHome = process.env.HOME;
 const previousUserProfile = process.env.USERPROFILE;

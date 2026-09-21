@@ -14,7 +14,6 @@
 
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
-import os from 'os';
 import path from 'path';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
@@ -36,7 +35,7 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
-import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
+import { createCompleteMessage, createNormalizedMessage, getClaudeConfigFilePath } from '@/shared/utils.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -635,13 +634,13 @@ function createHeldPromptStream(messages) {
 }
 
 /**
- * Loads MCP server configurations from ~/.claude.json
+ * Loads MCP server configurations from Claude's `.claude.json`
  * @param {string} cwd - Current working directory for project-specific configs
  * @returns {Object|null} MCP servers object or null if none found
  */
 async function loadMcpConfig(cwd) {
   try {
-    const claudeConfigPath = path.join(os.homedir(), '.claude.json');
+    const claudeConfigPath = getClaudeConfigFilePath();
 
     // Check if config file exists
     try {
@@ -658,7 +657,7 @@ async function loadMcpConfig(cwd) {
       const configContent = await fs.readFile(claudeConfigPath, 'utf8');
       claudeConfig = JSON.parse(configContent);
     } catch (error) {
-      console.error('Failed to parse ~/.claude.json:', error.message);
+      console.error(`Failed to parse ${claudeConfigPath}:`, error.message);
       return null;
     }
 

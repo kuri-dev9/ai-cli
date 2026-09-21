@@ -1,9 +1,16 @@
 import path from 'node:path';
 import { access } from 'node:fs/promises';
 
-import { scanStateDb, sessionsDb } from '@/modules/database/index.js';
+import { appConfigDb, scanStateDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { LLMProvider } from '@/shared/types.js';
+import { getClaudeHomeDirectory, isPathInsideDirectory } from '@/shared/utils.js';
+
+/**
+ * Remembers which Claude config directory the index was last built from, so a
+ * change to `CLAUDE_CONFIG_DIR` can be detected across restarts.
+ */
+const CLAUDE_HOME_CONFIG_KEY = 'claude_home_directory';
 
 type SessionSynchronizeResult = {
   processedByProvider: Record<LLMProvider, number>;
@@ -32,12 +39,37 @@ const pathExists = async (target: string): Promise<boolean> => {
  * A row is only dropped when its *containing directory* still exists. That
  * keeps an unmounted or not-yet-created home from being read as "every
  * transcript was deleted" and wiping the whole index.
+ *
+ * Claude rows are additionally dropped when their transcript lives outside the
+ * active Claude config directory. `CLAUDE_CONFIG_DIR` is forwarded to the CLI
+ * subprocess, so the CLI can only resume sessions under the active root:
+ * leaving rows from a previous root in the index would list conversations that
+ * open empty and cannot be continued. Only the database row is removed — the
+ * transcript file itself is never touched, so pointing the variable back at
+ * the old root re-indexes those sessions.
  */
 const pruneOrphanedSessions = async (): Promise<number> => {
   const knownDirectoryExists = new Map<string, boolean>();
   let pruned = 0;
 
-  for (const { session_id: sessionId, jsonl_path: jsonlPath } of sessionsDb.getSessionsWithTranscriptPath()) {
+  const claudeHome = getClaudeHomeDirectory();
+  // Same reasoning as the per-row directory guard: a `CLAUDE_CONFIG_DIR` that
+  // points somewhere unmounted or not yet created must not be read as "every
+  // Claude session belongs to the wrong root".
+  const activeClaudeRootExists = await pathExists(path.join(claudeHome, 'projects'));
+
+  for (const { session_id: sessionId, provider, jsonl_path: jsonlPath } of sessionsDb.getSessionsWithTranscriptPath()) {
+    if (
+      provider === 'claude'
+      && activeClaudeRootExists
+      && !isPathInsideDirectory(jsonlPath, claudeHome)
+    ) {
+      if (sessionsDb.deleteSessionById(sessionId)) {
+        pruned += 1;
+      }
+      continue;
+    }
+
     if (await pathExists(jsonlPath)) {
       continue;
     }
@@ -77,7 +109,13 @@ let inFlightSynchronization: Promise<SessionSynchronizeResult> | null = null;
  * Runs all provider synchronizers and updates scan_state.last_scanned_at.
  */
 async function runSessionSynchronization(): Promise<SessionSynchronizeResult> {
-  const lastScanAt = scanStateDb.getLastScannedAt();
+  // An incremental scan only looks at files created after the stored cursor, so
+  // transcripts that already existed in a newly configured Claude root would
+  // never be indexed. Whenever the root changes, the cursor is ignored once and
+  // every provider is rescanned in full.
+  const claudeHome = getClaudeHomeDirectory();
+  const claudeHomeChanged = appConfigDb.get(CLAUDE_HOME_CONFIG_KEY) !== claudeHome;
+  const lastScanAt = claudeHomeChanged ? null : scanStateDb.getLastScannedAt();
   const scanBoundary = new Date();
   const processedByProvider: Record<LLMProvider, number> = {
     claude: 0,
@@ -110,6 +148,11 @@ async function runSessionSynchronization(): Promise<SessionSynchronizeResult> {
 
   if (failures.length === 0) {
     scanStateDb.updateLastScannedAt(scanBoundary);
+    // Recorded only after a clean pass, so a failed sync retries the full
+    // rescan on the next run instead of leaving the new root half-indexed.
+    if (claudeHomeChanged) {
+      appConfigDb.set(CLAUDE_HOME_CONFIG_KEY, claudeHome);
+    }
   } else {
     console.warn(
       `[Sessions] Skipping scan_state cursor advance because ${failures.length} provider sync(s) failed.`,

@@ -10,6 +10,11 @@ import type { IProvider } from '@/shared/interfaces.js';
 // Each provider synchronizer resolves `os.homedir()` when the registry module is
 // first imported, so HOME has to point at an empty fixture home *before* that
 // import runs. The registry is stubbed per test, but the import still happens.
+// `CLAUDE_CONFIG_DIR` relocates Claude's whole config directory, and it may well
+// be set in the environment running these tests. Clearing it keeps the fixture
+// home authoritative instead of the machine's real Claude root.
+delete process.env.CLAUDE_CONFIG_DIR;
+
 const fixtureHome = await mkdtemp(path.join(os.tmpdir(), 'session-sync-home-'));
 const previousHome = process.env.HOME;
 const previousUserProfile = process.env.USERPROFILE;

@@ -27,6 +27,7 @@ upstream(siteboon/claudecodeui `1.37.3`)에서 클론한 뒤 로컬에서 고친
 | 13 | 모바일 홈 화면 이름 | `public/manifest.json`, `index.html` | 홈 화면에 추가하면 CloudCLI 로 떴다 |
 | 14 | https 옵션 | `https-config.ts`(신규), `generate-cert.sh`(신규) | 폰에서 평문으로 붙으면 토큰이 노출된다 |
 | 15 | 커밋 이름과 github 계정 분리 | `githubAccount.ts`(신규) | 배지 때문에 커밋 이름을 계정명으로 바꿔야 했다 |
+| 16 | `CLAUDE_CONFIG_DIR` 지원 | `server/shared/utils.ts` + Claude provider 전반 | 환경변수로 Claude 설정 폴더를 옮기면 대화가 빈 화면으로 떴다 |
 
 수정 1·2 는 **기존 동작을 없애지 않고 폴백/필터로만 얹었다.** 설정값을 지우면 원래
 동작으로 돌아간다.
@@ -606,6 +607,106 @@ GitHub 계정 형식일 때만 그걸 쓴다(하위호환).
 
 ---
 
+## 수정 16 — `CLAUDE_CONFIG_DIR` 지원
+
+### 증상
+
+UI 에서 Claude 세션을 열면 메시지가 하나도 안 뜨고 "대화 계속하기" 플레이스홀더와
+`0 / 160K 토큰` 만 보였다. 대화는 정상적으로 진행됐고 transcript 파일도 디스크에
+멀쩡히 있었다.
+
+### 원인
+
+Claude Code 는 `CLAUDE_CONFIG_DIR` 이 설정되면 `~/.claude` 대신 그 경로를 통째로
+쓴다. 그런데 코드 전체에 이 환경변수 참조가 **0건**이었고, 대신
+`path.join(os.homedir(), '.claude')` 가 10곳에 하드코딩돼 있었다.
+
+그래서 세션 동기화가 `~/.claude/projects` 만 훑고 실제 파일이 있는
+`$CLAUDE_CONFIG_DIR/projects` 는 보지 못했다. `sessions` 테이블의 `jsonl_path` 가
+NULL 로 남고, 조회 단계에서 `if (!jsonlPath) return []` 에 걸려 빈 배열이 돌아갔다.
+`provider_session_id` 는 정확히 캡처돼 있었다 — 런타임은 멀쩡했고 **경로 해석만**
+실패한 것이다.
+
+Codex 세션이 멀쩡했던 이유는 `~/.codex/sessions` 가 하드코딩 경로와 일치하기 때문이다.
+
+### 병합하지 않고 단일 루트로 갔다
+
+두 루트(`~/.claude` 와 `$CLAUDE_CONFIG_DIR`)를 모두 스캔해 합치는 선택지가 있었지만
+**버렸다.** `claude-runtime.provider.js` 가 SDK 서브프로세스에
+`env: { ...process.env }` 를 그대로 넘기므로, 실제로 대화를 실행하는 CLI 는
+`CLAUDE_CONFIG_DIR` 한 곳만 본다. 다른 루트의 세션을 목록에 띄워봐야 눌렀을 때
+CLI 가 그 id 를 찾지 못한다 — **열 수 없는 대화로 목록만 채우는 셈**이다.
+
+원칙은 하나다: **UI 가 보여주는 범위 = CLI 가 실제로 쓰는 범위.**
+
+### 해결
+
+`server/shared/utils.ts` 에 헬퍼 2개를 두고 모든 경로를 경유시켰다.
+
+```ts
+getClaudeHomeDirectory(homeDirectory?)  // CLAUDE_CONFIG_DIR ?? <home>/.claude
+getClaudeConfigFilePath(homeDirectory?) // .claude.json 전용
+```
+
+`.claude.json` 에 별도 헬퍼가 필요한 이유: 이 파일은 기본값일 때 `.claude` **안이
+아니라 옆에** 있다(`~/.claude.json`). `CLAUDE_CONFIG_DIR` 이 설정됐을 때만 안으로
+들어간다. 그냥 join 하면 기본 환경에서 회귀가 난다.
+
+환경변수는 **호출할 때마다** 읽는다. 모듈 평가 시점에 잡아두면 값이 얼어붙어서
+테스트에서 교체할 수 없다. 같은 이유로 `ClaudeSessionSynchronizer.claudeHome` 은
+필드에서 getter 로, `PROVIDER_WATCH_PATHS` 는 상수에서 함수로 바꿨다.
+
+### 빠질 뻔한 함정 3가지
+
+**1. 경로만 고치면 기존 대화는 여전히 빈 화면이다.**
+`findFilesRecursivelyCreatedAfter` 는 `birthtime > last_scanned_at` 인 파일만 담는다.
+새 루트의 transcript 들은 이미 저장된 스캔 커서보다 오래됐으므로 증분 스캔이 그냥
+건너뛴다. 그래서 `app_config` 의 `claude_home_directory` 에 루트를 기록해두고,
+값이 달라지면 커서를 무시하고 **1회 전체 재스캔**을 돌린다. 스키마 변경은 없다.
+
+**2. 옛 루트의 세션 행이 저절로 사라지지 않는다.**
+기존 orphan 정리는 "파일이 사라진 행"만 지우는데, 옛 `~/.claude` 의 파일들은 멀쩡히
+존재한다. 그래서 정리 규칙에 "활성 루트 밖의 Claude 행은 삭제"를 추가했다.
+**DB 행만 지운다. transcript 파일은 건드리지 않으므로** 환경변수를 되돌리면 다시
+잡힌다. 루트가 존재하지 않을 때는(오타·미마운트) 이 규칙을 적용하지 않는다 —
+기존의 "디렉터리가 있을 때만 삭제" 가드와 같은 이유다.
+
+**3. 테스트가 개발자의 진짜 설정 폴더를 긁는다.**
+테스트들은 import 전에 `HOME` 을 fixture 로 바꿔 격리하는데, `CLAUDE_CONFIG_DIR` 은
+셸 환경변수라 그걸 뚫고 살아남는다. 영향받는 테스트 5개에서 이 변수를 지웠다.
+
+### 고친 파일
+
+세션 표시에 직접 영향:
+- `claude-session-synchronizer.provider.ts`, `sessions-watcher.service.ts`
+- `provider-token-usage.service.ts`, `session-synchronizer.service.ts`
+- `sessions.db.ts` (정리 규칙이 provider 를 알아야 해서 조회에 컬럼 추가)
+
+같은 원인으로 설정·인증·스킬도 못 읽던 곳:
+- `claude-auth.provider.ts`, `claude-skills.provider.ts`, `claude-mcp.provider.ts`
+- `claude-runtime.provider.js` (MCP 설정 로드 — 원래 보고에 없던 곳)
+- `taskmaster.service.ts`, `agent.routes.ts`, `cli.service.ts`
+
+`<workspace>/.claude/skills` 처럼 **프로젝트 로컬** 경로는 그대로 뒀다. 이건
+설정 폴더가 아니라 작업 폴더 기준이라 환경변수와 무관하다.
+
+### 검증
+
+환경변수가 없으면 기존 동작(`~/.claude` 단독)과 완전히 동일하다. 테스트로 못 박았다.
+
+실제 환경(`CLAUDE_CONFIG_DIR=/Users/linalee/.claude-work`)에서:
+
+```
+processedByProvider: { claude: 3, codex: 54, cursor: 0, opencode: 0 }
+prunedOrphans: 11
+failures: []
+```
+
+NULL 이던 `jsonl_path` 가 모두 채워졌고, 옛 루트 행 11개가 정리됐으며, Codex 54개는
+그대로다. watcher 도 새 루트의 쓰기를 즉시 잡는다.
+
+---
+
 ## 설치 과정에서 겪은 문제
 
 ### npm 11.19+ 가 네이티브 모듈 빌드를 차단한다
@@ -704,6 +805,9 @@ Node v26.8.2 기준, 위 두 수정을 적용한 상태:
 신규  src/shared/enabledProviders.ts
 신규  docs/local/*                                       (이 문서들)
 수정  server/modules/providers/list/claude/claude-auth.provider.ts
+수정  server/shared/utils.ts                             (CLAUDE_CONFIG_DIR 헬퍼)
+수정  server/modules/providers/** , taskmaster, agent, cli  (수정 16 — 목록은 해당 절)
+신규  server/modules/providers/tests/claude-config-dir.test.ts
 수정  src/modules/onboarding/AgentConnectionsStep.tsx
 수정  src/modules/chat/transcript/ProviderSelectionEmptyState.tsx
 수정  src/modules/chat/hooks/useChatProviderState.ts

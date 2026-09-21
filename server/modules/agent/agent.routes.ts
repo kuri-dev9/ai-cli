@@ -5,7 +5,7 @@ import express from 'express';
 
 import type { ProviderRunFunction } from '@/shared/types.js';
 
-import { normalizeProjectPath } from '../../shared/utils.js';
+import { getClaudeHomeDirectory, normalizeProjectPath } from '../../shared/utils.js';
 
 type AgentRouterDependencies = {
   fileSystem: typeof import('node:fs/promises');
@@ -439,7 +439,7 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
   async function cleanupProject(projectPath, sessionId = null) {
     try {
       const externalProjectsRoot = await fs.realpath(
-        path.join(os.homedir(), '.claude', 'external-projects')
+        path.join(getClaudeHomeDirectory(os.homedir()), 'external-projects')
       );
       const canonicalProjectPath = await fs.realpath(projectPath);
       const relativeProjectPath = path.relative(externalProjectsRoot, canonicalProjectPath);
@@ -460,7 +460,7 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
       // Also clean up the Claude session directory if sessionId provided
       if (sessionId) {
         try {
-          const sessionPath = path.join(os.homedir(), '.claude', 'sessions', sessionId);
+          const sessionPath = path.join(getClaudeHomeDirectory(os.homedir()), 'sessions', sessionId);
           console.log('🧹 Cleaning up session directory:', sessionPath);
           await fs.rm(sessionPath, { recursive: true, force: true });
           console.log('✅ Session directory cleaned up');
@@ -922,7 +922,7 @@ export function createAgentRouter(dependencies: AgentRouterDependencies): expres
         } else {
           // Generate a unique path for cloning
           const repoHash = crypto.createHash('md5').update(githubUrl + Date.now()).digest('hex');
-          targetPath = path.join(os.homedir(), '.claude', 'external-projects', repoHash);
+          targetPath = path.join(getClaudeHomeDirectory(os.homedir()), 'external-projects', repoHash);
         }
 
         const clonedProject = await cloneGitHubRepo(githubUrl.trim(), tokenToUse, targetPath);

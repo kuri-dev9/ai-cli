@@ -4,6 +4,11 @@ import test from 'node:test';
 
 import { createTaskmasterService } from '../taskmaster.service.js';
 
+// `CLAUDE_CONFIG_DIR` relocates Claude's whole config directory, and it may well
+// be set in the environment running these tests. Clearing it keeps the fixture
+// home authoritative instead of the machine's real Claude root.
+delete process.env.CLAUDE_CONFIG_DIR;
+
 type ServiceDependencies = Parameters<typeof createTaskmasterService>[0];
 
 function createDependencies(
