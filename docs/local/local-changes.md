@@ -28,6 +28,7 @@ upstream(siteboon/claudecodeui `1.37.3`)에서 클론한 뒤 로컬에서 고친
 | 14 | https 옵션 | `https-config.ts`(신규), `generate-cert.sh`(신규) | 폰에서 평문으로 붙으면 토큰이 노출된다 |
 | 15 | 커밋 이름과 github 계정 분리 | `githubAccount.ts`(신규) | 배지 때문에 커밋 이름을 계정명으로 바꿔야 했다 |
 | 16 | `CLAUDE_CONFIG_DIR` 지원 | `server/shared/utils.ts` + Claude provider 전반 | 환경변수로 Claude 설정 폴더를 옮기면 대화가 빈 화면으로 떴다 |
+| 17 | 텔레그램 위임 해제·스크롤 따라가기·사이드바 | `telegram-bridge/**`, `useChatSessionState.ts`, `sessionAttention.ts`(신규) | 쓰면서 걸린 것 세 가지 |
 
 수정 1·2 는 **기존 동작을 없애지 않고 폴백/필터로만 얹었다.** 설정값을 지우면 원래
 동작으로 돌아간다.
@@ -707,6 +708,77 @@ NULL 이던 `jsonl_path` 가 모두 채워졌고, 옛 루트 행 11개가 정리
 
 ---
 
+## 수정 17 — 쓰면서 걸린 것 세 가지
+
+### 17-1. 텔레그램이 넘겨받은 대화를 놓을 방법이 없었다
+
+웹 입력 맨 앞에 `/bot` 을 붙이면 그 대화를 텔레그램이 넘겨받는데, 그 뒤로는 그
+대화의 모든 웹 작업이 폰으로 갔다. `/off` 는 웹 작업 알림만 끄고 구독은 남기므로
+**완전히 멈추는 길이 없었다.**
+
+- `/unwatch` 를 추가했다. 구독과 알림을 함께 놓는다.
+- `/help` 를 `--help` 처럼 전부 적는 형태로 바꿨다. 무엇이 이쪽으로 오는지를
+  세 가지 규칙으로 나눠 적었다 — 예전 문구는 명령만 나열하고 `/bot` 으로 넘겨받은
+  뒤의 동작을 설명하지 않았다.
+- `setMyCommands` 로 텔레그램 입력창의 `/` 메뉴를 채운다. 명령을 외우지 않아도
+  목록이 뜬다. 등록에 실패해도 브리지는 그대로 뜬다.
+- **"전달했습니다." 를 없앴다.** 결과가 곧 따라오는데 확인 한 줄이 먼저 와서
+  알림만 한 번 더 울리고 대화창을 밀어 올렸다. 실패는 그대로 말한다.
+
+### 17-2. 스트리밍 중 자동 스크롤이 너무 쉽게 다시 붙었다
+
+위로 올리면 따라가기가 멈추는데(정상), 바닥 근처로만 내려가도 다시 붙어서 화면이
+끌려 내려갔다. 실제로는 바닥이 아닌데도 그랬다.
+
+원인은 **놓는 선과 붙는 선이 같은 값(50px)** 이었던 것이다. 답이 자라는 동안에는
+바닥이 계속 내려가므로, 읽으려고 멈춘 자리가 가만히 있어도 그 선이 사용자 쪽으로
+다가온다. 내려오는 길에 잠깐 50px 안에 들어가기만 하면 다시 붙었다.
+
+히스테리시스를 넣었다. 놓는 것은 넉넉하게(`DETACH_FROM_BOTTOM_PX = 50`),
+다시 붙는 것은 인색하게(`REATTACH_TO_BOTTOM_PX = 8`) — **진짜 바닥에 닿아야**
+다시 따라간다. 이전 값을 봐야 어느 선을 쓸지 알 수 있어서 `setIsUserScrolledUp` 을
+함수형 갱신으로 바꿨다.
+
+바닥으로 가는 둥근 버튼은 그대로다. 그게 명시적인 복귀 수단이다.
+
+> 두 값을 다시 하나로 합치면 같은 증상이 돌아온다.
+> `transcriptScrollOwnership.test.tsx` 가 그 경우를 잡는다.
+> 설계 문서는 [`docs/architecture/05-scrolling.md`](../architecture/05-scrolling.md).
+
+### 17-3. 사이드바 — 새 세션 버튼 위치와, 확인하지 않은 대화 표시
+
+**버튼을 목록 아래로 내렸다.** 프로젝트를 펼치는 이유는 대개 하던 대화를 찾기
+위해서인데, 맨 위의 "+ 새 세션" 이 찾는 것을 가리고 서 있었다.
+
+**확인하지 않은 대화 표시가 창을 닫으면 사라졌다.** 이 표시(`attentionSessionIds`)는
+메모리에만 있어서, 답이 온 것을 보고 창을 닫았다가 다시 열면 어느 프로젝트에
+확인할 것이 있었는지 알 수 없었다.
+
+`src/shared/sessionAttention.ts` 를 만들어 브라우저에 두 가지를 적는다.
+
+1. 지금 표시가 붙어 있는 세션들 — 창을 닫아도 남는다.
+2. 각 세션을 마지막으로 열어 본 시각 — 앱이 **꺼져 있는 동안** 끝난 작업을 잡는다.
+   텔레그램으로 넘겨 돌린 작업이나 예약 메시지가 여기서 걸린다. 그때는 알려 줄
+   상대가 없어서 1번이 비어 있다.
+
+빠지기 쉬운 곳 둘:
+
+- **한 번도 열어 본 적 없는 대화는 표시하지 않는다.** 포함하면 이 기능을 켠 첫날
+  사이드바 전체에 점이 찍히고, 그 순간 표시는 아무 의미도 없어진다.
+- **시각은 문자열이 아니라 밀리초로 비교한다.** 서버는 대부분 ISO(`...Z`) 를
+  내려주지만 옛 행에는 SQLite 의 `YYYY-MM-DD HH:MM:SS` 가 남아 있고, 사전순으로
+  비교하면 `' '`(0x20) 와 `'T'`(0x54) 때문에 조용히 뒤집힌다.
+
+서버가 아니라 브라우저에 두는 이유는 "내가 봤다"가 이 기기에서의 사실이기
+때문이다. 폰에서 본 것을 노트북에서 안 봤다고 표시하는 편이, 노트북 화면에 한 번도
+뜬 적 없는 답을 읽은 것으로 처리하는 것보다 낫다.
+
+프로젝트 행의 점은 이미 안쪽 세션 상태를 모아 그리고 있으므로
+(`resolveProjectActivity`) 따로 손대지 않았다 — 표시가 남아 있기만 하면 프로젝트
+행까지 저절로 올라온다.
+
+---
+
 ## 설치 과정에서 겪은 문제
 
 ### npm 11.19+ 가 네이티브 모듈 빌드를 차단한다
@@ -808,6 +880,11 @@ Node v26.8.2 기준, 위 두 수정을 적용한 상태:
 수정  server/shared/utils.ts                             (CLAUDE_CONFIG_DIR 헬퍼)
 수정  server/modules/providers/** , taskmaster, agent, cli  (수정 16 — 목록은 해당 절)
 신규  server/modules/providers/tests/claude-config-dir.test.ts
+신규  src/shared/sessionAttention.ts                     (수정 17-3)
+수정  server/modules/telegram-bridge/**                  (수정 17-1)
+수정  src/modules/chat/hooks/useChatSessionState.ts      (수정 17-2)
+수정  src/modules/sidebar/SidebarProjectSessions.tsx     (수정 17-3)
+수정  src/modules/project-workspace/hooks/useProjectsState.ts (수정 17-3)
 수정  src/modules/onboarding/AgentConnectionsStep.tsx
 수정  src/modules/chat/transcript/ProviderSelectionEmptyState.tsx
 수정  src/modules/chat/hooks/useChatProviderState.ts

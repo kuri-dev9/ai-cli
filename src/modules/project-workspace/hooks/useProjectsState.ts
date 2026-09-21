@@ -10,6 +10,12 @@ import type { ServerEvent,
   ProjectSession,IsSessionProcessing } from '@/shared/types';
 import { mergeProjectSelectionMetadata } from '@/modules/project-workspace/utils/projectSelectionMetadata';
 import { readSelectedProvider } from '@/shared/selectedProvider';
+import {
+  findUnseenSessionIds,
+  readPersistedAttentionIds,
+  recordSessionViewed,
+  writePersistedAttentionIds,
+} from '@/shared/sessionAttention';
 
 type UseProjectsStateArgs = {
   sessionId?: string;
@@ -377,7 +383,11 @@ export function useProjectsState({
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedSession, setSelectedSession] = useState<ProjectSession | null>(null);
-  const [attentionSessionIds, setAttentionSessionIds] = useState<Set<string>>(new Set());
+  // 창을 닫기 전에 붙어 있던 표시를 그대로 들고 시작한다. 확인하지 않은 답이
+  // 있다는 사실은 탭을 닫았다고 사라지는 것이 아니다.
+  const [attentionSessionIds, setAttentionSessionIds] = useState<Set<string>>(
+    () => new Set(readPersistedAttentionIds()),
+  );
   const [activeTab, setActiveTab] = useState<AppTab>(readPersistedTab);
 
   useEffect(() => {
@@ -480,10 +490,18 @@ export function useProjectsState({
     });
   }, [sessionId]);
 
+  useEffect(() => {
+    writePersistedAttentionIds(attentionSessionIds);
+  }, [attentionSessionIds]);
+
   const clearSessionAttention = useCallback((targetSessionId?: string | null) => {
     if (!targetSessionId) {
       return;
     }
+
+    // 표시를 지우는 것과 "봤다"고 적는 것은 같은 사건이다. 이 시각이 있어야
+    // 앱이 꺼진 동안 갱신된 대화를 다음에 열었을 때 다시 집어낼 수 있다.
+    recordSessionViewed(targetSessionId);
 
     setAttentionSessionIds((previous) => {
       if (!previous.has(targetSessionId)) {
@@ -876,6 +894,44 @@ export function useProjectsState({
   useEffect(() => {
     clearSessionAttention(selectedSession?.id ?? sessionId ?? null);
   }, [clearSessionAttention, selectedSession?.id, sessionId]);
+
+  /**
+   * 앱이 꺼져 있는 동안 끝난 턴을 뒤늦게 집어낸다.
+   *
+   * 실시간 이벤트로 붙는 표시는 브라우저가 떠 있을 때만 붙는다. 텔레그램으로
+   * 넘겨 돌린 작업이나 예약 메시지는 창이 닫힌 사이에 끝나므로, 다시 열었을 때
+   * 목록을 훑어 "마지막으로 열어 본 뒤에 움직인 대화"를 찾아내야 한다.
+   */
+  useEffect(() => {
+    if (projects.length === 0) {
+      return;
+    }
+
+    // 보고 있는 대화는 지금 읽는 중이다. 답이 도착해 갱신 시각이 밀리더라도
+    // 확인하지 않은 것으로 잡히면 안 되므로, 여기서 시각을 앞당겨 둔다.
+    const viewedSessionId = selectedSessionRef.current?.id ?? sessionId ?? null;
+    if (viewedSessionId) {
+      recordSessionViewed(viewedSessionId);
+    }
+
+    const unseenSessionIds = findUnseenSessionIds(projects);
+    if (unseenSessionIds.length === 0) {
+      return;
+    }
+
+    setAttentionSessionIds((previous) => {
+      const next = new Set(previous);
+      let changed = false;
+      for (const unseenSessionId of unseenSessionIds) {
+        if (unseenSessionId === viewedSessionId || next.has(unseenSessionId)) {
+          continue;
+        }
+        next.add(unseenSessionId);
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, [projects, sessionId]);
 
   useEffect(() => {
     if (!sessionId) {

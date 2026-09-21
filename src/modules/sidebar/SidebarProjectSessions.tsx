@@ -87,31 +87,6 @@ export default function SidebarProjectSessions({
 
   return (
     <div className="ml-3 space-y-1 border-l border-border pl-3">
-      {isCompact ? (
-        <div className="px-3 pb-1 pt-1">
-          <button
-            className="flex h-8 w-full items-center justify-center gap-2 rounded-md bg-primary text-xs font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 active:scale-[0.98]"
-            onClick={() => {
-              onProjectSelect(project);
-              onNewSession(project);
-            }}
-          >
-            <Plus className="h-3 w-3" />
-            {t('sessions.newSession')}
-          </button>
-        </div>
-      ) : (
-        <Button
-          variant="default"
-          size="sm"
-          className="flex h-8 w-full justify-start gap-2 bg-primary text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          onClick={() => onNewSession(project)}
-        >
-          <Plus className="h-3 w-3" />
-          {t('sessions.newSession')}
-        </Button>
-      )}
-
       {!initialSessionsLoaded ? (
         <SessionListSkeleton />
       ) : !hasSessions ? (
@@ -155,6 +130,36 @@ export default function SidebarProjectSessions({
             </Button>
           )}
         </>
+      )}
+
+      {/*
+        목록 아래에 둔다. 맨 위에 있을 때는 프로젝트를 펼칠 때마다 가장 먼저
+        눈에 들어오는 것이 새 대화를 시작하는 버튼이었는데, 프로젝트를 펼치는
+        이유는 대개 하던 대화를 찾기 위해서다. 찾는 것을 가리고 서 있었다.
+      */}
+      {isCompact ? (
+        <div className="px-3 pb-1 pt-1">
+          <button
+            className="flex h-8 w-full items-center justify-center gap-2 rounded-md bg-primary text-xs font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 active:scale-[0.98]"
+            onClick={() => {
+              onProjectSelect(project);
+              onNewSession(project);
+            }}
+          >
+            <Plus className="h-3 w-3" />
+            {t('sessions.newSession')}
+          </button>
+        </div>
+      ) : (
+        <Button
+          variant="default"
+          size="sm"
+          className="flex h-8 w-full justify-start gap-2 bg-primary text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          onClick={() => onNewSession(project)}
+        >
+          <Plus className="h-3 w-3" />
+          {t('sessions.newSession')}
+        </Button>
       )}
     </div>
   );
