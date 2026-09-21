@@ -410,6 +410,8 @@ export const api = {
         `/api/providers/${provider}/mcp/servers/${encodeURIComponent(serverName)}${query({ scope, workspacePath })}`,
       ),
     saveGlobalMcpServer: (payload: unknown) => post('/api/providers/mcp/servers/global', payload),
+    testMcpServer: (provider: string, payload: unknown) =>
+      post(`/api/providers/${provider}/mcp/test`, payload),
 
     skills: (provider: string, { workspacePath }: { workspacePath?: string } = {}) =>
       get(`/api/providers/${encodeURIComponent(provider)}/skills${query({ workspacePath })}`),

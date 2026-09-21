@@ -299,12 +299,17 @@
       "arguments": "인수 (한 줄에 하나씩)",
       "jsonConfig": "JSON 설정",
       "url": "URL",
-      "envVars": "환경 변수 (KEY=value, 한 줄에 하나씩)",
-      "headers": "헤더 (KEY=value, 한 줄에 하나씩)",
-      "selectProject": "프로젝트 선택..."
+      "envVars": "환경 변수 (KEY=value, 한 줄에 하나씩, stdio 전용)",
+      "headers": "직접 지정할 헤더 (KEY=value, 한 줄에 하나씩)",
+      "selectProject": "프로젝트 선택...",
+      "headersHelp": "Authorization=Bearer <token>처럼 다른 방식으로 인증하는 서버용입니다. 여기에 x-api-key를 적으면 API 키 칸보다 우선합니다.",
+      "apiKey": "API 키",
+      "apiKeyHelp": "x-api-key 헤더로 전송됩니다. 서버가 키를 쓰지 않으면 비워 두세요.",
+      "advanced": "고급 설정"
     },
     "placeholders": {
-      "serverName": "my-server"
+      "serverName": "my-server",
+      "apiKey": "서버에서 발급한 키를 붙여 넣으세요"
     },
     "validation": {
       "missingType": "필수 항목 누락: type",
@@ -321,7 +326,9 @@
       "cancel": "취소",
       "saving": "저장 중...",
       "addServer": "서버 추가",
-      "updateServer": "서버 업데이트"
+      "updateServer": "서버 업데이트",
+      "testConnection": "연결 테스트",
+      "testing": "테스트 중..."
     },
     "scopes": {
       "userGlobal": "사용자 (전역)",
@@ -339,7 +346,16 @@
     "addToProvider": "{{provider}}에 {{action}}",
     "workingDirectory": "작업 디렉터리",
     "envVarNames": "환경 변수 이름",
-    "bearerTokenEnvVar": "Bearer 토큰 환경 변수"
+    "bearerTokenEnvVar": "Bearer 토큰 환경 변수",
+    "test": {
+      "success": "연결됨 — {{server}}",
+      "unknownServer": "서버가 이름을 알려주지 않음",
+      "authFailed": "인증 실패 — API 키를 확인하세요",
+      "notFound": "MCP 엔드포인트가 아닙니다 — URL 경로를 확인하세요",
+      "unreachable": "서버에 연결할 수 없습니다 — 기동 여부를 확인하세요",
+      "timeout": "서버가 제한 시간 안에 응답하지 않았습니다",
+      "failed": "연결 테스트 실패 {{detail}}"
+    }
   },
   "saveStatus": {
     "success": "설정이 저장되었습니다!",

@@ -189,12 +189,17 @@
       "arguments": "Argomenti (uno per riga)",
       "jsonConfig": "Configurazione JSON",
       "url": "URL",
-      "envVars": "Variabili d'ambiente (CHIAVE=valore, una per riga)",
-      "headers": "Header (CHIAVE=valore, uno per riga)",
-      "selectProject": "Seleziona un progetto..."
+      "envVars": "Variabili d’ambiente (CHIAVE=valore, una per riga, solo stdio)",
+      "headers": "Header personalizzati (CHIAVE=valore, uno per riga)",
+      "selectProject": "Seleziona un progetto...",
+      "headersHelp": "Per server che si autenticano in altro modo, ad esempio Authorization=Bearer <token>. Una x-api-key scritta qui ha la precedenza sul campo Chiave API.",
+      "apiKey": "Chiave API",
+      "apiKeyHelp": "Inviata come header x-api-key. Lascia vuoto se il server non ne usa una.",
+      "advanced": "Impostazioni avanzate"
     },
     "placeholders": {
-      "serverName": "mio-server"
+      "serverName": "mio-server",
+      "apiKey": "Incolla la chiave rilasciata dal server"
     },
     "validation": {
       "missingType": "Campo obbligatorio mancante: type",
@@ -211,7 +216,18 @@
       "cancel": "Annulla",
       "saving": "Salvataggio...",
       "addServer": "Aggiungi server",
-      "updateServer": "Aggiorna server"
+      "updateServer": "Aggiorna server",
+      "testConnection": "Prova connessione",
+      "testing": "Prova in corso..."
+    },
+    "test": {
+      "success": "Connesso — {{server}}",
+      "unknownServer": "il server non ha comunicato il proprio nome",
+      "authFailed": "Autenticazione fallita — controlla la chiave API",
+      "notFound": "Non è un endpoint MCP — controlla il percorso dell’URL",
+      "unreachable": "Impossibile raggiungere il server — verifica che sia avviato",
+      "timeout": "Il server non ha risposto in tempo",
+      "failed": "Prova di connessione fallita {{detail}}"
     }
   },
   "saveStatus": {

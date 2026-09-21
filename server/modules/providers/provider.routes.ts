@@ -2,6 +2,7 @@ import express, { type Request, type Response } from 'express';
 
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
+import { mcpConnectionTestService } from '@/modules/providers/services/mcp-connection-test.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
@@ -180,6 +181,74 @@ const parseMcpUpsertPayload = (payload: unknown): UpsertProviderMcpServerInput =
       )
       : undefined,
   };
+};
+
+const readStringRecord = (value: unknown): Record<string, string> | undefined => (
+  typeof value === 'object' && value !== null
+    ? Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    )
+    : undefined
+);
+
+/**
+ * Builds the connection-test target from either the form's current values or a
+ * server already on disk. The saved-server path exists so retesting an entry
+ * never requires the user to retype a key the form only ever shows masked.
+ */
+const resolveMcpTestInput = async (
+  provider: LLMProvider,
+  payload: unknown,
+): Promise<{ transport: McpTransport; url: string; headers?: Record<string, string> }> => {
+  if (!payload || typeof payload !== 'object') {
+    throw new AppError('Request body must be an object.', {
+      code: 'INVALID_REQUEST_BODY',
+      statusCode: 400,
+    });
+  }
+
+  const body = payload as Record<string, unknown>;
+  const url = readOptionalQueryString(body.url);
+  if (url) {
+    return {
+      transport: parseMcpTransport(body.transport),
+      url,
+      headers: readStringRecord(body.headers),
+    };
+  }
+
+  const name = readOptionalQueryString(body.name);
+  if (!name) {
+    throw new AppError('Either url or name is required.', {
+      code: 'MCP_TEST_TARGET_REQUIRED',
+      statusCode: 400,
+    });
+  }
+
+  const scope = parseMcpScope(body.scope);
+  const workspacePath = readOptionalQueryString(body.workspacePath);
+  const servers = scope
+    ? await providerMcpService.listProviderMcpServersForScope(provider, scope, { workspacePath })
+    : Object.values(await providerMcpService.listProviderMcpServers(provider, { workspacePath })).flat();
+
+  const server = servers.find((entry) => entry.name === name);
+  if (!server) {
+    throw new AppError(`MCP server "${name}" was not found.`, {
+      code: 'MCP_SERVER_NOT_FOUND',
+      statusCode: 404,
+    });
+  }
+
+  if (!server.url) {
+    throw new AppError(`MCP server "${name}" has no url to test.`, {
+      code: 'MCP_TEST_UNSUPPORTED_TRANSPORT',
+      statusCode: 400,
+    });
+  }
+
+  return { transport: server.transport, url: server.url, headers: server.headers };
 };
 
 const parseProviderSkillCreatePayload = (payload: unknown): ProviderSkillCreateInput => {
@@ -676,6 +745,25 @@ router.delete(
       workspacePath,
     });
     res.json(createApiSuccessResponse(result));
+  }),
+);
+
+/**
+ * Probes an http/sse MCP server with a real `initialize` handshake so the form
+ * can tell a missing auth header from an unreachable host, instead of leaving
+ * the user with whatever downstream error the CLI produces at session start.
+ *
+ * Accepts either the form's current values (`transport`/`url`/`headers`) or a
+ * server already saved for this provider (`name` plus optional
+ * `scope`/`workspacePath`), so the list view can retest without retyping keys.
+ */
+router.post(
+  '/:provider/mcp/test',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    const input = await resolveMcpTestInput(provider, req.body);
+    const result = await mcpConnectionTestService.testConnection(input);
+    res.json(createApiSuccessResponse({ provider, result }));
   }),
 );
 

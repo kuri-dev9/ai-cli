@@ -189,12 +189,17 @@
       "arguments": "Arguments (un par ligne)",
       "jsonConfig": "Configuration JSON",
       "url": "URL",
-      "envVars": "Variables d'environnement (CLÉ=valeur, une par ligne)",
-      "headers": "En-têtes (CLÉ=valeur, un par ligne)",
-      "selectProject": "Sélectionner un projet..."
+      "envVars": "Variables d’environnement (CLÉ=valeur, une par ligne, stdio uniquement)",
+      "headers": "En-têtes personnalisés (CLÉ=valeur, un par ligne)",
+      "selectProject": "Sélectionner un projet...",
+      "headersHelp": "Pour les serveurs qui s’authentifient autrement, par exemple Authorization=Bearer <token>. Un x-api-key saisi ici l’emporte sur le champ Clé d’API.",
+      "apiKey": "Clé d’API",
+      "apiKeyHelp": "Envoyée comme en-tête x-api-key. Laissez vide si le serveur n’en utilise pas.",
+      "advanced": "Paramètres avancés"
     },
     "placeholders": {
-      "serverName": "mon-serveur"
+      "serverName": "mon-serveur",
+      "apiKey": "Collez la clé fournie par le serveur"
     },
     "validation": {
       "missingType": "Champ requis manquant : type",
@@ -211,7 +216,18 @@
       "cancel": "Annuler",
       "saving": "Enregistrement...",
       "addServer": "Ajouter le serveur",
-      "updateServer": "Mettre à jour le serveur"
+      "updateServer": "Mettre à jour le serveur",
+      "testConnection": "Tester la connexion",
+      "testing": "Test en cours..."
+    },
+    "test": {
+      "success": "Connecté — {{server}}",
+      "unknownServer": "le serveur n’a pas indiqué son nom",
+      "authFailed": "Échec de l’authentification — vérifiez la clé d’API",
+      "notFound": "Ce n’est pas un point de terminaison MCP — vérifiez le chemin de l’URL",
+      "unreachable": "Impossible de joindre le serveur — vérifiez qu’il est démarré",
+      "timeout": "Le serveur n’a pas répondu à temps",
+      "failed": "Échec du test de connexion {{detail}}"
     }
   },
   "saveStatus": {

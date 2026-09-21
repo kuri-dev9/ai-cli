@@ -189,12 +189,17 @@
       "arguments": "Argumente (eines pro Zeile)",
       "jsonConfig": "JSON-Konfiguration",
       "url": "URL",
-      "envVars": "Umgebungsvariablen (SCHLÜSSEL=Wert, eine pro Zeile)",
-      "headers": "Header (SCHLÜSSEL=Wert, eine pro Zeile)",
-      "selectProject": "Projekt auswählen..."
+      "envVars": "Umgebungsvariablen (SCHLÜSSEL=Wert, eine pro Zeile, nur stdio)",
+      "headers": "Eigene Header (SCHLÜSSEL=Wert, eine pro Zeile)",
+      "selectProject": "Projekt auswählen...",
+      "headersHelp": "Für Server, die sich anders authentifizieren, etwa Authorization=Bearer <token>. Ein hier eingetragener x-api-key hat Vorrang vor dem Feld API-Schlüssel.",
+      "apiKey": "API-Schlüssel",
+      "apiKeyHelp": "Wird als Header x-api-key gesendet. Leer lassen, wenn der Server keinen verwendet.",
+      "advanced": "Erweiterte Einstellungen"
     },
     "placeholders": {
-      "serverName": "mein-server"
+      "serverName": "mein-server",
+      "apiKey": "Vom Server ausgestellten Schlüssel einfügen"
     },
     "validation": {
       "missingType": "Pflichtfeld fehlt: type",
@@ -211,7 +216,18 @@
       "cancel": "Abbrechen",
       "saving": "Wird gespeichert...",
       "addServer": "Server hinzufügen",
-      "updateServer": "Server aktualisieren"
+      "updateServer": "Server aktualisieren",
+      "testConnection": "Verbindung testen",
+      "testing": "Wird getestet..."
+    },
+    "test": {
+      "success": "Verbunden — {{server}}",
+      "unknownServer": "Server hat seinen Namen nicht gemeldet",
+      "authFailed": "Authentifizierung fehlgeschlagen — API-Schlüssel prüfen",
+      "notFound": "Kein MCP-Endpunkt — URL-Pfad prüfen",
+      "unreachable": "Server nicht erreichbar — prüfen, ob er läuft",
+      "timeout": "Der Server hat nicht rechtzeitig geantwortet",
+      "failed": "Verbindungstest fehlgeschlagen {{detail}}"
     }
   },
   "saveStatus": {

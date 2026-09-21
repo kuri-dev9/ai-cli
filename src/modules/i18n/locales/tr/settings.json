@@ -190,12 +190,17 @@
       "arguments": "Argümanlar (satır başına bir tane)",
       "jsonConfig": "JSON Yapılandırması",
       "url": "URL",
-      "envVars": "Ortam Değişkenleri (KEY=değer, satır başına bir tane)",
-      "headers": "Başlıklar (KEY=değer, satır başına bir tane)",
-      "selectProject": "Bir proje seç..."
+      "envVars": "Ortam Değişkenleri (KEY=değer, satır başına bir tane, yalnızca stdio)",
+      "headers": "Özel başlıklar (KEY=değer, satır başına bir tane)",
+      "selectProject": "Bir proje seç...",
+      "headersHelp": "Authorization=Bearer <token> gibi başka yöntemle kimlik doğrulayan sunucular için. Buraya yazılan x-api-key, API Anahtarı alanının önüne geçer.",
+      "apiKey": "API Anahtarı",
+      "apiKeyHelp": "x-api-key başlığı olarak gönderilir. Sunucu anahtar kullanmıyorsa boş bırakın.",
+      "advanced": "Gelişmiş ayarlar"
     },
     "placeholders": {
-      "serverName": "benim-sunucum"
+      "serverName": "benim-sunucum",
+      "apiKey": "Sunucunun verdiği anahtarı yapıştırın"
     },
     "validation": {
       "missingType": "Zorunlu alan eksik: type",
@@ -212,7 +217,18 @@
       "cancel": "İptal",
       "saving": "Kaydediliyor...",
       "addServer": "Sunucu Ekle",
-      "updateServer": "Sunucuyu Güncelle"
+      "updateServer": "Sunucuyu Güncelle",
+      "testConnection": "Bağlantıyı test et",
+      "testing": "Test ediliyor..."
+    },
+    "test": {
+      "success": "Bağlandı — {{server}}",
+      "unknownServer": "sunucu adını bildirmedi",
+      "authFailed": "Kimlik doğrulama başarısız — API Anahtarını kontrol edin",
+      "notFound": "Bu bir MCP uç noktası değil — URL yolunu kontrol edin",
+      "unreachable": "Sunucuya ulaşılamadı — çalışıp çalışmadığını kontrol edin",
+      "timeout": "Sunucu zamanında yanıt vermedi",
+      "failed": "Bağlantı testi başarısız {{detail}}"
     }
   },
   "saveStatus": {

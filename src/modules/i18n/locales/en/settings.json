@@ -299,12 +299,17 @@
       "arguments": "Arguments (one per line)",
       "jsonConfig": "JSON Configuration",
       "url": "URL",
-      "envVars": "Environment Variables (KEY=value, one per line)",
-      "headers": "Headers (KEY=value, one per line)",
-      "selectProject": "Select a project..."
+      "envVars": "Environment Variables (KEY=value, one per line, stdio only)",
+      "headers": "Custom headers (KEY=value, one per line)",
+      "selectProject": "Select a project...",
+      "headersHelp": "For servers that authenticate some other way, such as Authorization=Bearer <token>. An x-api-key written here overrides the API Key field.",
+      "apiKey": "API Key",
+      "apiKeyHelp": "Sent as the x-api-key header. Leave empty if the server does not use one.",
+      "advanced": "Advanced settings"
     },
     "placeholders": {
-      "serverName": "my-server"
+      "serverName": "my-server",
+      "apiKey": "Paste the key issued by the server"
     },
     "validation": {
       "missingType": "Missing required field: type",
@@ -321,7 +326,9 @@
       "cancel": "Cancel",
       "saving": "Saving...",
       "addServer": "Add Server",
-      "updateServer": "Update Server"
+      "updateServer": "Update Server",
+      "testConnection": "Test connection",
+      "testing": "Testing..."
     },
     "scopes": {
       "userGlobal": "User (Global)",
@@ -339,7 +346,16 @@
     "addToProvider": "{{action}} to {{provider}}",
     "workingDirectory": "Working Directory",
     "envVarNames": "Environment Variable Names",
-    "bearerTokenEnvVar": "Bearer Token Environment Variable"
+    "bearerTokenEnvVar": "Bearer Token Environment Variable",
+    "test": {
+      "success": "Connected — {{server}}",
+      "unknownServer": "server did not report its name",
+      "authFailed": "Authentication failed — check the API Key",
+      "notFound": "Not an MCP endpoint — check the URL path",
+      "unreachable": "Could not reach the server — check that it is running",
+      "timeout": "The server did not answer in time",
+      "failed": "Connection test failed {{detail}}"
+    }
   },
   "saveStatus": {
     "success": "Settings saved successfully!",

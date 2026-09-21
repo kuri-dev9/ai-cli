@@ -189,12 +189,17 @@
       "arguments": "引数（1行に1つ）",
       "jsonConfig": "JSON設定",
       "url": "URL",
-      "envVars": "環境変数（KEY=value、1行に1つ）",
-      "headers": "ヘッダー（KEY=value、1行に1つ）",
-      "selectProject": "プロジェクトを選択..."
+      "envVars": "環境変数（KEY=value、1行に1つ、stdio のみ）",
+      "headers": "任意のヘッダー（KEY=value、1行に1つ）",
+      "selectProject": "プロジェクトを選択...",
+      "headersHelp": "Authorization=Bearer <token> など別の方式で認証するサーバー用です。ここに x-api-key を書くと API キー欄より優先されます。",
+      "apiKey": "API キー",
+      "apiKeyHelp": "x-api-key ヘッダーとして送信されます。サーバーがキーを使わない場合は空のままにしてください。",
+      "advanced": "詳細設定"
     },
     "placeholders": {
-      "serverName": "my-server"
+      "serverName": "my-server",
+      "apiKey": "サーバーが発行したキーを貼り付けてください"
     },
     "validation": {
       "missingType": "必須フィールドがありません: type",
@@ -211,7 +216,18 @@
       "cancel": "キャンセル",
       "saving": "保存中...",
       "addServer": "サーバーを追加",
-      "updateServer": "サーバーを更新"
+      "updateServer": "サーバーを更新",
+      "testConnection": "接続テスト",
+      "testing": "テスト中..."
+    },
+    "test": {
+      "success": "接続しました — {{server}}",
+      "unknownServer": "サーバーが名前を返しませんでした",
+      "authFailed": "認証に失敗しました — API キーを確認してください",
+      "notFound": "MCP エンドポイントではありません — URL のパスを確認してください",
+      "unreachable": "サーバーに接続できません — 起動しているか確認してください",
+      "timeout": "サーバーが時間内に応答しませんでした",
+      "failed": "接続テストに失敗しました {{detail}}"
     }
   },
   "saveStatus": {

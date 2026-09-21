@@ -50,6 +50,41 @@ export const parseKeyValueLines = (value: string): KeyValueMap => {
   return normalized;
 };
 
+/** The header name the dedicated API Key field writes to. Lower-case by convention only — MCP servers match header names case-insensitively. */
+export const API_KEY_HEADER = 'x-api-key';
+
+const findApiKeyHeaderName = (headers: KeyValueMap): string | undefined => (
+  Object.keys(headers).find((key) => key.trim().toLowerCase() === API_KEY_HEADER)
+);
+
+/** Reads the lone API key out of a saved header map, or undefined when the headers need the advanced editor instead. */
+export const readApiKeyHeader = (headers: KeyValueMap | undefined): string | undefined => {
+  const entries = Object.entries(headers ?? {});
+  if (entries.length !== 1) {
+    return undefined;
+  }
+
+  const [name, value] = entries[0];
+  return name.trim().toLowerCase() === API_KEY_HEADER ? value : undefined;
+};
+
+/**
+ * Folds the dedicated API Key field into the advanced header map.
+ *
+ * The advanced textarea wins: it is the explicit, fully-visible editor, so a
+ * user who spells out `x-api-key` there is not silently overridden by a value
+ * left behind in the simple field. Matching is case-insensitive because that is
+ * how servers compare header names.
+ */
+export const mergeApiKeyHeader = (headers: KeyValueMap, apiKey: string): KeyValueMap => {
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey || findApiKeyHeaderName(headers)) {
+    return headers;
+  }
+
+  return { ...headers, [API_KEY_HEADER]: trimmedKey };
+};
+
 export const parseListLines = (value: string): string[] => (
   value.split('\n').map((entry) => entry.trim()).filter(Boolean)
 );
@@ -166,10 +201,14 @@ export const createMcpPayloadFromForm = (
     transport: formData.transport,
     command: formData.transport === 'stdio' ? formData.command.trim() : undefined,
     args: formData.transport === 'stdio' ? formData.args : undefined,
-    env: formData.env,
+    // Every provider drops `env` for http/sse when it writes the config file,
+    // so the payload stops claiming to carry it.
+    env: formData.transport === 'stdio' ? formData.env : undefined,
     cwd: supportsWorkingDirectory ? formData.cwd.trim() || undefined : undefined,
     url: formData.transport !== 'stdio' ? formData.url.trim() : undefined,
-    headers: formData.transport !== 'stdio' ? formData.headers : undefined,
+    headers: formData.transport !== 'stdio'
+      ? mergeApiKeyHeader(formData.headers, formData.apiKey)
+      : undefined,
     envVars: includeProviderSpecificFields ? formData.envVars : undefined,
     bearerTokenEnvVar: includeProviderSpecificFields ? formData.bearerTokenEnvVar.trim() || undefined : undefined,
     envHttpHeaders: includeProviderSpecificFields ? formData.envHttpHeaders : undefined,

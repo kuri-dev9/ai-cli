@@ -190,12 +190,17 @@
       "arguments": "參數（每行一個）",
       "jsonConfig": "JSON 設定",
       "url": "URL",
-      "envVars": "環境變數（KEY=值，每行一個）",
-      "headers": "標頭（KEY=值，每行一個）",
-      "selectProject": "選取專案..."
+      "envVars": "環境變數（KEY=值，每行一個，僅 stdio）",
+      "headers": "自訂標頭（KEY=值，每行一個）",
+      "selectProject": "選取專案...",
+      "headersHelp": "適用於以其他方式驗證的伺服器，例如 Authorization=Bearer <token>。在此寫入的 x-api-key 會覆寫 API 金鑰欄位。",
+      "apiKey": "API 金鑰",
+      "apiKeyHelp": "以 x-api-key 標頭送出。伺服器不需要金鑰時請留空。",
+      "advanced": "進階設定"
     },
     "placeholders": {
-      "serverName": "我的服務"
+      "serverName": "我的服務",
+      "apiKey": "貼上伺服器核發的金鑰"
     },
     "validation": {
       "missingType": "缺少必填欄位：type",
@@ -212,7 +217,18 @@
       "cancel": "取消",
       "saving": "儲存中...",
       "addServer": "新增伺服器",
-      "updateServer": "更新伺服器"
+      "updateServer": "更新伺服器",
+      "testConnection": "測試連線",
+      "testing": "測試中..."
+    },
+    "test": {
+      "success": "已連線 — {{server}}",
+      "unknownServer": "伺服器未回報名稱",
+      "authFailed": "驗證失敗 — 請檢查 API 金鑰",
+      "notFound": "這不是 MCP 端點 — 請檢查 URL 路徑",
+      "unreachable": "無法連線到伺服器 — 請確認它已啟動",
+      "timeout": "伺服器未在時間內回應",
+      "failed": "連線測試失敗 {{detail}}"
     }
   },
   "saveStatus": {

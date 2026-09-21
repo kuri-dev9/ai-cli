@@ -215,12 +215,17 @@
       "arguments": "Argumentos (uno por línea)",
       "jsonConfig": "Configuración JSON",
       "url": "URL",
-      "envVars": "Variables de entorno (CLAVE=valor, una por línea)",
-      "headers": "Cabeceras (CLAVE=valor, una por línea)",
-      "selectProject": "Selecciona un proyecto..."
+      "envVars": "Variables de entorno (CLAVE=valor, una por línea, solo stdio)",
+      "headers": "Cabeceras personalizadas (CLAVE=valor, una por línea)",
+      "selectProject": "Selecciona un proyecto...",
+      "headersHelp": "Para servidores que se autentican de otra forma, como Authorization=Bearer <token>. Una x-api-key escrita aquí tiene prioridad sobre el campo Clave de API.",
+      "apiKey": "Clave de API",
+      "apiKeyHelp": "Se envía como la cabecera x-api-key. Déjala vacía si el servidor no usa ninguna.",
+      "advanced": "Configuración avanzada"
     },
     "placeholders": {
-      "serverName": "mi-servidor"
+      "serverName": "mi-servidor",
+      "apiKey": "Pega la clave emitida por el servidor"
     },
     "validation": {
       "missingType": "Falta el campo obligatorio: type",
@@ -237,7 +242,18 @@
       "cancel": "Cancelar",
       "saving": "Guardando...",
       "addServer": "Añadir servidor",
-      "updateServer": "Actualizar servidor"
+      "updateServer": "Actualizar servidor",
+      "testConnection": "Probar conexión",
+      "testing": "Probando..."
+    },
+    "test": {
+      "success": "Conectado — {{server}}",
+      "unknownServer": "el servidor no indicó su nombre",
+      "authFailed": "Error de autenticación — revisa la clave de API",
+      "notFound": "No es un endpoint MCP — revisa la ruta de la URL",
+      "unreachable": "No se pudo conectar con el servidor — comprueba que esté en marcha",
+      "timeout": "El servidor no respondió a tiempo",
+      "failed": "La prueba de conexión falló {{detail}}"
     }
   },
   "saveStatus": {

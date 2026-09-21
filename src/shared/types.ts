@@ -980,12 +980,27 @@ export type McpFormState = {
   cwd: string;
   url: string;
   headers: KeyValueMap;
+  /** The http/sse API key edited on its own, saved as the `x-api-key` header; an `x-api-key` typed into the advanced `headers` textarea wins over it. */
+  apiKey: string;
   envVars: string[];
   bearerTokenEnvVar: string;
   envHttpHeaders: KeyValueMap;
   importMode: McpImportMode;
   jsonInput: string;
 };
+
+/** Why an MCP connection test failed, as classified by the server so the form can explain the cause rather than relaying a transport error. */
+export type McpConnectionTestFailureReason =
+  | 'authFailed'
+  | 'notFound'
+  | 'unreachable'
+  | 'timeout'
+  | 'protocolError';
+
+/** The outcome of `POST /api/providers/:provider/mcp/test`: the server's own identification on success, or the classified failure cause. */
+export type McpConnectionTestResult =
+  | { ok: true; serverInfo: { name: string; version?: string } | null }
+  | { ok: false; reason: McpConnectionTestFailureReason; status?: number; detail?: string };
 
 /** The request body sent when creating or updating a provider's MCP server, built from McpFormState so only the fields valid for the chosen transport are included. */
 export type UpsertProviderMcpServerPayload = {

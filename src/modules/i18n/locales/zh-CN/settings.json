@@ -215,12 +215,17 @@
       "arguments": "参数（每行一个）",
       "jsonConfig": "JSON 配置",
       "url": "URL",
-      "envVars": "环境变量（KEY=值，每行一个）",
-      "headers": "请求头（KEY=值，每行一个）",
-      "selectProject": "选择项目..."
+      "envVars": "环境变量（KEY=值，每行一个，仅 stdio）",
+      "headers": "自定义请求头（KEY=值，每行一个）",
+      "selectProject": "选择项目...",
+      "headersHelp": "适用于以其他方式认证的服务器，例如 Authorization=Bearer <token>。在此处写入的 x-api-key 会覆盖 API 密钥字段。",
+      "apiKey": "API 密钥",
+      "apiKeyHelp": "以 x-api-key 请求头发送。服务器不需要密钥时请留空。",
+      "advanced": "高级设置"
     },
     "placeholders": {
-      "serverName": "我的服务"
+      "serverName": "我的服务",
+      "apiKey": "粘贴服务器签发的密钥"
     },
     "validation": {
       "missingType": "缺少必填字段：type",
@@ -237,7 +242,18 @@
       "cancel": "取消",
       "saving": "保存中...",
       "addServer": "添加服务器",
-      "updateServer": "更新服务器"
+      "updateServer": "更新服务器",
+      "testConnection": "测试连接",
+      "testing": "测试中..."
+    },
+    "test": {
+      "success": "已连接 — {{server}}",
+      "unknownServer": "服务器未报告名称",
+      "authFailed": "认证失败 — 请检查 API 密钥",
+      "notFound": "这不是 MCP 端点 — 请检查 URL 路径",
+      "unreachable": "无法连接到服务器 — 请确认它已启动",
+      "timeout": "服务器未在规定时间内响应",
+      "failed": "连接测试失败 {{detail}}"
     }
   },
   "saveStatus": {

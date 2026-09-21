@@ -1,11 +1,11 @@
-import { FolderOpen, Globe, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderOpen, Globe, Plug, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Input } from '@/shared/ui';
 import { MCP_PROVIDER_NAMES, MCP_SUPPORTED_SCOPES, MCP_SUPPORTED_TRANSPORTS, MCP_SUPPORTS_WORKING_DIRECTORY } from '@/shared/constants';
 import { useMcpServerForm } from '@/modules/mcp/hooks/useMcpServerForm';
-import type { McpFormState, McpProject, McpProvider, McpScope, McpTransport, ProviderMcpServer } from '@/shared/types';
+import type { McpConnectionTestResult, McpFormState, McpProject, McpProvider, McpScope, McpTransport, ProviderMcpServer } from '@/shared/types';
 
 type McpFormMode = 'provider' | 'global';
 
@@ -23,7 +23,42 @@ type McpServerFormModalProps = {
   onSubmit: (formData: McpFormState, editingServer: ProviderMcpServer | null) => Promise<void>;
 };
 
-type TranslateFn = (key: string) => string;
+type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * Turns a handshake result into the one line the user needs. The failure cases
+ * are split deliberately: the incident this button was added for produced a
+ * `Dynamic Client Registration rejected (HTTP 404)` message for what was really
+ * a missing API key, so each reason names the field to go fix.
+ */
+const describeConnectionTest = (result: McpConnectionTestResult, t: TranslateFn): string => {
+  if (result.ok) {
+    const serverInfo = result.serverInfo;
+    return t('mcpForm.test.success', {
+      server: serverInfo
+        ? [serverInfo.name, serverInfo.version].filter(Boolean).join(' ')
+        : t('mcpForm.test.unknownServer'),
+    });
+  }
+
+  if (result.reason === 'authFailed') {
+    return t('mcpForm.test.authFailed');
+  }
+
+  if (result.reason === 'notFound') {
+    return t('mcpForm.test.notFound');
+  }
+
+  if (result.reason === 'timeout') {
+    return t('mcpForm.test.timeout');
+  }
+
+  if (result.reason === 'unreachable') {
+    return t('mcpForm.test.unreachable');
+  }
+
+  return t('mcpForm.test.failed', { detail: result.detail ?? result.status ?? '' });
+};
 
 const getScopeLabel = (scope: McpScope, mode: McpFormMode, t: TranslateFn): string => {
   if (scope === 'user') {
@@ -79,6 +114,12 @@ export default function McpServerFormModal({
     isSubmitting,
     jsonValidationError,
     canSubmit,
+    showAdvanced,
+    setShowAdvanced,
+    canTestConnection,
+    isTestingConnection,
+    connectionTest,
+    testConnection,
     updateForm,
     updateScope,
     updateTransport,
@@ -339,61 +380,121 @@ export default function McpServerFormModal({
             </div>
           )}
 
-          {formData.importMode === 'form' && (
-            <div>
-              <label className="mb-2 block text-sm font-medium text-foreground">
-                {t('mcpForm.fields.envVars')}
-              </label>
-              <textarea
-                value={multilineText.env}
-                onChange={(event) => updateMultilineText('env', event.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                rows={3}
-                placeholder="API_KEY=your-key&#10;DEBUG=true"
-              />
-            </div>
-          )}
-
           {formData.importMode === 'form' && supportsHttpHeaders && (
             <div>
               <label className="mb-2 block text-sm font-medium text-foreground">
-                {t('mcpForm.fields.headers')}
-              </label>
-              <textarea
-                value={multilineText.headers}
-                onChange={(event) => updateMultilineText('headers', event.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                rows={3}
-                placeholder="Authorization=Bearer token&#10;X-API-Key=your-key"
-              />
-            </div>
-          )}
-
-          {showCodexOnlyFields && formData.importMode === 'form' && formData.transport === 'stdio' && (
-            <div>
-              <label className="mb-2 block text-sm font-medium text-foreground">
-                {t('mcpForm.envVarNames')}
-              </label>
-              <textarea
-                value={multilineText.envVars}
-                onChange={(event) => updateMultilineText('envVars', event.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                rows={3}
-                placeholder="GITHUB_TOKEN&#10;API_KEY"
-              />
-            </div>
-          )}
-
-          {showCodexOnlyFields && formData.importMode === 'form' && formData.transport === 'http' && (
-            <div>
-              <label className="mb-2 block text-sm font-medium text-foreground">
-                {t('mcpForm.bearerTokenEnvVar')}
+                {t('mcpForm.fields.apiKey')}
               </label>
               <Input
-                value={formData.bearerTokenEnvVar}
-                onChange={(event) => updateForm('bearerTokenEnvVar', event.target.value)}
-                placeholder="MCP_TOKEN"
+                value={formData.apiKey}
+                onChange={(event) => updateForm('apiKey', event.target.value)}
+                placeholder={t('mcpForm.placeholders.apiKey')}
+                type="password"
+                autoComplete="off"
               />
+              <p className="mt-1 text-xs text-muted-foreground">{t('mcpForm.fields.apiKeyHelp')}</p>
+            </div>
+          )}
+
+          {canTestConnection && (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { void testConnection(); }}
+                disabled={isTestingConnection}
+              >
+                <Plug className="mr-2 h-4 w-4" />
+                {isTestingConnection ? t('mcpForm.actions.testing') : t('mcpForm.actions.testConnection')}
+              </Button>
+              {connectionTest && (
+                <p
+                  className={`text-xs ${connectionTest.ok ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}
+                  role="status"
+                >
+                  {describeConnectionTest(connectionTest, t)}
+                </p>
+              )}
+            </div>
+          )}
+
+          {formData.importMode === 'form' && (
+            <div className="rounded-lg border border-border">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-foreground"
+                aria-expanded={showAdvanced}
+              >
+                {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                {t('mcpForm.fields.advanced')}
+              </button>
+
+              {showAdvanced && (
+                <div className="space-y-4 border-t border-border p-3">
+                  {/* Only stdio servers keep `env`; every provider drops it when
+                      it writes an http/sse entry, so showing it there invited
+                      users to put credentials somewhere that is discarded. */}
+                  {formData.transport === 'stdio' && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-foreground">
+                        {t('mcpForm.fields.envVars')}
+                      </label>
+                      <textarea
+                        value={multilineText.env}
+                        onChange={(event) => updateMultilineText('env', event.target.value)}
+                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        rows={3}
+                        placeholder="API_KEY=your-key"
+                      />
+                    </div>
+                  )}
+
+                  {supportsHttpHeaders && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-foreground">
+                        {t('mcpForm.fields.headers')}
+                      </label>
+                      <textarea
+                        value={multilineText.headers}
+                        onChange={(event) => updateMultilineText('headers', event.target.value)}
+                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        rows={3}
+                        placeholder="X-API-Key=your-key&#10;Authorization=Bearer token"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">{t('mcpForm.fields.headersHelp')}</p>
+                    </div>
+                  )}
+
+                  {showCodexOnlyFields && formData.transport === 'stdio' && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-foreground">
+                        {t('mcpForm.envVarNames')}
+                      </label>
+                      <textarea
+                        value={multilineText.envVars}
+                        onChange={(event) => updateMultilineText('envVars', event.target.value)}
+                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        rows={3}
+                        placeholder="GITHUB_TOKEN&#10;API_KEY"
+                      />
+                    </div>
+                  )}
+
+                  {showCodexOnlyFields && formData.transport === 'http' && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-foreground">
+                        {t('mcpForm.bearerTokenEnvVar')}
+                      </label>
+                      <Input
+                        value={formData.bearerTokenEnvVar}
+                        onChange={(event) => updateForm('bearerTokenEnvVar', event.target.value)}
+                        placeholder="MCP_TOKEN"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
