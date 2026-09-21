@@ -21,6 +21,14 @@ type WebSocketContextType = {
    */
   subscribe: (listener: ServerEventListener) => () => void;
   isConnected: boolean;
+  /**
+   * 지금 소켓이 열려 있어야 하는 상태인지.
+   *
+   * 로그인 전에는 연결을 시도조차 하지 않는다. 그때의 `isConnected === false`
+   * 는 "끊겼다"가 아니라 "아직 열 이유가 없다"는 뜻이라, 둘을 구분하지 않으면
+   * 계정을 만들기도 전에 서버가 죽은 것처럼 보인다.
+   */
+  shouldConnect: boolean;
 };
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -174,13 +182,18 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     };
   }, []);
 
+  // `connect` 의 가드와 같은 조건이어야 한다. 둘이 어긋나면 화면이 연결 상태를
+  // 실제와 다르게 말하게 된다.
+  const shouldConnect = IS_PLATFORM || (!isAuthLoading && Boolean(user));
+
   const value: WebSocketContextType = useMemo(() =>
   ({
     ws: wsRef.current,
     sendMessage,
     subscribe,
-    isConnected
-  }), [sendMessage, subscribe, isConnected]);
+    isConnected,
+    shouldConnect
+  }), [sendMessage, subscribe, isConnected, shouldConnect]);
 
   return value;
 };

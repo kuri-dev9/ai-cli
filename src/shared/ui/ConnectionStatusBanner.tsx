@@ -30,11 +30,19 @@ const OFFLINE_GRACE_MS = 1000;
 const RESTORED_VISIBLE_MS = 4000;
 
 export function ConnectionStatusBanner() {
-  const { isConnected } = useWebSocket();
+  const { isConnected, shouldConnect } = useWebSocket();
   const { t } = useTranslation('common');
   const [phase, setPhase] = useState<ConnectionPhase>('idle');
 
   useEffect(() => {
+    // 로그인 전에는 소켓을 열지 않는다. 그 상태를 끊김으로 알리면 계정을
+    // 만드는 화면에서 "서버와 연결이 끊겼습니다" 가 떠서, 방금 띄운 서버가
+    // 고장 난 것처럼 보인다.
+    if (!shouldConnect) {
+      setPhase('idle');
+      return undefined;
+    }
+
     if (!isConnected) {
       const timer = setTimeout(() => setPhase('offline'), OFFLINE_GRACE_MS);
       return () => clearTimeout(timer);
@@ -43,7 +51,7 @@ export function ConnectionStatusBanner() {
     // 끊겼다는 것을 이미 알린 뒤에만 복귀를 알린다. 첫 연결은 알릴 일이 아니다.
     setPhase((previous) => (previous === 'offline' ? 'restored' : 'idle'));
     return undefined;
-  }, [isConnected]);
+  }, [isConnected, shouldConnect]);
 
   useEffect(() => {
     if (phase !== 'restored') {

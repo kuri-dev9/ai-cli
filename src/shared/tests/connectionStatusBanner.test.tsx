@@ -13,9 +13,10 @@ import { ConnectionStatusBanner } from '@/shared/ui';
  */
 
 let connected = true;
+let shouldConnect = true;
 
 vi.mock('@/shared/context/WebSocketContext', () => ({
-  useWebSocket: () => ({ isConnected: connected }),
+  useWebSocket: () => ({ isConnected: connected, shouldConnect }),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -27,6 +28,7 @@ vi.mock('react-i18next', () => ({
 
 beforeEach(() => {
   connected = true;
+  shouldConnect = true;
   vi.useFakeTimers();
 });
 
@@ -70,4 +72,29 @@ test('돌아오면 복귀를 알리고 스스로 사라진다', () => {
   // 복귀 안내까지 남아 있으면 그것도 결국 배경이 된다.
   act(() => { vi.advanceTimersByTime(4000); });
   assert.equal(screen.queryByRole('status'), null);
+});
+
+test('로그인 전에는 끊김으로 보지 않는다', () => {
+  // 로그인 전에는 소켓을 열지 않으므로 `isConnected` 는 false 다. 이것까지
+  // 경고로 띄우면, 계정을 만드는 첫 화면에서 방금 띄운 서버가 고장 난 것처럼
+  // 보인다.
+  connected = false;
+  shouldConnect = false;
+  render(<ConnectionStatusBanner />);
+
+  act(() => { vi.advanceTimersByTime(5000); });
+  assert.equal(screen.queryByRole('status'), null);
+});
+
+test('로그인해서 연결이 필요해진 뒤부터 끊김을 알린다', () => {
+  connected = false;
+  shouldConnect = false;
+  const view = render(<ConnectionStatusBanner />);
+  act(() => { vi.advanceTimersByTime(5000); });
+  assert.equal(screen.queryByRole('status'), null);
+
+  shouldConnect = true;
+  view.rerender(<ConnectionStatusBanner />);
+  act(() => { vi.advanceTimersByTime(1000); });
+  assert.match(screen.getByRole('status').textContent ?? '', /연결이 끊겼습니다/);
 });
