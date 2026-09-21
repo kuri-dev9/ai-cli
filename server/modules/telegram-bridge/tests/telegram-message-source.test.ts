@@ -93,7 +93,7 @@ test('텔레그램에서 보낸 프롬프트는 본문 그대로 실행되고 �
     await handleTelegramCommand('/watch 1', { userId, runtime });
     const reply = await handleTelegramCommand('테스트 돌려줘', { userId, runtime });
 
-    assert.equal(reply, '전달했습니다.');
+    assert.equal(reply, null);
     // 모델이 읽는 글에 "[텔레그램]" 같은 것이 섞이면 안 된다.
     assert.deepEqual(runs.map((run) => run.command), ['테스트 돌려줘']);
 

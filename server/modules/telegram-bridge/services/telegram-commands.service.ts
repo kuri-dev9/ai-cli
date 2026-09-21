@@ -63,20 +63,28 @@ function describeSession(sessionId: string): string {
 const HELP_TEXT = [
   '명령 목록',
   '',
-  '/status   지금 무엇이 돌고 있는지, 승인 대기가 있는지',
-  '/projects 프로젝트 목록',
-  '/watch N  N번 프로젝트의 최신 세션을 구독',
-  '/allow    승인 대기 중인 도구를 허용',
-  '/deny     승인 대기 중인 도구를 거부',
-  '/stop     지금 돌고 있는 턴을 중단',
-  '/on /off  구독 중인 세션의 웹 작업까지 알림 받기·끄기',
+  '/help            이 목록',
+  '/status          지금 무엇이 돌고 있는지, 승인 대기가 있는지',
+  '/projects        프로젝트 목록',
+  '/watch <번호|이름> 그 프로젝트의 최신 대화를 구독',
+  '/unwatch         구독을 놓는다. 이 대화로 오는 것을 전부 멈춘다',
+  '/on              구독 중인 대화의 웹 작업까지 알림 받기',
+  '/off             웹 작업 알림 끄기. 구독은 유지된다',
+  '/allow [번호]    승인 대기 중인 도구를 허용',
+  '/deny [번호]     승인 대기 중인 도구를 거부',
+  '/stop            지금 돌고 있는 턴을 중단',
   '',
-  '여기서 보낸 작업의 결과는 항상 돌아온다.',
-  '웹에서 시작한 작업은 기본적으로 알리지 않는다 — /on 으로 켜 두거나,',
-  '웹 입력 맨 앞에 /bot 을 붙이면 그 대화를 이쪽으로 넘겨받는다.',
-  '넘겨받은 뒤로는 /watch 없이 그냥 답장하면 그 대화로 들어간다.',
+  '이쪽으로 무엇이 오는지',
   '',
-  '슬래시 없이 보낸 글은 구독 중인 세션에 그대로 전달된다.',
+  '1. 여기서 보낸 작업의 결과 — 항상 온다. /off 로도 막히지 않는다.',
+  '2. 웹에서 시작한 작업의 결과 — /on 으로 켠 대화만.',
+  '3. 웹 입력 맨 앞에 /bot 을 붙이면 그 대화를 이쪽으로 넘겨받는다.',
+  '   넘겨받으면 구독과 알림이 함께 켜지므로, 그 뒤로는 그 대화의 웹 작업도',
+  '   전부 이쪽으로 온다.',
+  '',
+  '전부 멈추려면 /unwatch, 웹 작업만 멈추려면 /off 를 쓴다.',
+  '',
+  '슬래시 없이 보낸 글은 구독 중인 대화에 그대로 들어간다.',
 ].join('\n');
 
 /**
@@ -106,6 +114,19 @@ export async function handleTelegramCommand(
     case '/help':
     case '/start':
       return HELP_TEXT;
+
+    case '/unwatch': {
+      // 넘겨받은 대화를 통째로 놓는 길. `/off` 는 웹 작업 알림만 끄고 구독은
+      // 남기므로, `/bot` 으로 끌어온 대화를 완전히 멈출 방법이 없었다.
+      if (!state.watchedSessionId) {
+        return '구독 중인 대화가 없습니다.';
+      }
+
+      const released = describeSession(state.watchedSessionId);
+      setSessionNotified(context.userId, state.watchedSessionId, false);
+      writeBridgeState(context.userId, { watchedSessionId: null });
+      return `구독을 놓았습니다: ${released}\n이 대화로는 더 오지 않습니다. 다시 받으려면 /watch 해 주세요.`;
+    }
 
     case '/on':
     case '/off': {
@@ -236,7 +257,7 @@ async function sendPrompt(
   prompt: string,
   context: CommandContext,
   watchedSessionId: string | null,
-): Promise<string> {
+): Promise<string | null> {
   if (!watchedSessionId) {
     return '구독 중인 세션이 없습니다. /projects 로 고른 뒤 /watch 해 주세요.';
   }
@@ -281,5 +302,8 @@ async function sendPrompt(
     messageSourcesDb.dropMessageSource(sourceMarkId);
     return `보내지 못했습니다: ${result.error ?? '알 수 없는 이유'}`;
   }
-  return '전달했습니다.';
+
+  // 잘 들어갔다는 말은 하지 않는다. 결과가 곧 따라오므로 확인용 한 줄은
+  // 알림만 한 번 더 울리고 대화창을 밀어 올린다. 실패는 위에서 말한다.
+  return null;
 }

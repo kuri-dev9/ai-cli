@@ -151,11 +151,39 @@ export function claimRelayHandoff(sessionId: string): boolean {
   return true;
 }
 
+/**
+ * 텔레그램 입력창의 `/` 메뉴에 올릴 목록.
+ *
+ * `/help` 본문과 짝이 맞아야 한다 — 한쪽에만 있는 명령이 생기면 메뉴를 믿고
+ * 쓰던 사람은 그 기능이 없는 줄 안다.
+ */
+const BOT_COMMAND_MENU = [
+  { command: 'help', description: '명령 목록' },
+  { command: 'status', description: '무엇이 돌고 있는지' },
+  { command: 'projects', description: '프로젝트 목록' },
+  { command: 'watch', description: '<번호|이름> 그 프로젝트의 최신 대화를 구독' },
+  { command: 'unwatch', description: '구독을 놓는다 (이쪽으로 오는 것을 전부 멈춤)' },
+  { command: 'on', description: '웹 작업 알림 켜기' },
+  { command: 'off', description: '웹 작업 알림 끄기' },
+  { command: 'allow', description: '승인 대기 중인 도구를 허용' },
+  { command: 'deny', description: '승인 대기 중인 도구를 거부' },
+  { command: 'stop', description: '돌고 있는 턴을 중단' },
+];
+
 export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
   const client = config.client ?? createTelegramClient(config.botToken);
   const allowed = new Set(config.allowedChatIds);
   const abortController = new AbortController();
   let stopped = false;
+
+  // 실패해도 브리지는 뜬다. 메뉴가 비는 것과 통로가 막히는 것은 무게가 다르다.
+  // 테스트가 넘기는 가짜 클라이언트에는 이 메서드가 없을 수 있다.
+  if (typeof client.setMyCommands === 'function') {
+    void client.setMyCommands(BOT_COMMAND_MENU).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TelegramBridge] Failed to register the command menu', { error: message });
+    });
+  }
 
   /** 화이트리스트에 있는 모두에게. 보통 본인 한 명이다. */
   const broadcast = async (text: string): Promise<void> => {

@@ -82,7 +82,8 @@ test('/watch 로 고른 세션에 명령이 들어간다', async () => {
     await handleTelegramCommand('/watch 1', { userId, runtime });
     const reply = await handleTelegramCommand('테스트 돌려줘', { userId, runtime });
 
-    assert.equal(reply, '전달했습니다.');
+    // 잘 들어갔다는 확인 한 줄은 보내지 않는다. 결과가 곧 따라온다.
+    assert.equal(reply, null);
     assert.deepEqual(runs.map((run) => run.command), ['테스트 돌려줘']);
   });
 });
@@ -151,8 +152,40 @@ test('/off 는 명령 수신까지 막지는 않는다', async () => {
     await handleTelegramCommand('/off', { userId, runtime });
     const reply = await handleTelegramCommand('그래도 실행해줘', { userId, runtime });
 
-    assert.equal(reply, '전달했습니다.');
+    assert.equal(reply, null);
     assert.equal(runs.length, 1);
+  });
+});
+
+test('/unwatch 는 구독과 알림을 함께 놓는다', async () => {
+  await withIsolatedDatabase(async ({ userId }) => {
+    const runs: RunCall[] = [];
+    const runtime = createRuntime(runs);
+    await handleTelegramCommand('/watch 1', { userId, runtime });
+    await handleTelegramCommand('/on', { userId, runtime });
+
+    const reply = await handleTelegramCommand('/unwatch', { userId, runtime });
+
+    assert.match(reply ?? '', /구독을 놓았습니다/);
+    // 웹 작업 알림도 같이 꺼져야 한다. 구독만 놓고 알림이 남으면 `/bot` 으로
+    // 넘겨받은 대화가 계속 이쪽으로 온다.
+    assert.equal(isSessionNotified(userId, SESSION_ID), false);
+
+    // 구독이 없으므로 그냥 보낸 글은 실행되지 않는다.
+    const afterRelease = await handleTelegramCommand('이건 가면 안 된다', { userId, runtime });
+    assert.match(afterRelease ?? '', /구독 중인 세션이 없습니다/);
+    assert.equal(runs.length, 0);
+  });
+});
+
+test('/help 는 모든 명령을 보여준다', async () => {
+  await withIsolatedDatabase(async ({ userId }) => {
+    const runtime = createRuntime([]);
+    const reply = await handleTelegramCommand('/help', { userId, runtime });
+
+    for (const command of ['/status', '/projects', '/watch', '/unwatch', '/on', '/off', '/allow', '/deny', '/stop']) {
+      assert.ok(reply?.includes(command), `${command} 가 /help 에 없다`);
+    }
   });
 });
 

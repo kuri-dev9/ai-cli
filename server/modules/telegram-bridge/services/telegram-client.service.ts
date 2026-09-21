@@ -139,6 +139,16 @@ export function createTelegramClient(botToken: string) {
       });
     },
 
+    /**
+     * 텔레그램 입력창의 명령 메뉴를 채운다.
+     *
+     * 이게 없으면 사용자는 `/help` 를 외우고 있어야 한다. 등록해 두면 `/` 만
+     * 쳐도 목록이 뜨므로, 명령을 기억하지 못해도 쓸 수 있다.
+     */
+    async setMyCommands(commands: Array<{ command: string; description: string }>): Promise<void> {
+      await call('setMyCommands', { commands });
+    },
+
     /** 폴링 한 번이 매달릴 수 있는 시간. 호출부가 타임아웃을 걸 때 쓴다. */
     requestTimeoutMs: REQUEST_TIMEOUT_MS,
   };
