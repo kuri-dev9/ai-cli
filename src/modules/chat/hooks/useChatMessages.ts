@@ -5,6 +5,7 @@
 
 import type { ChatMessage,NormalizedMessage,SubagentActivity } from '@/shared/types';
 import { formatUsageLimitText } from '@/modules/chat/utils/chatFormatting';
+import { foldQuestionAnswers } from '@/modules/chat/utils/questionAnswers';
 
 function formatToolResultContent(content: unknown): string {
   const text = typeof content === 'string' ? content : JSON.stringify(content);
@@ -269,6 +270,13 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             }
           : null;
 
+        // A live turn never passes through the backend's transcript fold, so the
+        // answers the user just picked have to be merged in here or the question
+        // card renders as though it was never answered.
+        const toolInput = msg.toolName === 'AskUserQuestion'
+          ? foldQuestionAnswers(msg.toolInput, toolResult)
+          : msg.toolInput;
+
         // The server-indexed timeline arrives on a history load; the live fold
         // covers the run in progress. A mid-run refresh can attach a partial
         // server timeline while newer live rows keep streaming, so the longer
@@ -285,7 +293,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           timestamp: msg.timestamp,
           isToolUse: true,
           toolName: msg.toolName,
-          toolInput: typeof msg.toolInput === 'string' ? msg.toolInput : JSON.stringify(msg.toolInput ?? '', null, 2),
+          toolInput: typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput ?? '', null, 2),
           toolId: msg.toolId,
           toolResult,
           toolStatus: typeof msg.status === 'string' ? msg.status : undefined,
