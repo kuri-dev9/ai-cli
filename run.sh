@@ -4,7 +4,9 @@
 #
 #   ./run.sh              서버를 켠다 (watchdog 포함)
 #   ./run.sh stop         끈다
-#   ./run.sh restart      껐다 켠다
+#   ./run.sh restart      빌드하고 껐다 켠다
+#   ./run.sh restart -n   빌드 없이 껐다 켠다
+#   ./run.sh build        빌드만 한다
 #   ./run.sh status       상태를 본다
 #   ./run.sh logs         로그를 따라 본다 (Ctrl+C 로 빠져나옴)
 #   ./run.sh logs server  서버 로그만
@@ -19,7 +21,7 @@ set -uo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/lib/common.sh"
 
 usage() {
-  sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 access_urls() {
@@ -45,6 +47,30 @@ access_urls() {
   fi
 }
 
+# 빌드 산출물을 다시 만든다.
+#
+# `restart` 가 이걸 먼저 부르는 이유: run.sh 는 dist-server/ 를 실행하는데,
+# 소스를 고치고 재시작만 하면 예전 빌드가 그대로 뜬다. 고친 것이 반영된 줄
+# 알고 한참을 헤매게 되는 종류의 함정이라, 기본값을 안전한 쪽에 둔다.
+#
+# 출력은 파일로 보낸다. 성공하면 볼 일이 없고, 실패했을 때 터미널을 거슬러
+# 올라가는 것보다 파일 하나를 보는 편이 낫다.
+cmd_build() {
+  ensure_dirs
+
+  info "빌드합니다 (npm run build)"
+  if (cd "$PROJECT_ROOT" && npm run build) > "$BUILD_LOG" 2>&1; then
+    ok "빌드 완료"
+    return 0
+  fi
+
+  fail "빌드에 실패했습니다"
+  printf "\n"
+  tail -n 25 "$BUILD_LOG"
+  printf "\n  %s전체 로그: %s%s\n\n" "$C_DIM" "${BUILD_LOG#"$PROJECT_ROOT"/}" "$C_OFF"
+  return 1
+}
+
 cmd_start() {
   ensure_dirs
 
@@ -54,11 +80,11 @@ cmd_start() {
     return 0
   fi
 
+  # 산출물이 없으면 만들면 된다. 예전에는 ./install.sh 를 다시 돌리라고
+  # 돌려보냈는데, 정작 필요한 것은 빌드 한 번뿐이었다.
   if ! build_exists; then
-    fail "빌드 산출물이 없습니다. 먼저 설치를 끝내세요."
-    printf "  %s./install.sh%s   또는   %snpm run build%s\n" \
-      "$C_BLUE" "$C_OFF" "$C_BLUE" "$C_OFF"
-    return 1
+    info "빌드 산출물이 없습니다"
+    cmd_build || return 1
   fi
 
   # 남아 있는 PID 파일은 지난번에 비정상 종료된 흔적이다. 정리하고 시작한다.
@@ -205,7 +231,15 @@ cmd_foreground() {
 case "${1:-start}" in
   start)      cmd_start ;;
   stop)       cmd_stop ;;
-  restart)    cmd_stop; sleep 2; cmd_start ;;
+  # 빌드를 끄기 전에 한다. 먼저 껐다가 빌드가 깨지면 서버가 내려간 채로
+  # 남는다 — 고치는 동안 아무도 쓸 수 없게 되는 것이 가장 나쁜 결과다.
+  restart)
+    case "${2:-}" in
+      -n|--no-build) ;;
+      *) cmd_build || exit 1 ;;
+    esac
+    cmd_stop; sleep 2; cmd_start ;;
+  build)      cmd_build ;;
   status)     cmd_status ;;
   logs)       cmd_logs "${2:-all}" ;;
   foreground|fg) cmd_foreground ;;

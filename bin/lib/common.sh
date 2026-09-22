@@ -22,6 +22,7 @@ RUN_DIR="$PROJECT_ROOT/.run"
 
 SERVER_LOG="$LOG_DIR/server.log"
 WATCHDOG_LOG="$LOG_DIR/watchdog.log"
+BUILD_LOG="$LOG_DIR/build.log"
 SERVER_PID_FILE="$RUN_DIR/server.pid"
 WATCHDOG_PID_FILE="$RUN_DIR/watchdog.pid"
 
