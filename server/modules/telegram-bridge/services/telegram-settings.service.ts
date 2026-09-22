@@ -1,4 +1,9 @@
 import { appConfigDb } from '@/modules/database/index.js';
+import {
+  parseTelegramPermissionMode,
+  TELEGRAM_PERMISSION_MODE_KEY,
+} from '@/modules/websocket/index.js';
+import type { TelegramPermissionMode } from '@/modules/websocket/index.js';
 
 /**
  * 브리지 접속 정보. UI 에서 넣고 고칠 수 있도록 DB 에 둔다.
@@ -26,6 +31,13 @@ export type TelegramSettings = {
   fromEnvironment: boolean;
   /** 마지막 "연결 확인"에서 받아 둔 봇 이름. 확인 전이면 null. */
   botUsername: string | null;
+  /**
+   * 폰에서 보낸 작업에 얼마나 허용할지. 기본 `ask`.
+   *
+   * 판정과 의미는 websocket 쪽이 갖고 있다 — 실제로 쓰이는 자리가 거기라서,
+   * 두 군데에 같은 뜻의 코드를 두지 않으려고 여기서는 읽고 쓰기만 한다.
+   */
+  permissionMode: TelegramPermissionMode;
 };
 
 function parseChatIds(raw: string | null | undefined): number[] {
@@ -57,6 +69,7 @@ export function readTelegramSettings(): TelegramSettings {
     enabled: storedEnabled === null ? true : storedEnabled === 'true',
     fromEnvironment,
     botUsername: readCachedBotUsername(botToken),
+    permissionMode: parseTelegramPermissionMode(appConfigDb.get(TELEGRAM_PERMISSION_MODE_KEY)),
   };
 }
 
@@ -64,6 +77,7 @@ export function writeTelegramSettings(updates: {
   botToken?: string;
   allowedChatIds?: number[];
   enabled?: boolean;
+  permissionMode?: TelegramPermissionMode;
 }): TelegramSettings {
   if (updates.botToken !== undefined) {
     appConfigDb.set(TOKEN_KEY, updates.botToken.trim());
@@ -73,6 +87,10 @@ export function writeTelegramSettings(updates: {
   }
   if (updates.enabled !== undefined) {
     appConfigDb.set(ENABLED_KEY, updates.enabled ? 'true' : 'false');
+  }
+  if (updates.permissionMode !== undefined) {
+    // 모르는 값이 저장되면 그때부터 조용히 `ask` 로 읽힌다. 들어올 때 거른다.
+    appConfigDb.set(TELEGRAM_PERMISSION_MODE_KEY, parseTelegramPermissionMode(updates.permissionMode));
   }
   return readTelegramSettings();
 }

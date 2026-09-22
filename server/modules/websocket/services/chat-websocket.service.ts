@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import type { WebSocket } from 'ws';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { appConfigDb, sessionsDb } from '@/modules/database/index.js';
 import { providerModelsService, sessionsService } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import type { ChatRunOrigin } from '@/modules/websocket/services/chat-run-registry.service.js';
@@ -99,24 +99,85 @@ export function parseTelegramRelayPrefix(raw: string): { content: string; relayR
 }
 
 /**
- * 폰으로 넘어간 턴을 승인 없이 돌릴지. `.env` 의 `TELEGRAM_SKIP_PERMISSIONS`.
+ * 폰으로 넘어간 턴에 얼마나 허용할지.
  *
- * 기본은 꺼짐이다. 켜면 폰에서 보낸 한 줄이 파일 삭제나 배포까지 아무도
- * 승인하지 않은 채 실행한다 — 혼자 쓰는 설치에서는 그게 편하지만, 기본값이
- * 될 수는 없다. 받는 사람이 모르는 채로 위험을 떠안는 쪽이 기본이면 안 된다.
+ * - `ask`   평소처럼 승인을 묻는다. 기본값.
+ * - `read`  읽기 도구만 자동 허용하고, 고치거나 실행하는 것은 묻는다.
+ * - `full`  묻지 않는다.
  *
- * 설정 화면(DB)이 아니라 `.env` 에서만 읽는다. 화면에 두면 브라우저를 잡은
- * 누군가가 클릭 한 번으로 켤 수 있는데, 이 스위치는 그 정도 무게가 아니다.
- * 파일을 고치고 서버를 재시작하는 만큼의 의도는 있어야 한다.
+ * 왜 고르게 하는가: 승인 창은 붙어 있는 브라우저에만 그려진다. 폰에는 아무것도
+ * 뜨지 않은 채 55초 뒤 거부로 끝나므로, `ask` 로 두면 폰에서는 읽기조차 사실상
+ * 막힌다. 그렇다고 `full` 이 기본일 수는 없다 — 폰에서 보낸 한 줄이 파일
+ * 삭제나 배포까지 아무도 승인하지 않은 채 실행한다.
  *
- * 꺼 두면 승인 요청이 평소처럼 뜬다. 텔레그램에는 보이지 않으므로 `/status`
- * 로 확인하고 `/allow` 로 답해야 한다 — 55초 안에.
- *
- * 매번 읽는 이유는 테스트 때문이다. 모듈을 읽는 시점에 한 번만 보면 값을
- * 바꿔 가며 확인할 수 없다. 환경변수 하나 읽는 비용은 턴당 무시할 만하다.
+ * `read` 가 그 사이다. 폰에서 코드를 훑고 상황을 묻는 데는 충분하면서, 뭔가를
+ * 바꾸려는 순간에는 멈춰 선다.
  */
-export function isTelegramPermissionBypassEnabled(): boolean {
-  return process.env.TELEGRAM_SKIP_PERMISSIONS?.trim().toLowerCase() === 'true';
+export type TelegramPermissionMode = 'ask' | 'read' | 'full';
+
+/** 설정 화면이 쓰는 저장 키. `telegram-settings` 가 같이 읽고 쓴다. */
+export const TELEGRAM_PERMISSION_MODE_KEY = 'telegram.permissionMode';
+
+export const TELEGRAM_PERMISSION_MODES: TelegramPermissionMode[] = ['ask', 'read', 'full'];
+
+/**
+ * `read` 에서 자동으로 허용할 도구.
+ *
+ * 읽기만 하고 아무것도 남기지 않는 것만 넣는다. `Bash` 는 읽는 명령도 있지만
+ * 같은 도구로 지울 수도 있어서 넣지 않는다 — 도구 이름만으로는 가를 수 없다.
+ *
+ * 이름이 정확히 맞아야 통과한다. 런타임의 허용 규칙이 정확한 이름과 `Bash(...)`
+ * 축약만 알아보기 때문이다.
+ */
+export const TELEGRAM_READ_ONLY_TOOLS = [
+  'Read',
+  'Grep',
+  'Glob',
+  'NotebookRead',
+  'WebFetch',
+  'WebSearch',
+  'TodoWrite',
+];
+
+export function parseTelegramPermissionMode(value: unknown): TelegramPermissionMode {
+  return TELEGRAM_PERMISSION_MODES.includes(value as TelegramPermissionMode)
+    ? (value as TelegramPermissionMode)
+    : 'ask';
+}
+
+/**
+ * 지금 설정된 값. 저장돼 있지 않으면 `ask`.
+ *
+ * 턴마다 읽는다. 설정 화면에서 방금 바꾼 값이 다음 턴부터 듣지 않으면 왜 안
+ * 되는지 알 길이 없고, 키 하나 읽는 비용은 턴당 무시할 만하다.
+ */
+export function readTelegramPermissionMode(): TelegramPermissionMode {
+  return parseTelegramPermissionMode(appConfigDb.get(TELEGRAM_PERMISSION_MODE_KEY));
+}
+
+/**
+ * 폰으로 넘어간 턴에 붙일 실행 옵션.
+ *
+ * 프로바이더마다 읽는 자리가 달라 두 가지를 같이 넘긴다. Claude 와 Codex 는
+ * `permissionMode` 를, Cursor 는 `skipPermissions` 를 본다.
+ *
+ * `read` 는 허용 목록으로 푼다. 이 경로의 턴은 컴포저가 없어 `toolsSettings` 를
+ * 아무것도 보내지 않으므로, 여기서 넣는 것이 사용자의 설정을 덮는 일은 없다.
+ */
+export function resolveTelegramRunPermissions(mode: TelegramPermissionMode): AnyRecord {
+  if (mode === 'full') {
+    return { permissionMode: 'bypassPermissions', skipPermissions: true };
+  }
+  if (mode === 'read') {
+    return {
+      toolsSettings: {
+        allowedTools: [...TELEGRAM_READ_ONLY_TOOLS],
+        disallowedTools: [],
+        skipPermissions: false,
+      },
+    };
+  }
+  return {};
 }
 
 /**
@@ -382,16 +443,14 @@ async function dispatchRun(
     projectPath: session.project_path ?? clientOptions.projectPath,
     // 폰으로 넘어간 턴은 승인을 물을 자리가 없다. 승인 요청은 붙어 있는
     // 브라우저로만 그려지고, 텔레그램에는 아무것도 뜨지 않은 채 55초 뒤 거부로
-    // 끝난다. 그래서 켜 두면 묻지 않고 돌린다 — 다만 켜는 것은 설치한 사람의
-    // 몫이다. `isTelegramPermissionBypassEnabled` 참고.
+    // 끝난다. 얼마나 허용할지는 설정 화면에서 고른다 —
+    // `readTelegramPermissionMode` 참고.
     //
     // 대상은 두 가지뿐이다: 텔레그램에서 보낸 턴과, `/bot` 으로 넘긴 그 턴. 둘 다
     // 사용자가 브라우저를 떠나겠다고 방금 말한 경우다. 브라우저에서 그냥 보낸
     // 턴은 손대지 않는다.
-    // 두 가지를 같이 넘기는 것은 런타임마다 읽는 곳이 다르기 때문이다. Claude 와
-    // Codex 는 `permissionMode` 를, Cursor 는 `skipPermissions` 를 본다.
-    ...((origin === 'telegram' || relay.relayRequested) && isTelegramPermissionBypassEnabled()
-      ? { permissionMode: 'bypassPermissions', skipPermissions: true }
+    ...(origin === 'telegram' || relay.relayRequested
+      ? resolveTelegramRunPermissions(readTelegramPermissionMode())
       : {}),
   };
 

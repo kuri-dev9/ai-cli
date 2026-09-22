@@ -10,6 +10,7 @@ import SettingsSection from '@/modules/settings/SettingsSection';
 import SettingsToggle from '@/modules/settings/SettingsToggle';
 import type {
   TelegramChatDiscovery,
+  TelegramPermissionMode,
   TelegramSettingsState,
   TelegramSettingsUpdate,
   TelegramTestResult,
@@ -24,7 +25,16 @@ const EMPTY_SETTINGS: TelegramSettingsState = {
   fromEnvironment: false,
   running: false,
   botUsername: null,
+  permissionMode: 'ask',
 };
+
+/**
+ * 고를 수 있는 권한과, 각각이 무슨 뜻인지.
+ *
+ * 설명을 길게 쓰는 이유: 승인 창이 폰에 뜨지 않는다는 사실을 모르면 `ask` 가
+ * 왜 답답한지, `full` 이 왜 위험한지 둘 다 알 수 없다.
+ */
+const PERMISSION_MODES: TelegramPermissionMode[] = ['ask', 'read', 'full'];
 
 /**
  * 서버 응답에서 설정 객체를 꺼낸다.
@@ -47,6 +57,9 @@ function unwrapSettings(payload: unknown): TelegramSettingsState {
     fromEnvironment: source?.fromEnvironment === true,
     running: source?.running === true,
     botUsername: typeof source?.botUsername === 'string' ? source.botUsername : null,
+    permissionMode: PERMISSION_MODES.includes(source?.permissionMode as TelegramPermissionMode)
+      ? (source?.permissionMode as TelegramPermissionMode)
+      : 'ask',
   };
 }
 
@@ -90,6 +103,7 @@ export default function TelegramTab() {
   const [chatIdDraft, setChatIdDraft] = useState('');
   const [chatIds, setChatIds] = useState<number[]>([]);
   const [chatIdError, setChatIdError] = useState<string | null>(null);
+  const [permissionMode, setPermissionMode] = useState<TelegramPermissionMode>('ask');
 
   // "내 chat id 찾기" 결과. 화이트리스트 초안과 따로 둔다 — 여기서 고른 것만
   // 위 목록에 들어가고, 고르지 않은 대화는 아무 영향도 주지 않아야 한다.
@@ -101,6 +115,7 @@ export default function TelegramTab() {
   const applySettings = useCallback((next: TelegramSettingsState) => {
     setSettings(next);
     setChatIds(next.allowedChatIds);
+    setPermissionMode(next.permissionMode);
     setTokenDraft('');
     setIsTokenDirty(false);
     // 저장하면 브리지가 다시 뜬다. 그 전에 읽어 둔 대화 목록은 이미 낡은
@@ -154,7 +169,9 @@ export default function TelegramTab() {
   };
 
   const current = settings ?? EMPTY_SETTINGS;
-  const isDirty = isTokenDirty || !sameIds(chatIds, current.allowedChatIds);
+  const isDirty = isTokenDirty
+    || !sameIds(chatIds, current.allowedChatIds)
+    || permissionMode !== current.permissionMode;
 
   const addChatIds = (value: string) => {
     const { ids, hasInvalid } = parseChatIds(value);
@@ -214,6 +231,9 @@ export default function TelegramTab() {
     }
     if (!sameIds(chatIds, current.allowedChatIds)) {
       updates.allowedChatIds = chatIds;
+    }
+    if (permissionMode !== current.permissionMode) {
+      updates.permissionMode = permissionMode;
     }
     if (Object.keys(updates).length === 0) {
       return;
@@ -547,6 +567,56 @@ export default function TelegramTab() {
             )}
 
             <p className="text-xs text-muted-foreground">{t('telegramSettings.chatIds.help')}</p>
+          </div>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('telegramSettings.permissions.title')}
+        description={t('telegramSettings.permissions.description')}
+      >
+        <SettingsCard>
+          <div className="space-y-2">
+            {PERMISSION_MODES.map((mode) => {
+              const isSelected = permissionMode === mode;
+              return (
+                <label
+                  key={mode}
+                  className={`flex cursor-pointer gap-3 rounded-lg border p-3 transition-colors ${
+                    isSelected
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-muted-foreground/40'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="telegram-permission-mode"
+                    value={mode}
+                    checked={isSelected}
+                    onChange={() => setPermissionMode(mode)}
+                    className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                  />
+                  <span className="space-y-1">
+                    <span className="block text-sm font-medium text-foreground">
+                      {t(`telegramSettings.permissions.modes.${mode}.label`)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t(`telegramSettings.permissions.modes.${mode}.description`)}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+
+            {permissionMode === 'full' && (
+              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                {t('telegramSettings.permissions.fullWarning')}
+              </p>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              {t('telegramSettings.permissions.help')}
+            </p>
           </div>
         </SettingsCard>
       </SettingsSection>

@@ -1255,6 +1255,15 @@ export type CodeEditorSettingsState = {
 };
 
 /** 텔레그램 브리지 설정을 설정 화면이 읽는 형태. 서버가 `GET/PUT /api/telegram/settings` 로 돌려주는 것과 같은 모양이며, `botToken` 은 언제나 마스킹된 값이다(평문은 프론트로 오지 않는다). */
+/**
+ * 폰에서 보낸 작업에 얼마나 허용할지.
+ *
+ * 승인 창은 붙어 있는 브라우저에만 그려진다. 폰에는 아무것도 뜨지 않은 채
+ * 시간이 지나 거부로 끝나므로, `ask` 로 두면 폰에서는 읽기조차 사실상 막힌다.
+ * `read` 가 그 사이다 — 훑어보는 것은 되고, 바꾸려 하면 멈춰 선다.
+ */
+export type TelegramPermissionMode = 'ask' | 'read' | 'full';
+
 export type TelegramSettingsState = {
   /** 꺼 두면 토큰이 있어도 브리지를 켜지 않는다. */
   enabled: boolean;
@@ -1270,6 +1279,8 @@ export type TelegramSettingsState = {
   running: boolean;
   /** 마지막 연결 확인에서 받아 둔 봇 이름. 확인한 적이 없으면 null. */
   botUsername: string | null;
+  /** 폰에서 보낸 작업에 얼마나 허용할지. */
+  permissionMode: TelegramPermissionMode;
 };
 
 /** `PUT /api/telegram/settings` 에 올리는 변경분. 사용자가 건드린 항목만 담는다 — 특히 토큰 입력칸을 건드리지 않았으면 `botToken` 은 아예 넣지 않는다. */
@@ -1277,6 +1288,7 @@ export type TelegramSettingsUpdate = {
   botToken?: string;
   allowedChatIds?: number[];
   enabled?: boolean;
+  permissionMode?: TelegramPermissionMode;
 };
 
 /** `POST /api/telegram/test` 의 응답. 성공하면 봇 이름이, 실패하면 이유가 온다. */

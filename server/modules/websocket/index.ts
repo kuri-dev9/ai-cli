@@ -17,4 +17,14 @@ export { runDetachedChatTurn } from './services/chat-websocket.service.js';
 export { parseTelegramRelayPrefix, TELEGRAM_RELAY_PREFIX } from './services/chat-websocket.service.js';
 // `/unbot`: 그 반대. 이 대화를 폰에서 놓고 브라우저로 되돌린다.
 export { parseTelegramReleasePrefix, TELEGRAM_RELEASE_PREFIX } from './services/chat-websocket.service.js';
+// 폰으로 넘어간 턴에 얼마나 허용할지. 설정 화면이 읽고 쓴다.
+export {
+  parseTelegramPermissionMode,
+  readTelegramPermissionMode,
+  resolveTelegramRunPermissions,
+  TELEGRAM_PERMISSION_MODE_KEY,
+  TELEGRAM_PERMISSION_MODES,
+  TELEGRAM_READ_ONLY_TOOLS,
+} from './services/chat-websocket.service.js';
+export type { TelegramPermissionMode } from './services/chat-websocket.service.js';
 export type { ProviderRuntimeGateway } from './services/chat-websocket.service.js';

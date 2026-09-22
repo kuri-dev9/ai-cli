@@ -215,6 +215,26 @@
         "failed": "Could not look up chat ids",
         "select": "Add chat id {{id}}"
       }
+    },
+    "permissions": {
+      "title": "Telegram task permissions",
+      "description": "Choose what a task sent from your phone is allowed to do. Approval prompts only render in the browser, so a task arriving from Telegram can do exactly what you allow here.",
+      "modes": {
+        "ask": {
+          "label": "Ask every time",
+          "description": "Requests approval exactly as the browser does. Safest, but the prompt is invisible on Telegram — you have to check it with /status and answer with /allow."
+        },
+        "read": {
+          "label": "Reading only",
+          "description": "Reading and searching files go through immediately. Anything that edits or runs still asks. A good fit for looking through code from your phone."
+        },
+        "full": {
+          "label": "Allow everything",
+          "description": "Runs everything without asking, so you can carry a task through to the end from your phone."
+        }
+      },
+      "fullWarning": "One line sent from your phone can delete files or deploy with nobody approving it. Only choose this on an install you alone use.",
+      "help": "This applies to tasks sent from Telegram and to tasks handed over with the /bot prefix. Tasks sent normally from the browser are unaffected."
     }
   },
   "appearanceSettings": {

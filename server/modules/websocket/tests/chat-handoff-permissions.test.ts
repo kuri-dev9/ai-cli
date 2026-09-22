@@ -5,45 +5,26 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { appConfigDb, closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
 import {
   handleChatConnection,
   runDetachedChatTurn,
+  TELEGRAM_PERMISSION_MODE_KEY,
+  TELEGRAM_READ_ONLY_TOOLS,
+  type TelegramPermissionMode,
 } from '@/modules/websocket/services/chat-websocket.service.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
 
 /**
- * 폰으로 넘어간 턴을 승인 없이 돌리는 스위치.
+ * 폰으로 넘어간 턴에 얼마나 허용할지.
  *
- * 승인 요청은 붙어 있는 브라우저에만 그려진다. 텔레그램에는 아무것도 뜨지 않은
- * 채 55초 뒤 거부로 끝나므로, 켜 두면 아예 묻지 않고 돌린다.
+ * 승인 창은 붙어 있는 브라우저에만 그려진다. 폰에는 아무것도 뜨지 않은 채 55초
+ * 뒤 거부로 끝나므로, 설정 화면에서 고른 만큼만 폰에서 할 수 있다.
  *
- * 다만 기본은 꺼짐이다. 켜면 폰에서 보낸 한 줄이 파일 삭제까지 아무도 승인하지
- * 않은 채 실행하므로, 설치한 사람이 `.env` 에서 직접 켜야 한다. 브라우저에서
- * 그냥 보낸 턴은 스위치와 무관하게 이 규칙 밖이다 — 거기서는 물을 수 있다.
+ * 기본은 `ask` 다. 브라우저에서 그냥 보낸 턴은 이 설정과 무관하게 규칙 밖이다 —
+ * 거기서는 물을 수 있다.
  */
-
-/** 이 파일이 환경변수를 갈아 끼우므로, 다른 테스트에 새지 않도록 되돌린다. */
-function withBypass(enabled: boolean, run: () => Promise<void>): () => Promise<void> {
-  return async () => {
-    const previous = process.env.TELEGRAM_SKIP_PERMISSIONS;
-    if (enabled) {
-      process.env.TELEGRAM_SKIP_PERMISSIONS = 'true';
-    } else {
-      delete process.env.TELEGRAM_SKIP_PERMISSIONS;
-    }
-    try {
-      await run();
-    } finally {
-      if (previous === undefined) {
-        delete process.env.TELEGRAM_SKIP_PERMISSIONS;
-      } else {
-        process.env.TELEGRAM_SKIP_PERMISSIONS = previous;
-      }
-    }
-  };
-}
 
 const SESSION_ID = 'handoff-permission-session';
 
@@ -65,6 +46,9 @@ async function withGateway(
     runs: RunCall[];
     runtime: unknown;
   }) => Promise<void>,
+  // 설정은 DB 에 있고 DB 는 이 함수가 만든다. 값을 미리 넣어 두지 않으면 테스트가
+  // 저장 시점과 읽는 시점을 직접 맞춰야 한다.
+  permissionMode?: TelegramPermissionMode,
 ): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'chat-handoff-perms-'));
@@ -86,6 +70,10 @@ async function withGateway(
     const now = new Date().toISOString();
     sessionsDb.createSession(SESSION_ID, 'claude', tempDirectory, 'Handoff session', now, now, null);
 
+    if (permissionMode) {
+      appConfigDb.set(TELEGRAM_PERMISSION_MODE_KEY, permissionMode);
+    }
+
     handleChatConnection(socket as never, { user: { id: 1 } } as never, { runtime } as never);
     await runTest({ socket, runs, runtime });
   } finally {
@@ -104,7 +92,7 @@ async function withGateway(
 /** The handler is async and the socket listener does not await it. */
 const settle = () => new Promise((resolve) => { setTimeout(resolve, 30); });
 
-test('켜 두면 텔레그램에서 보낸 턴은 승인을 묻지 않는다', withBypass(true, async () => {
+test('전부 허용이면 텔레그램에서 보낸 턴은 승인을 묻지 않는다', async () => {
   await withGateway(async ({ runs, runtime }) => {
     await runDetachedChatTurn(
       { sessionId: SESSION_ID, userId: 1, content: '이어서 해줘', origin: 'telegram' },
@@ -115,10 +103,10 @@ test('켜 두면 텔레그램에서 보낸 턴은 승인을 묻지 않는다', w
     assert.equal(runs[0].options.permissionMode, 'bypassPermissions');
     // Cursor 런타임은 최상위 플래그만 읽는다.
     assert.equal(runs[0].options.skipPermissions, true);
-  });
-}));
+  }, 'full');
+});
 
-test('켜 두면 /bot 으로 넘긴 턴도 승인을 묻지 않는다', withBypass(true, async () => {
+test('전부 허용이면 /bot 으로 넘긴 턴도 승인을 묻지 않는다', async () => {
   await withGateway(async ({ socket, runs }) => {
     socket.emit('message', JSON.stringify({
       type: 'chat.send',
@@ -130,11 +118,40 @@ test('켜 두면 /bot 으로 넘긴 턴도 승인을 묻지 않는다', withBypa
     assert.equal(runs.length, 1);
     // `/bot` 은 "브라우저를 떠난다"는 뜻이다. 떠난 뒤에 물으면 답할 사람이 없다.
     assert.equal(runs[0].options.permissionMode, 'bypassPermissions');
-    assert.equal(runs[0].options.skipPermissions, true);
-  });
-}));
+  }, 'full');
+});
 
-test('꺼 두면 텔레그램에서 보낸 턴도 평소처럼 승인을 묻는다', withBypass(false, async () => {
+test('읽기만 허용이면 읽기 도구만 통과시킨다', async () => {
+  await withGateway(async ({ runs, runtime }) => {
+    await runDetachedChatTurn(
+      { sessionId: SESSION_ID, userId: 1, content: '코드 좀 훑어줘', origin: 'telegram' },
+      { runtime } as never,
+    );
+
+    const toolsSettings = runs[0].options.toolsSettings as { allowedTools: string[] };
+    assert.deepEqual(toolsSettings.allowedTools, TELEGRAM_READ_ONLY_TOOLS);
+    // 나머지는 평소처럼 묻는다. 승인을 통째로 끄는 것이 아니다.
+    assert.equal(runs[0].options.permissionMode, undefined);
+    assert.equal(runs[0].options.skipPermissions, undefined);
+  }, 'read');
+});
+
+test('읽기만 허용에 고치거나 실행하는 도구는 들어가지 않는다', async () => {
+  await withGateway(async ({ runs, runtime }) => {
+    await runDetachedChatTurn(
+      { sessionId: SESSION_ID, userId: 1, content: '확인', origin: 'telegram' },
+      { runtime } as never,
+    );
+
+    const { allowedTools } = runs[0].options.toolsSettings as { allowedTools: string[] };
+    // `Bash` 는 읽는 명령도 있지만 같은 도구로 지울 수도 있어서 넣지 않는다.
+    for (const tool of ['Bash', 'Edit', 'Write', 'NotebookEdit']) {
+      assert.equal(allowedTools.includes(tool), false, `${tool} 이 들어가면 안 된다`);
+    }
+  }, 'read');
+});
+
+test('기본값은 묻기다', async () => {
   await withGateway(async ({ runs, runtime }) => {
     await runDetachedChatTurn(
       { sessionId: SESSION_ID, userId: 1, content: '이어서 해줘', origin: 'telegram' },
@@ -142,41 +159,27 @@ test('꺼 두면 텔레그램에서 보낸 턴도 평소처럼 승인을 묻는�
     );
 
     assert.equal(runs.length, 1);
-    // 기본값이다. 켜는 것은 설치한 사람의 몫이고, 받는 사람이 모르는 채로
-    // 위험을 떠안는 쪽이 기본이면 안 된다.
+    // 아무것도 고르지 않은 설치가 승인 없이 도는 쪽이면 안 된다.
     assert.equal(runs[0].options.permissionMode, undefined);
     assert.equal(runs[0].options.skipPermissions, undefined);
+    assert.equal(runs[0].options.toolsSettings, undefined);
   });
-}));
+});
 
-test('꺼 두면 /bot 으로 넘긴 턴도 평소처럼 승인을 묻는다', withBypass(false, async () => {
-  await withGateway(async ({ socket, runs }) => {
-    socket.emit('message', JSON.stringify({
-      type: 'chat.send',
-      sessionId: SESSION_ID,
-      content: '/bot 나가 있는 동안 돌려줘',
-    }));
-    await settle();
-
-    assert.equal(runs.length, 1);
-    assert.equal(runs[0].options.permissionMode, undefined);
-  });
-}));
-
-test('true 가 아닌 값은 켠 것으로 보지 않는다', withBypass(false, async () => {
-  process.env.TELEGRAM_SKIP_PERMISSIONS = '1';
+test('저장된 값이 이상하면 묻기로 떨어진다', async () => {
   await withGateway(async ({ runs, runtime }) => {
     await runDetachedChatTurn(
       { sessionId: SESSION_ID, userId: 1, content: '확인', origin: 'telegram' },
       { runtime } as never,
     );
 
-    // 어중간하게 켜지면 켠 줄 모르고 쓰게 된다. 정확히 true 만 받는다.
+    // 알 수 없는 값을 관대하게 읽으면 어느 쪽으로 도는지 아무도 모르게 된다.
     assert.equal(runs[0].options.permissionMode, undefined);
-  });
-}));
+    assert.equal(runs[0].options.toolsSettings, undefined);
+  }, 'nonsense' as never);
+});
 
-test('브라우저에서 그냥 보낸 턴은 컴포저가 고른 그대로 간다', withBypass(true, async () => {
+test('브라우저에서 그냥 보낸 턴은 설정과 무관하게 컴포저를 따른다', async () => {
   await withGateway(async ({ socket, runs }) => {
     socket.emit('message', JSON.stringify({
       type: 'chat.send',
@@ -187,12 +190,11 @@ test('브라우저에서 그냥 보낸 턴은 컴포저가 고른 그대로 간�
     await settle();
 
     assert.equal(runs.length, 1);
-    // 여기서는 승인 창이 뜬다. 뜰 수 있는 자리의 선택은 건드리지 않는다.
-    // 스위치를 켜 두어도 브라우저 턴은 그대로다. 거기서는 물을 수 있다.
+    // 전부 허용으로 두어도 브라우저 턴은 그대로다. 거기서는 물을 수 있다.
     assert.equal(runs[0].options.permissionMode, 'default');
     assert.equal(runs[0].options.skipPermissions, undefined);
-  });
-}));
+  }, 'full');
+});
 
 test('/unbot 만 보내면 턴을 돌리지 않는다', async () => {
   await withGateway(async ({ socket, runs }) => {

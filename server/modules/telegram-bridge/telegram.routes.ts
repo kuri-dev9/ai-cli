@@ -22,6 +22,8 @@ import {
   readBridgeUserId,
   setSessionNotified,
 } from '@/modules/telegram-bridge/services/telegram-state.service.js';
+import { TELEGRAM_PERMISSION_MODES } from '@/modules/websocket/index.js';
+import type { TelegramPermissionMode } from '@/modules/websocket/index.js';
 
 /**
  * 설정 화면이 브리지를 붙이는 통로.
@@ -68,6 +70,7 @@ function toSettingsResponse(settings: TelegramSettings, running: boolean) {
     fromEnvironment: settings.fromEnvironment,
     running,
     botUsername: settings.botUsername,
+    permissionMode: settings.permissionMode,
   };
 }
 
@@ -139,6 +142,15 @@ export function createTelegramRouter(
         throw invalidRequest('enabled must be a boolean');
       }
 
+      // 모르는 값은 받지 않는다. 저장되면 그때부터 조용히 `ask` 로 읽히는데,
+      // 화면에서는 고른 대로 보이므로 왜 안 듣는지 알 길이 없다.
+      if (
+        requestBody.permissionMode !== undefined
+        && !TELEGRAM_PERMISSION_MODES.includes(requestBody.permissionMode as TelegramPermissionMode)
+      ) {
+        throw invalidRequest(`permissionMode must be one of ${TELEGRAM_PERMISSION_MODES.join(', ')}`);
+      }
+
       const botToken = resolveBotTokenUpdate(requestBody.botToken);
       const allowedChatIds = requestBody.allowedChatIds === undefined
         ? undefined
@@ -148,6 +160,7 @@ export function createTelegramRouter(
         botToken,
         allowedChatIds,
         enabled: requestBody.enabled as boolean | undefined,
+        permissionMode: requestBody.permissionMode as TelegramPermissionMode | undefined,
       });
 
       // 저장한 설정대로 켜지거나 꺼진다. 서버를 다시 띄우게 하면 설정 화면을
