@@ -118,6 +118,7 @@
     "git": "Git",
     "apiTokens": "API & Tokens",
     "voice": "Voice",
+    "usage": "Usage",
     "tasks": "Tasks",
     "browser": "Browser",
     "notifications": "Notifications",
@@ -904,5 +905,28 @@
     "teamManagementDescription": "Multiple users, role-based access, and shared projects for your team.",
     "licensed": "Licensed under AGPL-3.0",
     "proCta": "Available with CloudCLI Pro"
+  },
+  "usage": {
+    "title": "Usage",
+    "description": "Subscription limit windows reported by Claude.",
+    "refresh": "Refresh",
+    "percentUsed": "{{percent}}% used",
+    "percentUnknown": "not reported",
+    "resets": "Resets {{time}}",
+    "lastUpdated": "updated {{time}}",
+    "loadFailed": "Could not load usage limits.",
+    "disclaimer": "Claude reports a limit window only when it changes, so these numbers update after a turn rather than on demand.",
+    "empty": {
+      "title": "No usage data yet",
+      "description": "A window appears once Claude reports it. Send a message and come back."
+    },
+    "windows": {
+      "fiveHour": "Current session",
+      "sevenDay": "Current week (all models)",
+      "sevenDayOpus": "Current week (Opus)",
+      "sevenDaySonnet": "Current week (Sonnet)",
+      "sevenDayFable": "Current week (Fable)",
+      "overage": "Overage"
+    }
   }
 }

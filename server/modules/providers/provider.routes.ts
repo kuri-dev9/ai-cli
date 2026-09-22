@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 
+import { claudeRateLimitService } from '@/modules/providers/services/claude-rate-limit.service.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { mcpConnectionTestService } from '@/modules/providers/services/mcp-connection-test.service.js';
@@ -802,6 +803,27 @@ router.get(
     res.json(createApiSuccessResponse(
       providerCapabilitiesService.getProviderCapabilities(provider),
     ));
+  }),
+);
+
+/**
+ * Subscription usage windows (session / weekly limits). Only Claude reports
+ * these; other providers answer `supported: false` so the usage screen can say
+ * so instead of showing an error.
+ */
+router.get(
+  '/:provider/rate-limits',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    if (provider !== 'claude') {
+      res.json(createApiSuccessResponse({ supported: false, windows: [] }));
+      return;
+    }
+
+    res.json(createApiSuccessResponse({
+      supported: true,
+      ...claudeRateLimitService.getSnapshot(),
+    }));
   }),
 );
 

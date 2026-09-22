@@ -27,6 +27,7 @@ import {
   CLAUDE_PREDEFINED_MODELS,
   CLAUDE_ULTRACODE_EFFORT
 } from '@/modules/providers/list/claude/claude-models.provider.js';
+import { claudeRateLimitService } from '@/modules/providers/services/claude-rate-limit.service.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import {
   createNotificationEvent,
@@ -942,6 +943,15 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         }
       } else {
         // session_id already captured
+      }
+
+      // Subscription usage windows only arrive when a limit changes, and there
+      // is no way to ask for them later, so each one is banked as it passes.
+      // It has no transcript representation — the normalizer below would drop
+      // it on the floor — hence the early continue.
+      if (message.type === 'rate_limit_event') {
+        claudeRateLimitService.record(message.rate_limit_info);
+        continue;
       }
 
       // Transform and normalize message via adapter

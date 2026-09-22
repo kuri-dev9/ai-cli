@@ -118,6 +118,7 @@
     "git": "Git",
     "apiTokens": "API & 토큰",
     "voice": "음성",
+    "usage": "사용량",
     "tasks": "작업",
     "browser": "브라우저",
     "notifications": "알림",
@@ -904,5 +905,28 @@
     "teamManagementDescription": "다중 사용자, 역할 기반 접근 제어, 팀을 위한 공유 프로젝트를 제공합니다.",
     "licensed": "AGPL-3.0 라이선스",
     "proCta": "CloudCLI Pro에서 사용 가능"
+  },
+  "usage": {
+    "title": "사용량",
+    "description": "Claude가 보고한 구독 한도 구간입니다.",
+    "refresh": "새로고침",
+    "percentUsed": "{{percent}}% 사용",
+    "percentUnknown": "보고되지 않음",
+    "resets": "{{time}} 초기화",
+    "lastUpdated": "{{time}} 갱신",
+    "loadFailed": "사용량 한도를 불러오지 못했습니다.",
+    "disclaimer": "Claude는 한도가 바뀔 때만 구간을 보고하므로, 이 값은 요청 시점이 아니라 대화를 한 번 돌린 뒤에 갱신됩니다.",
+    "empty": {
+      "title": "아직 사용량 데이터가 없습니다",
+      "description": "Claude가 한 번 보고하면 구간이 나타납니다. 메시지를 보낸 뒤 다시 확인해 주세요."
+    },
+    "windows": {
+      "fiveHour": "현재 세션",
+      "sevenDay": "이번 주 (전체 모델)",
+      "sevenDayOpus": "이번 주 (Opus)",
+      "sevenDaySonnet": "이번 주 (Sonnet)",
+      "sevenDayFable": "이번 주 (Fable)",
+      "overage": "초과 사용"
+    }
   }
 }

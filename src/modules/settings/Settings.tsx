@@ -9,6 +9,7 @@ import AgentsSettingsTab from '@/modules/settings/tabs/agents-settings/AgentsSet
 import AppearanceSettingsTab from '@/modules/settings/tabs/AppearanceSettingsTab';
 import CredentialsSettingsTab from '@/modules/settings/tabs/api-settings/CredentialsSettingsTab';
 import VoiceSettingsTab from '@/modules/settings/tabs/VoiceSettingsTab';
+import UsageSettingsTab from '@/modules/settings/tabs/UsageSettingsTab';
 import GitSettingsTab from '@/modules/settings/tabs/git-settings/GitSettingsTab';
 import BrowserUseSettingsTab from '@/modules/settings/tabs/browser-use-settings/BrowserUseSettingsTab';
 import NotificationsSettingsTab from '@/modules/settings/tabs/NotificationsSettingsTab';
@@ -223,6 +224,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
               {activeTab === 'api' && <CredentialsSettingsTab />}
 
               {activeTab === 'voice' && <VoiceSettingsTab />}
+
+              {activeTab === 'usage' && <UsageSettingsTab />}
 
               {activeTab === 'plugins' && <PluginSettingsTab />}
 
