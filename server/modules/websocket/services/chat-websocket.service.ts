@@ -99,6 +99,27 @@ export function parseTelegramRelayPrefix(raw: string): { content: string; relayR
 }
 
 /**
+ * 폰으로 넘어간 턴을 승인 없이 돌릴지. `.env` 의 `TELEGRAM_SKIP_PERMISSIONS`.
+ *
+ * 기본은 꺼짐이다. 켜면 폰에서 보낸 한 줄이 파일 삭제나 배포까지 아무도
+ * 승인하지 않은 채 실행한다 — 혼자 쓰는 설치에서는 그게 편하지만, 기본값이
+ * 될 수는 없다. 받는 사람이 모르는 채로 위험을 떠안는 쪽이 기본이면 안 된다.
+ *
+ * 설정 화면(DB)이 아니라 `.env` 에서만 읽는다. 화면에 두면 브라우저를 잡은
+ * 누군가가 클릭 한 번으로 켤 수 있는데, 이 스위치는 그 정도 무게가 아니다.
+ * 파일을 고치고 서버를 재시작하는 만큼의 의도는 있어야 한다.
+ *
+ * 꺼 두면 승인 요청이 평소처럼 뜬다. 텔레그램에는 보이지 않으므로 `/status`
+ * 로 확인하고 `/allow` 로 답해야 한다 — 55초 안에.
+ *
+ * 매번 읽는 이유는 테스트 때문이다. 모듈을 읽는 시점에 한 번만 보면 값을
+ * 바꿔 가며 확인할 수 없다. 환경변수 하나 읽는 비용은 턴당 무시할 만하다.
+ */
+export function isTelegramPermissionBypassEnabled(): boolean {
+  return process.env.TELEGRAM_SKIP_PERMISSIONS?.trim().toLowerCase() === 'true';
+}
+
+/**
  * `/bot` 의 반대. 이 대화를 폰에서 놓고 브라우저로 되돌린다.
  *
  * 돌아왔을 때 폰이 계속 울리는 것을 멈추는 길이 UI 안에 있어야 한다 — 그러자고
@@ -359,17 +380,17 @@ async function dispatchRun(
     sessionId,
     cwd: clientOptions.cwd ?? session.project_path ?? undefined,
     projectPath: session.project_path ?? clientOptions.projectPath,
-    // 폰으로 넘어간 턴은 승인을 물을 수 없다. 승인 요청은 붙어 있는 브라우저로만
-    // 그려지고, 텔레그램에는 아무것도 뜨지 않은 채 55초 뒤 거부로 끝난다. 그래서
-    // 이 대화를 폰으로 가져간 시점부터는 묻지 않고 돌린다 — 묻지 못하는 자리에서
-    // 묻는 것은 그냥 실패다.
+    // 폰으로 넘어간 턴은 승인을 물을 자리가 없다. 승인 요청은 붙어 있는
+    // 브라우저로만 그려지고, 텔레그램에는 아무것도 뜨지 않은 채 55초 뒤 거부로
+    // 끝난다. 그래서 켜 두면 묻지 않고 돌린다 — 다만 켜는 것은 설치한 사람의
+    // 몫이다. `isTelegramPermissionBypassEnabled` 참고.
     //
     // 대상은 두 가지뿐이다: 텔레그램에서 보낸 턴과, `/bot` 으로 넘긴 그 턴. 둘 다
     // 사용자가 브라우저를 떠나겠다고 방금 말한 경우다. 브라우저에서 그냥 보낸
     // 턴은 손대지 않는다.
     // 두 가지를 같이 넘기는 것은 런타임마다 읽는 곳이 다르기 때문이다. Claude 와
     // Codex 는 `permissionMode` 를, Cursor 는 `skipPermissions` 를 본다.
-    ...(origin === 'telegram' || relay.relayRequested
+    ...((origin === 'telegram' || relay.relayRequested) && isTelegramPermissionBypassEnabled()
       ? { permissionMode: 'bypassPermissions', skipPermissions: true }
       : {}),
   };
