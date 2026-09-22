@@ -88,6 +88,34 @@ test('/watch 로 고른 세션에 명령이 들어간다', async () => {
   });
 });
 
+test('인자 없는 /watch 는 되묻지 않고 프로젝트 목록을 보여준다', async () => {
+  await withIsolatedDatabase(async ({ userId }) => {
+    // 텔레그램의 `/` 메뉴는 명령을 누르는 순간 인자 없이 그대로 보내 버린다.
+    // 그래서 인자를 받는 `/watch` 는 사실상 항상 맨몸으로 도착한다.
+    const reply = await handleTelegramCommand('/watch', {
+      userId,
+      runtime: createRuntime([]),
+    });
+
+    assert.match(reply ?? '', /1\. /);
+    assert.match(reply ?? '', /\/watch <번호>/);
+    // 예전에는 `/projects` 를 한 번 더 치게 했다.
+    assert.doesNotMatch(reply ?? '', /\/projects 로 번호를 확인/);
+  });
+});
+
+test('맞는 프로젝트가 없으면 고를 수 있는 것을 다시 보여준다', async () => {
+  await withIsolatedDatabase(async ({ userId }) => {
+    const reply = await handleTelegramCommand('/watch 없는프로젝트', {
+      userId,
+      runtime: createRuntime([]),
+    });
+
+    assert.match(reply ?? '', /없는프로젝트/);
+    assert.match(reply ?? '', /1\. /);
+  });
+});
+
 test('작업 중에 보낸 명령은 거절되지 않고 대기열로 간다', async () => {
   await withIsolatedDatabase(async ({ userId }) => {
     const runs: RunCall[] = [];

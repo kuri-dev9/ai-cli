@@ -98,6 +98,32 @@ export function parseTelegramRelayPrefix(raw: string): { content: string; relayR
   return { content: rest, relayRequested: true };
 }
 
+/**
+ * `/bot` 의 반대. 이 대화를 폰에서 놓고 브라우저로 되돌린다.
+ *
+ * 돌아왔을 때 폰이 계속 울리는 것을 멈추는 길이 UI 안에 있어야 한다 — 그러자고
+ * 텔레그램을 열어 `/unwatch` 를 치는 것은 앞뒤가 바뀐 일이다.
+ *
+ * `/bot` 과 달리 뒤에 내용이 없어도 명령으로 본다. 놓는 것은 그 자체로 끝나는
+ * 일이고, 보낼 말이 없어도 놓고 싶을 때가 대부분이다. 내용이 붙어 있으면 놓은
+ * 뒤에 그 턴을 평소처럼 브라우저에서 돌린다.
+ */
+export const TELEGRAM_RELEASE_PREFIX = '/unbot';
+
+const TELEGRAM_RELEASE_PREFIX_PATTERN = /^\/unbot(?:\s+|$)/i;
+
+export function parseTelegramReleasePrefix(raw: string): {
+  content: string;
+  releaseRequested: boolean;
+} {
+  const text = raw.trimStart();
+  const match = TELEGRAM_RELEASE_PREFIX_PATTERN.exec(text);
+  if (!match) {
+    return { content: raw, releaseRequested: false };
+  }
+  return { content: text.slice(match[0].length), releaseRequested: true };
+}
+
 /** Application boundary for dispatching provider runs and approvals. */
 export type ProviderRuntimeGateway = {
   hasRuntime(provider: string): boolean;
@@ -187,6 +213,20 @@ async function handleChatSend(
   const resolved = resolveSendTarget(ws, data, dependencies, 'chat.send');
   if (!resolved) {
     return;
+  }
+
+  // `/unbot` 은 모델에게 갈 말이 아니라 통로를 끊는 신호다. 접두어는 여기서
+  // 떼어 내고, 남은 내용이 없으면 턴 없이 끝낸다 — 놓기만 하려던 사람에게
+  // 빈 프롬프트로 한 턴을 돌려 주지 않는다.
+  const release = parseTelegramReleasePrefix(
+    typeof data.content === 'string' ? data.content : '',
+  );
+  if (release.releaseRequested) {
+    chatRunRegistry.releaseRelay(resolved.sessionId);
+    if (!release.content.trim()) {
+      return;
+    }
+    data = { ...data, content: release.content };
   }
 
   await dispatchRun(ws, userId, resolved.sessionId, resolved.session, data, dependencies);
@@ -319,6 +359,19 @@ async function dispatchRun(
     sessionId,
     cwd: clientOptions.cwd ?? session.project_path ?? undefined,
     projectPath: session.project_path ?? clientOptions.projectPath,
+    // 폰으로 넘어간 턴은 승인을 물을 수 없다. 승인 요청은 붙어 있는 브라우저로만
+    // 그려지고, 텔레그램에는 아무것도 뜨지 않은 채 55초 뒤 거부로 끝난다. 그래서
+    // 이 대화를 폰으로 가져간 시점부터는 묻지 않고 돌린다 — 묻지 못하는 자리에서
+    // 묻는 것은 그냥 실패다.
+    //
+    // 대상은 두 가지뿐이다: 텔레그램에서 보낸 턴과, `/bot` 으로 넘긴 그 턴. 둘 다
+    // 사용자가 브라우저를 떠나겠다고 방금 말한 경우다. 브라우저에서 그냥 보낸
+    // 턴은 손대지 않는다.
+    // 두 가지를 같이 넘기는 것은 런타임마다 읽는 곳이 다르기 때문이다. Claude 와
+    // Codex 는 `permissionMode` 를, Cursor 는 `skipPermissions` 를 본다.
+    ...(origin === 'telegram' || relay.relayRequested
+      ? { permissionMode: 'bypassPermissions', skipPermissions: true }
+      : {}),
   };
 
   let failure: string | null = null;

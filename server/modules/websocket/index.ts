@@ -15,4 +15,6 @@ export { runDetachedChatTurn } from './services/chat-websocket.service.js';
 // 판정과 제거는 서버(dispatchRun)에서 하고, 화면은 같은 이름의 슬래시 명령을
 // 목록에 보여 주기만 한다.
 export { parseTelegramRelayPrefix, TELEGRAM_RELAY_PREFIX } from './services/chat-websocket.service.js';
+// `/unbot`: 그 반대. 이 대화를 폰에서 놓고 브라우저로 되돌린다.
+export { parseTelegramReleasePrefix, TELEGRAM_RELEASE_PREFIX } from './services/chat-websocket.service.js';
 export type { ProviderRuntimeGateway } from './services/chat-websocket.service.js';

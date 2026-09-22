@@ -35,6 +35,28 @@ function listActiveProjects() {
   return projectsDb.getProjectPaths().filter((project) => !project.isArchived);
 }
 
+/**
+ * 고를 수 있는 프로젝트를 번호와 함께 보여준다.
+ *
+ * `/projects` 와 인자 없는 `/watch` 가 같은 목록을 쓴다. 텔레그램의 `/` 메뉴는
+ * 명령을 누르는 순간 인자 없이 그대로 보내 버려서, 인자를 받는 `/watch` 는
+ * 사실상 항상 맨몸으로 도착한다. 그때 "번호를 확인해 주세요" 라고 되돌려
+ * 보내면 사용자는 `/projects` 를 한 번 더 쳐야 한다 — 어차피 보여줄 목록이니
+ * 여기서 바로 보여주는 편이 왕복 하나를 없앤다.
+ */
+function renderProjectPicker(heading: string): string {
+  const projects = listActiveProjects();
+  if (projects.length === 0) {
+    return '프로젝트가 없습니다.';
+  }
+  return [
+    heading,
+    ...projects.map((project, index) => `${index + 1}. ${projectLabel(project)}`),
+    '',
+    '/watch <번호> 로 구독합니다.',
+  ].join('\n');
+}
+
 /** 프로젝트에서 가장 최근에 손댄 세션. `/watch` 가 고르는 대상이다. */
 function findLatestSession(projectPath: string) {
   const sessions = sessionsDb.getSessionsByProjectPath(projectPath);
@@ -80,9 +102,11 @@ const HELP_TEXT = [
   '2. 웹에서 시작한 작업의 결과 — /on 으로 켠 대화만.',
   '3. 웹 입력 맨 앞에 /bot 을 붙이면 그 대화를 이쪽으로 넘겨받는다.',
   '   넘겨받으면 구독과 알림이 함께 켜지므로, 그 뒤로는 그 대화의 웹 작업도',
-  '   전부 이쪽으로 온다.',
+  '   전부 이쪽으로 온다. 이렇게 넘어온 작업은 승인을 묻지 않고 진행한다 —',
+  '   여기서는 승인 창을 띄울 수 없기 때문이다.',
   '',
-  '전부 멈추려면 /unwatch, 웹 작업만 멈추려면 /off 를 쓴다.',
+  '브라우저로 돌아왔으면 웹 입력에 /unbot 만 쳐도 이 대화를 놓는다.',
+  '여기서 멈추려면 /unwatch, 웹 작업 알림만 끄려면 /off 를 쓴다.',
   '',
   '슬래시 없이 보낸 글은 구독 중인 대화에 그대로 들어간다.',
 ].join('\n');
@@ -143,20 +167,16 @@ export async function handleTelegramCommand(
         : '이 세션의 웹 작업은 알리지 않는다. 여기서 보낸 작업의 결과는 계속 온다.';
     }
 
-    case '/projects': {
-      const projects = listActiveProjects();
-      if (projects.length === 0) {
-        return '프로젝트가 없습니다.';
-      }
-      return [
-        '프로젝트',
-        ...projects.map((project, index) => `${index + 1}. ${projectLabel(project)}`),
-        '',
-        '/watch <번호> 로 구독합니다.',
-      ].join('\n');
-    }
+    case '/projects':
+      return renderProjectPicker('프로젝트');
 
     case '/watch': {
+      // 인자 없이 온 `/watch` 는 오타가 아니라 메뉴에서 눌렀다는 뜻이다. 목록을
+      // 바로 돌려주면 그대로 번호만 붙여 다시 보내면 된다.
+      if (!argument) {
+        return renderProjectPicker('어느 프로젝트를 구독할까요?');
+      }
+
       const projects = listActiveProjects();
       // 번호로도, 이름 일부로도 고를 수 있다. 폰에서 긴 이름을 치기 번거롭다.
       const index = Number.parseInt(argument, 10);
@@ -164,8 +184,8 @@ export async function handleTelegramCommand(
         ? projects[index - 1]
         : projects.find((project) => projectLabel(project).toLowerCase().includes(argument.toLowerCase()));
 
-      if (!argument || !picked) {
-        return '어느 프로젝트인지 모르겠습니다. /projects 로 번호를 확인해 주세요.';
+      if (!picked) {
+        return renderProjectPicker(`"${argument}" 에 맞는 프로젝트가 없습니다.`);
       }
 
       const session = findLatestSession(picked.project_path);

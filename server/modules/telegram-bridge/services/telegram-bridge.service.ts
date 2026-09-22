@@ -152,6 +152,35 @@ export function claimRelayHandoff(sessionId: string): boolean {
 }
 
 /**
+ * `/unbot` 으로 이 대화를 놓는다. `claimRelayHandoff` 의 반대.
+ *
+ * 구독과 알림을 함께 끈다 — 넘겨받을 때 둘을 같이 켰으므로, 놓을 때 하나만
+ * 끄면 폰은 계속 울린다.
+ *
+ * @returns 실제로 놓았으면 `true`. 보고 있지 않던 대화면 `false` — 안 보던
+ *   대화를 놓았다는 말은 무슨 일이 일어났는지만 헷갈리게 한다.
+ */
+export function releaseRelayHandoff(sessionId: string): boolean {
+  const userId = readBridgeUserId();
+  if (userId === null) {
+    return false;
+  }
+
+  const state = readBridgeState(userId);
+  const wasWatched = state.watchedSessionId === sessionId;
+  const wasNotified = state.notifiedSessionIds.includes(sessionId);
+  if (!wasWatched && !wasNotified) {
+    return false;
+  }
+
+  writeBridgeState(userId, {
+    watchedSessionId: wasWatched ? null : state.watchedSessionId,
+    notifiedSessionIds: state.notifiedSessionIds.filter((entry) => entry !== sessionId),
+  });
+  return true;
+}
+
+/**
  * 텔레그램 입력창의 `/` 메뉴에 올릴 목록.
  *
  * `/help` 본문과 짝이 맞아야 한다 — 한쪽에만 있는 명령이 생기면 메뉴를 믿고
@@ -202,6 +231,13 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
       return;
     }
     void broadcast('📎 이 대화를 이어받았습니다. 그냥 답장하면 여기로 들어갑니다.');
+  });
+
+  const unsubscribeReleased = chatRunRegistry.onRelayReleased((sessionId) => {
+    if (!releaseRelayHandoff(sessionId)) {
+      return;
+    }
+    void broadcast('🔇 이 대화를 놓았습니다. 브라우저에서 이어집니다.');
   });
 
   const unsubscribeSettled = chatRunRegistry.onRunSettled((sessionId) => {
@@ -289,6 +325,7 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
       stopped = true;
       abortController.abort();
       unsubscribeStarted();
+      unsubscribeReleased();
       unsubscribeSettled();
     },
   };

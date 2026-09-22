@@ -80,6 +80,24 @@ export const BOT_RELAY_COMMAND: SlashCommand = {
 };
 
 /**
+ * `/bot` 의 반대. 이 대화를 폰에서 놓고 브라우저로 되돌린다.
+ *
+ * 넘기는 길이 화면에 있으면 되돌리는 길도 있어야 한다 — 여기 없으면 폰이 계속
+ * 울릴 때 텔레그램을 열어 `/unwatch` 를 치는 수밖에 없고, 그건 브라우저 앞에
+ * 앉은 사람에게 시킬 일이 아니다.
+ *
+ * `/bot` 과 달리 뒤에 할 말이 없어도 된다. 그래서 `prefix` 가 아니라 그대로
+ * 보내지는 쪽이다 — 고르면 `/unbot` 만 입력창에 남고, 엔터로 끝난다.
+ */
+export const BOT_RELEASE_COMMAND: SlashCommand = {
+  name: '/unbot',
+  description: '이 대화를 텔레그램에서 놓습니다 — 폰으로 더 보내지 않습니다',
+  namespace: 'builtin',
+  type: 'prefix',
+  metadata: { type: 'builtin' },
+};
+
+/**
  * 이 명령이 "실행"되는 것인지, 입력창에 남아 프롬프트의 일부가 되는 것인지.
  *
  * 스킬과 `/bot` 은 후자다. 고르면 입력창에 꽂히고, 뒤에 할 말을 이어 쓴 다음
@@ -220,6 +238,7 @@ export function useSlashCommands({
           .map(mapSkillToSlashCommand);
         const allCommands: SlashCommand[] = [
           BOT_RELAY_COMMAND,
+          BOT_RELEASE_COMMAND,
           ...((data.builtIn || []) as SlashCommand[]).map((command) => ({
             ...command,
             type: 'built-in',
@@ -246,7 +265,7 @@ export function useSlashCommands({
         if (!cancelled) {
           // 목록을 못 읽어도 `/bot` 은 남긴다 — 서버 목록과 무관하게 동작하고,
           // 여기서 빠지면 알림을 한 번 받는 방법이 화면에서 사라진다.
-          setSlashCommands([BOT_RELAY_COMMAND]);
+          setSlashCommands([BOT_RELAY_COMMAND, BOT_RELEASE_COMMAND]);
         }
       }
     };

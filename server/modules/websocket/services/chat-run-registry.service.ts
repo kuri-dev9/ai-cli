@@ -159,6 +159,18 @@ const runSettledListeners = new Set<(appSessionId: string) => void>();
 /** 반대쪽 신호: 세션에서 턴이 막 시작됐다. 외부 브리지의 "작업 시작" 알림용. */
 const runStartedListeners = new Set<(appSessionId: string) => void>();
 
+/**
+ * "이 대화를 외부 통로에서 놓아 달라"는 신호.
+ *
+ * 턴이 아니라 사용자의 의사 표시라서 실행과 함께 오지 않는다 — 브라우저로
+ * 돌아와 `/unbot` 만 친 경우처럼 돌릴 턴이 없을 수도 있다. 그래서 실행 신호와
+ * 별개의 통로로 둔다.
+ *
+ * 여기서 브리지를 직접 부르지 않는 이유는 방향 때문이다. 브리지가 이 모듈을
+ * 가져다 쓰므로, 이쪽에서 브리지를 부르면 서로 물린다.
+ */
+const relayReleaseListeners = new Set<(appSessionId: string) => void>();
+
 function notifyRunStarted(appSessionId: string): void {
   for (const listener of runStartedListeners) {
     setImmediate(() => {
@@ -421,6 +433,33 @@ export const chatRunRegistry = {
     runStartedListeners.add(listener);
     return () => {
       runStartedListeners.delete(listener);
+    };
+  },
+
+  /** 이 세션을 외부 통로에서 놓아 달라고 알린다. */
+  releaseRelay(appSessionId: string): void {
+    for (const listener of relayReleaseListeners) {
+      setImmediate(() => {
+        try {
+          listener(appSessionId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[ChatRunRegistry] Relay-release listener failed', {
+            appSessionId,
+            error: message,
+          });
+        }
+      });
+    }
+  },
+
+  /**
+   * Subscribes to "stop relaying this session"; returns the unsubscribe.
+   */
+  onRelayReleased(listener: (appSessionId: string) => void): () => void {
+    relayReleaseListeners.add(listener);
+    return () => {
+      relayReleaseListeners.delete(listener);
     };
   },
 

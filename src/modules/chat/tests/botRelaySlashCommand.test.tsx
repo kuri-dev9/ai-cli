@@ -100,16 +100,18 @@ test('/bot 은 고르면 실행되지 않고 입력창에 남는다', async () =
   assert.equal(setInput.mock.calls[0][0], '/bot ');
 });
 
-test('명령 목록을 못 읽어도 /bot 은 남는다', async () => {
+test('명령 목록을 못 읽어도 /bot 과 /unbot 은 남는다', async () => {
   const api = await import('@/shared/api');
   vi.spyOn(api.api.commands, 'list').mockRejectedValueOnce(new Error('offline'));
 
   const { result } = setUp();
 
   await waitFor(() => {
+    // 둘 다 서버 목록과 무관하게 동작한다. 여기서 빠지면 대화를 폰으로 넘기거나
+    // 되돌리는 방법이 화면에서 사라진다.
     assert.deepEqual(
       result.current.slashCommands.map((command) => command.name),
-      ['/bot'],
+      ['/bot', '/unbot'],
     );
   });
 });

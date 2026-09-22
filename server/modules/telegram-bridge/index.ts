@@ -5,6 +5,7 @@ export {
   closeTelegramBridge,
   initializeTelegramBridge,
   isTelegramBridgeRunning,
+  releaseRelayHandoff,
   restartTelegramBridge,
   shouldRelayCompletion,
 } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
