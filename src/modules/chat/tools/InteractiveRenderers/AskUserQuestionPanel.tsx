@@ -8,6 +8,17 @@ import type { PermissionPanelProps,Question } from '@/shared/types';
 const NO_QUESTIONS: Question[] = [];
 
 /**
+ * Round for pick-one, square for tick-many.
+ *
+ * The keyboard hint doubles as the selection indicator — it fills solid once an
+ * option is chosen — so its shape is the only cue telling the two kinds of
+ * question apart. Squares throughout made a single-select list read as
+ * checkboxes that refuse to untick, which is exactly what a radio group does.
+ */
+const selectionShape = (multiSelect: boolean) =>
+  multiSelect ? 'rounded-[4px]' : 'rounded-full';
+
+/**
  * Registered by chat's PermissionRequestsBanner as the permission panel for
  * AskUserQuestion requests, so the user answers the model's questions inline.
  */
@@ -221,9 +232,9 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
           <p className="text-[14px] font-medium leading-snug text-gray-900 dark:text-gray-100">
             {q.question}
           </p>
-          {multi && (
-            <span className="text-[10px] text-gray-400 dark:text-gray-500">Select all that apply</span>
-          )}
+          <span className="text-[10px] text-gray-400 dark:text-gray-500">
+            {multi ? 'Select all that apply' : 'Pick one'}
+          </span>
         </div>
 
         {/* Options — tight spacing */}
@@ -243,7 +254,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                   }`}
                 >
                   {/* Keyboard hint */}
-                  <kbd className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-[10px] transition-all duration-150 ${
+                  <kbd className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${selectionShape(multi)} font-mono text-[10px] transition-all duration-150 ${
                     isSelected
                       ? 'bg-blue-500 font-semibold text-white dark:bg-blue-500'
                       : 'border border-gray-200 bg-gray-100 text-gray-400 group-hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500 dark:group-hover:border-gray-600'
@@ -290,7 +301,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
                   : 'border-dashed border-gray-200 hover:border-gray-300 hover:bg-gray-50/60 dark:border-gray-700/60 dark:hover:border-gray-600 dark:hover:bg-gray-700/40'
               }`}
             >
-              <kbd className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded font-mono text-[10px] transition-all duration-150 ${
+              <kbd className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${selectionShape(multi)} font-mono text-[10px] transition-all duration-150 ${
                 isOtherOn
                   ? 'bg-blue-500 font-semibold text-white dark:bg-blue-500'
                   : 'border border-gray-200 bg-gray-100 text-gray-400 group-hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500 dark:group-hover:border-gray-600'
