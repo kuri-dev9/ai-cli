@@ -20,6 +20,7 @@ GUI로 감싸주는 앱으로, 오픈소스 **CloudCLI UI**(구 claudecodeui)를
 
 | 문서 | 내용 |
 |---|---|
+| [`team-setup.md`](./team-setup.md) | **팀원 설치 가이드.** 사전 준비부터 첫 실행까지. 원격 맥(ssh 전용)에 올릴 때 필요한 설정도 여기 있다 |
 | [`local-changes.md`](./local-changes.md) | **이 설치본에 가한 수정 전부.** upstream 업데이트 시 재적용 가이드 포함 |
 | [`UPSTREAM.md`](./UPSTREAM.md) | **원본 출처, 기준 커밋, 라이선스 의무.** 재배포하기 전에 반드시 읽을 것 |
 | [`claude-cli-headless.md`](./claude-cli-headless.md) | Claude Code CLI 헤드리스 프로토콜 스펙. 직접 GUI를 만들거나 이 앱을 깊게 고칠 때의 설계 자료 |
