@@ -1,4 +1,5 @@
 import { messageSourcesDb, projectsDb, sessionDraftsDb, sessionsDb } from '@/modules/database/index.js';
+import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import {
@@ -100,12 +101,12 @@ const HELP_TEXT = [
   '',
   '1. 여기서 보낸 작업의 결과 — 항상 온다. /off 로도 막히지 않는다.',
   '2. 웹에서 시작한 작업의 결과 — /on 으로 켠 대화만.',
-  '3. 웹 입력 맨 앞에 /bot 을 붙이면 그 대화를 이쪽으로 넘겨받는다.',
+  '3. 웹 화면의 빠른 설정에서 넘기기를 켜면 그 대화를 이쪽으로 넘겨받는다.',
   '   넘겨받으면 구독과 알림이 함께 켜지므로, 그 뒤로는 그 대화의 웹 작업도',
   '   전부 이쪽으로 온다. 이렇게 넘어온 작업은 승인을 묻지 않고 진행한다 —',
   '   여기서는 승인 창을 띄울 수 없기 때문이다.',
   '',
-  '브라우저로 돌아왔으면 웹 입력에 /unbot 만 쳐도 이 대화를 놓는다.',
+  '브라우저로 돌아왔으면 같은 자리에서 넘기기를 끄면 이 대화를 놓는다.',
   '여기서 멈추려면 /unwatch, 웹 작업 알림만 끄려면 /off 를 쓴다.',
   '',
   '슬래시 없이 보낸 글은 구독 중인 대화에 그대로 들어간다.',
@@ -141,7 +142,7 @@ export async function handleTelegramCommand(
 
     case '/unwatch': {
       // 넘겨받은 대화를 통째로 놓는 길. `/off` 는 웹 작업 알림만 끄고 구독은
-      // 남기므로, `/bot` 으로 끌어온 대화를 완전히 멈출 방법이 없었다.
+      // 남기므로, 넘기기로 끌어온 대화를 완전히 멈출 방법이 없었다.
       if (!state.watchedSessionId) {
         return '구독 중인 대화가 없습니다.';
       }
@@ -313,7 +314,7 @@ async function sendPrompt(
       // 무관하게 결과를 돌려보낸다.
       origin: 'telegram',
     },
-    { runtime: context.runtime },
+    { runtime: context.runtime, isSessionHandedToTelegram },
   );
 
   if (!result.started) {

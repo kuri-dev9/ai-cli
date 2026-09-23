@@ -1,4 +1,5 @@
 import { scheduledMessagesDb, sessionDraftsDb } from '@/modules/database/index.js';
+import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/index.js';
 import type { QueuedSessionMessageRecord, ScheduledMessageRow } from '@/modules/database/index.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
 import type { ChatRunOrigin, ProviderRuntimeGateway } from '@/modules/websocket/index.js';
@@ -105,7 +106,7 @@ async function sendClaimedQueuedMessage(
         options: { ...message.options, attachments: message.attachments },
         origin: message.origin,
       },
-      { runtime },
+      { runtime, isSessionHandedToTelegram },
     );
   } catch (error) {
     // A throw is not a verdict on the message. Put it back rather than lose
@@ -180,7 +181,7 @@ async function sendClaimedMessage(
         // of being recorded as "not sent — session was busy".
         interruptActiveRun: true,
       },
-      { runtime },
+      { runtime, isSessionHandedToTelegram },
     );
 
     // Recorded rather than retried, and recorded whether the run never started

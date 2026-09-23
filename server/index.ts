@@ -52,7 +52,12 @@ import {
     initializeScheduledMessageDispatcher,
     scheduledMessagesRoutes,
 } from './modules/scheduled-messages/index.js';
-import { closeTelegramBridge, initializeTelegramBridge, telegramRoutes } from './modules/telegram-bridge/index.js';
+import {
+    closeTelegramBridge,
+    initializeTelegramBridge,
+    isSessionHandedToTelegram,
+    telegramRoutes,
+} from './modules/telegram-bridge/index.js';
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
@@ -144,6 +149,9 @@ createWebSocketServer(server, {
     },
     chat: {
         runtime: providerRuntimeService,
+        // 텔레그램 모듈이 websocket 모듈을 가져다 쓰므로, 반대 방향은 여기서
+        // 이어 준다.
+        isSessionHandedToTelegram,
     },
     shell: {
         resolveProviderSessionId: (sessionId, provider) => {

@@ -71,7 +71,7 @@
       "appearance": "Appearance",
       "toolDisplay": "Tool Display",
       "inputSettings": "Input Settings",
-      "telegramRelay": "Telegram notifications"
+      "telegramRelay": "Telegram"
     },
     "darkMode": "Dark Mode",
     "showRawParameters": "Show raw parameters",
@@ -87,8 +87,8 @@
       "toggleAndMove": "Click to toggle, drag to move"
     },
     "telegramRelay": {
-      "label": "Notify me about this session",
-      "description": "While this is on, finished runs in this session are sent to Telegram. Replies to work you started from Telegram always arrive regardless of this toggle. For a single run, prefix your message with /bot.",
+      "label": "Hand this conversation to Telegram",
+      "description": "While on, this conversation's results arrive in Telegram and replying there continues it. Tool approvals are handled automatically within the range you configured, because the approval prompt never reaches your phone. Results of turns started from Telegram always arrive regardless of this toggle.",
       "needsSession": "Open a session first.",
       "loading": "Checking Telegram notification settings...",
       "needsToken": "Save a bot token in Settings > Telegram first.",
@@ -234,7 +234,7 @@
         }
       },
       "fullWarning": "One line sent from your phone can delete files or deploy with nobody approving it. Only choose this on an install you alone use.",
-      "help": "This applies to tasks sent from Telegram and to tasks handed over with the /bot prefix. Tasks sent normally from the browser are unaffected."
+      "help": "This applies to tasks sent from Telegram and to conversations you handed over. Turns you send from the browser in a conversation that was not handed over are unaffected."
     }
   },
   "appearanceSettings": {

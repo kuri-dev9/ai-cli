@@ -98,7 +98,7 @@ async function withBridge(runTest: (harness: Harness) => Promise<void>): Promise
       runTurn: async ({ content, origin }) => {
         await runDetachedChatTurn(
           { sessionId: SESSION_ID, userId: Number(user.id), content, origin },
-          { runtime },
+          { runtime, isSessionHandedToTelegram: () => false },
         );
         await flush();
       },
@@ -162,22 +162,16 @@ test('시작 알림은 더 이상 발송되지 않는다', async () => {
   });
 });
 
-test('/bot 을 붙인 웹 작업은 결과가 가고, 접두어는 모델에게 넘어가지 않는다', async () => {
+// 넘기기가 버튼으로 옮겨 간 뒤로 웹 입력에서 떼어 내는 접두어는 없다. 예전에는
+// `/bot` 을 떼어 냈고, 뒤에 붙일 말이 없으면 떼지 않아 그 글자가 그대로 모델에게
+// 흘러갔다. 이제는 무엇을 쳐도 친 그대로 간다.
+test('웹 입력은 어떤 글자도 떼이지 않고 모델에게 그대로 간다', async () => {
   await withBridge(async ({ sent, prompts, runTurn }) => {
     await runTurn({ content: '/bot 테스트 돌려줘' });
 
-    // 모델이 받은 것은 접두어를 뗀 본문뿐이다.
-    assert.deepEqual(prompts, ['테스트 돌려줘']);
-
-    // 이어받았다는 안내 한 번 + 완료 한 번.
-    assert.equal(sent.length, 2);
-    assert.match(sent[0], /이어받았습니다/);
-    assert.match(sent[1], /완료/);
-
-    // 안내는 대화당 한 번뿐이다. 같은 세션을 다시 /bot 으로 불러도 쌓이지 않는다.
-    await runTurn({ content: '/bot 한 번 더' });
-    assert.equal(sent.length, 3);
-    assert.match(sent[2], /완료/);
+    assert.deepEqual(prompts, ['/bot 테스트 돌려줘']);
+    // 넘기지 않은 대화라 폰으로는 아무것도 가지 않는다.
+    assert.deepEqual(sent, []);
   });
 });
 

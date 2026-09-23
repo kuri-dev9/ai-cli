@@ -64,39 +64,6 @@ export function filterImagesToUploadStore(
   return filterAttachmentsToUploadStore(images, assetsRootOverride);
 }
 
-/**
- * 이 실행 하나의 결과를 텔레그램으로도 보내 달라는 표시.
- *
- * 웹에서 시작한 실행은 기본적으로 조용하다(브라우저에서 대화할 때마다 폰이
- * 울리면 알림이 소음이 된다). 한 번만 받고 싶을 때 입력 맨 앞에 붙인다.
- */
-export const TELEGRAM_RELAY_PREFIX = '/bot';
-
-const TELEGRAM_RELAY_PREFIX_PATTERN = /^\/bot(?:\s+|$)/i;
-
-/**
- * 프롬프트에서 `/bot` 접두어를 떼어 내고, 붙어 있었는지 알려준다.
- *
- * 판정은 반드시 서버에서 한다 — 접두어를 화면에서만 떼면 다른 클라이언트(또는
- * 손으로 만든 websocket 프레임)에서 온 `/bot` 이 그대로 모델에게 흘러간다.
- *
- * 뒤에 내용이 없는 `/bot` 하나만 온 경우는 접두어로 보지 않는다. 그렇게 보면
- * 빈 프롬프트로 한 턴이 시작되는데, 사용자가 원한 것은 명령을 고르던 중이거나
- * 오타였을 가능성이 훨씬 높다.
- */
-export function parseTelegramRelayPrefix(raw: string): { content: string; relayRequested: boolean } {
-  const text = raw.trimStart();
-  const match = TELEGRAM_RELAY_PREFIX_PATTERN.exec(text);
-  if (!match) {
-    return { content: raw, relayRequested: false };
-  }
-
-  const rest = text.slice(match[0].length);
-  if (!rest.trim()) {
-    return { content: raw, relayRequested: false };
-  }
-  return { content: rest, relayRequested: true };
-}
 
 /**
  * 폰으로 넘어간 턴에 얼마나 허용할지.
@@ -180,31 +147,6 @@ export function resolveTelegramRunPermissions(mode: TelegramPermissionMode): Any
   return {};
 }
 
-/**
- * `/bot` 의 반대. 이 대화를 폰에서 놓고 브라우저로 되돌린다.
- *
- * 돌아왔을 때 폰이 계속 울리는 것을 멈추는 길이 UI 안에 있어야 한다 — 그러자고
- * 텔레그램을 열어 `/unwatch` 를 치는 것은 앞뒤가 바뀐 일이다.
- *
- * `/bot` 과 달리 뒤에 내용이 없어도 명령으로 본다. 놓는 것은 그 자체로 끝나는
- * 일이고, 보낼 말이 없어도 놓고 싶을 때가 대부분이다. 내용이 붙어 있으면 놓은
- * 뒤에 그 턴을 평소처럼 브라우저에서 돌린다.
- */
-export const TELEGRAM_RELEASE_PREFIX = '/unbot';
-
-const TELEGRAM_RELEASE_PREFIX_PATTERN = /^\/unbot(?:\s+|$)/i;
-
-export function parseTelegramReleasePrefix(raw: string): {
-  content: string;
-  releaseRequested: boolean;
-} {
-  const text = raw.trimStart();
-  const match = TELEGRAM_RELEASE_PREFIX_PATTERN.exec(text);
-  if (!match) {
-    return { content: raw, releaseRequested: false };
-  }
-  return { content: text.slice(match[0].length), releaseRequested: true };
-}
 
 /** Application boundary for dispatching provider runs and approvals. */
 export type ProviderRuntimeGateway = {
@@ -223,6 +165,13 @@ export type ProviderRuntimeGateway = {
 type ChatWebSocketDependencies = {
   /** Central dispatcher for every provider SDK/CLI runtime. */
   runtime: ProviderRuntimeGateway;
+  /**
+   * 이 대화가 폰으로 넘어가 있는지. 넘기기 버튼이 켜 둔 값을 읽는다.
+   *
+   * 텔레그램 모듈이 이 모듈을 가져다 쓰므로 여기서 직접 부르면 서로 물린다.
+   * 그래서 조립하는 곳에서 넣어 준다.
+   */
+  isSessionHandedToTelegram: (sessionId: string) => boolean;
 };
 
 /**
@@ -297,20 +246,6 @@ async function handleChatSend(
     return;
   }
 
-  // `/unbot` 은 모델에게 갈 말이 아니라 통로를 끊는 신호다. 접두어는 여기서
-  // 떼어 내고, 남은 내용이 없으면 턴 없이 끝낸다 — 놓기만 하려던 사람에게
-  // 빈 프롬프트로 한 턴을 돌려 주지 않는다.
-  const release = parseTelegramReleasePrefix(
-    typeof data.content === 'string' ? data.content : '',
-  );
-  if (release.releaseRequested) {
-    chatRunRegistry.releaseRelay(resolved.sessionId);
-    if (!release.content.trim()) {
-      return;
-    }
-    data = { ...data, content: release.content };
-  }
-
   await dispatchRun(ws, userId, resolved.sessionId, resolved.session, data, dependencies);
 }
 
@@ -375,10 +310,6 @@ async function dispatchRun(
 ): Promise<{ started: boolean; error: string | null }> {
   const provider = session.provider as LLMProvider;
 
-  // 접두어는 실행을 등록하기 전에 뗀다. 등록할 때 "이 실행만 중계" 표시를
-  // 같이 남겨야 하고, 프로바이더에게는 접두어를 뗀 본문만 가야 한다.
-  const relay = parseTelegramRelayPrefix(typeof data.content === 'string' ? data.content : '');
-
   const run = chatRunRegistry.startRun({
     appSessionId: sessionId,
     provider,
@@ -386,7 +317,6 @@ async function dispatchRun(
     connection: ws,
     userId,
     origin,
-    relayRequested: relay.relayRequested,
   });
 
   if (!run) {
@@ -402,7 +332,7 @@ async function dispatchRun(
   }
 
   const clientOptions = (data.options ?? {}) as AnyRecord;
-  const command = relay.content;
+  const command = typeof data.content === 'string' ? data.content : '';
 
   // Record what this turn runs with so reopening the session later restores the
   // same model and reasoning effort, and so the resume path has a
@@ -446,10 +376,10 @@ async function dispatchRun(
     // 끝난다. 얼마나 허용할지는 설정 화면에서 고른다 —
     // `readTelegramPermissionMode` 참고.
     //
-    // 대상은 두 가지뿐이다: 텔레그램에서 보낸 턴과, `/bot` 으로 넘긴 그 턴. 둘 다
-    // 사용자가 브라우저를 떠나겠다고 방금 말한 경우다. 브라우저에서 그냥 보낸
-    // 턴은 손대지 않는다.
-    ...(origin === 'telegram' || relay.relayRequested
+    // 대상은 두 가지다: 텔레그램에서 보낸 턴과, 넘기기 버튼을 켜 둔 대화의 턴.
+    // 둘 다 사용자가 답을 폰에서 받겠다고 말해 둔 경우다. 버튼을 끈 대화의
+    // 웹 턴은 손대지 않는다.
+    ...(origin === 'telegram' || dependencies.isSessionHandedToTelegram(sessionId)
       ? resolveTelegramRunPermissions(readTelegramPermissionMode())
       : {}),
   };

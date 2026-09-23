@@ -41,13 +41,6 @@ type ChatRun = {
   provider: LLMProvider;
   /** 이 실행을 시작시킨 곳. 기본은 `web`. */
   origin: ChatRunOrigin;
-  /**
-   * 이 실행 하나만 바깥(텔레그램)으로 중계해 달라는 일회성 요청.
-   *
-   * 웹 입력이 `/bot` 으로 시작할 때 켜진다. 실행마다 따로 들고 있어야 한다 —
-   * 세션에 저장하면 다음 턴까지 따라가서, 한 번만 받으려던 알림이 계속 온다.
-   */
-  relayRequested: boolean;
   providerSessionId: string | null;
   status: ChatRunStatus;
   lastSeq: number;
@@ -159,17 +152,6 @@ const runSettledListeners = new Set<(appSessionId: string) => void>();
 /** 반대쪽 신호: 세션에서 턴이 막 시작됐다. 외부 브리지의 "작업 시작" 알림용. */
 const runStartedListeners = new Set<(appSessionId: string) => void>();
 
-/**
- * "이 대화를 외부 통로에서 놓아 달라"는 신호.
- *
- * 턴이 아니라 사용자의 의사 표시라서 실행과 함께 오지 않는다 — 브라우저로
- * 돌아와 `/unbot` 만 친 경우처럼 돌릴 턴이 없을 수도 있다. 그래서 실행 신호와
- * 별개의 통로로 둔다.
- *
- * 여기서 브리지를 직접 부르지 않는 이유는 방향 때문이다. 브리지가 이 모듈을
- * 가져다 쓰므로, 이쪽에서 브리지를 부르면 서로 물린다.
- */
-const relayReleaseListeners = new Set<(appSessionId: string) => void>();
 
 function notifyRunStarted(appSessionId: string): void {
   for (const listener of runStartedListeners) {
@@ -269,8 +251,6 @@ export const chatRunRegistry = {
     userId: string | number | null;
     /** 생략하면 `web`. 텔레그램에서 시작한 턴만 `telegram` 을 넘긴다. */
     origin?: ChatRunOrigin;
-    /** 이 실행 하나만 텔레그램으로 중계할지(`/bot` 접두어). */
-    relayRequested?: boolean;
   }): ChatRun | null {
     const existing = runs.get(input.appSessionId);
     if (existing && existing.status === 'running') {
@@ -281,7 +261,6 @@ export const chatRunRegistry = {
       appSessionId: input.appSessionId,
       provider: input.provider,
       origin: input.origin ?? 'web',
-      relayRequested: input.relayRequested ?? false,
       providerSessionId: input.providerSessionId,
       status: 'running',
       lastSeq: 0,
@@ -312,20 +291,19 @@ export const chatRunRegistry = {
   },
 
   /**
-   * 이 세션의 마지막(또는 진행 중) 실행이 어디서 시작됐는지와, `/bot` 처럼
-   * 한 번만 중계해 달라는 요청이 붙어 있었는지.
+   * 이 세션의 마지막(또는 진행 중) 실행이 어디서 시작됐는지.
    *
    * 완료 알림을 만드는 쪽이 `onRunSettled` 직후에 묻는다. 그 시점의 실행은
    * 아직 보존 창(`COMPLETED_RUN_RETENTION_MS`) 안에 있으므로 답이 있다.
    * 기록이 이미 사라진 세션이면 `null` — 그때는 아무것도 보내지 않는 쪽이
    * 맞다(출처를 모르는 실행을 웹 실행으로 단정해 조용히 넘기는 것과 같다).
    */
-  describeRunOrigin(appSessionId: string): { origin: ChatRunOrigin; relayRequested: boolean } | null {
+  describeRunOrigin(appSessionId: string): { origin: ChatRunOrigin } | null {
     const run = runs.get(appSessionId);
     if (!run) {
       return null;
     }
-    return { origin: run.origin, relayRequested: run.relayRequested };
+    return { origin: run.origin };
   },
 
   isProcessing(appSessionId: string): boolean {
@@ -444,33 +422,6 @@ export const chatRunRegistry = {
     runStartedListeners.add(listener);
     return () => {
       runStartedListeners.delete(listener);
-    };
-  },
-
-  /** 이 세션을 외부 통로에서 놓아 달라고 알린다. */
-  releaseRelay(appSessionId: string): void {
-    for (const listener of relayReleaseListeners) {
-      setImmediate(() => {
-        try {
-          listener(appSessionId);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error('[ChatRunRegistry] Relay-release listener failed', {
-            appSessionId,
-            error: message,
-          });
-        }
-      });
-    }
-  },
-
-  /**
-   * Subscribes to "stop relaying this session"; returns the unsubscribe.
-   */
-  onRelayReleased(listener: (appSessionId: string) => void): () => void {
-    relayReleaseListeners.add(listener);
-    return () => {
-      relayReleaseListeners.delete(listener);
     };
   },
 

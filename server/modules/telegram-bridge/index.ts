@@ -1,11 +1,11 @@
 // 텔레그램에서 명령을 받아 세션에 넣고, 결과를 돌려보내는 브리지.
 // long polling 만 쓰므로 인바운드 포트를 열지 않는다.
 export {
-  claimRelayHandoff,
+  announceRelayHandoff,
   closeTelegramBridge,
   initializeTelegramBridge,
+  isSessionHandedToTelegram,
   isTelegramBridgeRunning,
-  releaseRelayHandoff,
   restartTelegramBridge,
   shouldRelayCompletion,
 } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';

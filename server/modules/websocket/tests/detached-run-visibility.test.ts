@@ -63,7 +63,7 @@ async function withGateway(
     const now = new Date().toISOString();
     sessionsDb.createSession(SESSION_ID, 'claude', tempDirectory, 'Detached session', now, now, null);
 
-    handleChatConnection(socket as never, { user: { id: 1 } } as never, { runtime } as never);
+    handleChatConnection(socket as never, { user: { id: 1 } } as never, { runtime, isSessionHandedToTelegram: () => false } as never);
     await runTest({ socket, runtime });
   } finally {
     connectedClients.clear();
@@ -91,7 +91,7 @@ test('텔레그램에서 보낸 글이 실행 스트림에 바로 남는다', as
   await withGateway(async ({ runtime }) => {
     await runDetachedChatTurn(
       { sessionId: SESSION_ID, userId: 1, content: '이어서 해줘', origin: 'telegram' },
-      { runtime } as never,
+      { runtime, isSessionHandedToTelegram: () => false } as never,
     );
 
     const echoes = userEchoes(SESSION_ID);
@@ -124,7 +124,7 @@ test('예약·대기열로 들어온 턴에는 텔레그램 표시를 붙이지 
   await withGateway(async ({ runtime }) => {
     await runDetachedChatTurn(
       { sessionId: SESSION_ID, userId: 1, content: '아침 점검' },
-      { runtime } as never,
+      { runtime, isSessionHandedToTelegram: () => false } as never,
     );
 
     const echoes = userEchoes(SESSION_ID);

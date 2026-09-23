@@ -109,6 +109,7 @@ async function withGateway(
             }
           },
         } as never,
+        isSessionHandedToTelegram: () => false,
       },
     );
 

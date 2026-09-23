@@ -787,7 +787,7 @@ export function useChatComposerState({
                 metadata: { type: 'builtin' },
               } as SlashCommand)
             : undefined);
-        // 스킬과 `/bot` 은 실행 대상이 아니라 프롬프트에 붙는 접두어다. 아래
+        // 스킬은 실행 대상이 아니라 프롬프트에 붙는 접두어다. 아래
         // 일반 전송 경로로 흘려보내야 서버가 접두어를 떼고 모델에게 넘긴다.
         if (matchedCommand && !isPromptPrefixCommand(matchedCommand)) {
           executeCommand(matchedCommand, isHelpAlias ? '/help' : commandInput);

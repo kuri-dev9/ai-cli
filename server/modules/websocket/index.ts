@@ -11,12 +11,6 @@ export { initializeRunStateBroadcast } from './services/run-state-broadcast.serv
 // runDetachedChatTurn: used by the scheduled-messages module to run a turn
 // from a timer, with no socket to stream to or report errors on.
 export { runDetachedChatTurn } from './services/chat-websocket.service.js';
-// `/bot` 접두어: 웹에서 시작한 실행 하나만 텔레그램으로 중계해 달라는 표시.
-// 판정과 제거는 서버(dispatchRun)에서 하고, 화면은 같은 이름의 슬래시 명령을
-// 목록에 보여 주기만 한다.
-export { parseTelegramRelayPrefix, TELEGRAM_RELAY_PREFIX } from './services/chat-websocket.service.js';
-// `/unbot`: 그 반대. 이 대화를 폰에서 놓고 브라우저로 되돌린다.
-export { parseTelegramReleasePrefix, TELEGRAM_RELEASE_PREFIX } from './services/chat-websocket.service.js';
 // 폰으로 넘어간 턴에 얼마나 허용할지. 설정 화면이 읽고 쓴다.
 export {
   parseTelegramPermissionMode,

@@ -11,7 +11,7 @@ import { ThemeProvider } from '@/shared/context/ThemeContext';
 import type { QuickSettingsPreferences } from '@/shared/types';
 
 /**
- * "이 세션 작업 알림 받기" 토글.
+ * "이 대화를 텔레그램으로 넘기기" 토글.
  *
  * 두 가지를 지킨다. 하나, 켜 둔 값은 서버에 남아야 한다 — 브라우저에만 두면
  * 서버가 재시작하거나 다른 기기에서 열었을 때 화면과 실제 동작이 어긋나는데,
@@ -104,7 +104,7 @@ test('브리지가 붙어 있으면 토글을 켤 수 있다', async () => {
   const setEnabled = vi.fn();
   renderPanel('session-1', telegramState({ setEnabled }));
 
-  const toggle = await screen.findByLabelText('이 세션 작업 알림 받기') as HTMLInputElement;
+  const toggle = await screen.findByLabelText('이 대화를 텔레그램으로 넘기기') as HTMLInputElement;
   assert.equal(toggle.disabled, false);
   assert.equal(toggle.checked, false);
 
@@ -115,7 +115,7 @@ test('브리지가 붙어 있으면 토글을 켤 수 있다', async () => {
 test('토큰이 없으면 잠그고 이유를 보여 준다', async () => {
   renderPanel('session-1', telegramState({ hasToken: false, available: false }));
 
-  const toggle = await screen.findByLabelText('이 세션 작업 알림 받기') as HTMLInputElement;
+  const toggle = await screen.findByLabelText('이 대화를 텔레그램으로 넘기기') as HTMLInputElement;
   assert.equal(toggle.disabled, true);
   assert.ok(document.body.textContent?.includes('봇 토큰을 먼저 저장'));
 });
@@ -123,7 +123,7 @@ test('토큰이 없으면 잠그고 이유를 보여 준다', async () => {
 test('브리지가 연결되지 않았으면 잠근다', async () => {
   renderPanel('session-1', telegramState({ available: false }));
 
-  const toggle = await screen.findByLabelText('이 세션 작업 알림 받기') as HTMLInputElement;
+  const toggle = await screen.findByLabelText('이 대화를 텔레그램으로 넘기기') as HTMLInputElement;
   assert.equal(toggle.disabled, true);
   assert.ok(document.body.textContent?.includes('연결되지 않았습니다'));
 });
@@ -131,7 +131,7 @@ test('브리지가 연결되지 않았으면 잠근다', async () => {
 test('열린 세션이 없으면 켤 수 없다', async () => {
   renderPanel(null, telegramState());
 
-  const toggle = await screen.findByLabelText('이 세션 작업 알림 받기') as HTMLInputElement;
+  const toggle = await screen.findByLabelText('이 대화를 텔레그램으로 넘기기') as HTMLInputElement;
   assert.equal(toggle.disabled, true);
   assert.ok(document.body.textContent?.includes('세션을 연 뒤에'));
 });

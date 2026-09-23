@@ -2,6 +2,7 @@ import express from 'express';
 
 import { AppError, asyncHandler } from '@/shared/utils.js';
 import {
+  announceRelayHandoff,
   isTelegramBridgeRunning,
   restartTelegramBridge,
 } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
@@ -20,6 +21,7 @@ import type { TelegramSettings } from '@/modules/telegram-bridge/services/telegr
 import {
   isSessionNotified,
   readBridgeUserId,
+  setSessionHandedOver,
   setSessionNotified,
 } from '@/modules/telegram-bridge/services/telegram-state.service.js';
 import { TELEGRAM_PERMISSION_MODES } from '@/modules/websocket/index.js';
@@ -44,7 +46,8 @@ type TelegramRouterDependencies = {
   discoverChats: typeof discoverTelegramChats;
   readBridgeUserId: typeof readBridgeUserId;
   isSessionNotified: typeof isSessionNotified;
-  setSessionNotified: typeof setSessionNotified;
+  setSessionHandedOver: typeof setSessionHandedOver;
+  announceHandoff: typeof announceRelayHandoff;
 };
 
 const defaultDependencies: TelegramRouterDependencies = {
@@ -57,7 +60,8 @@ const defaultDependencies: TelegramRouterDependencies = {
   discoverChats: discoverTelegramChats,
   readBridgeUserId,
   isSessionNotified,
-  setSessionNotified,
+  setSessionHandedOver,
+  announceHandoff: announceRelayHandoff,
 };
 
 /** 설정 화면이 그릴 수 있는 만큼만. 평문 토큰은 여기 들어가지 않는다. */
@@ -292,7 +296,14 @@ export function createTelegramRouter(
       }
 
       const settings = dependencies.readSettings();
-      dependencies.setSessionNotified(userId, sessionId, requestBody.enabled);
+      const wasEnabled = dependencies.isSessionNotified(userId, sessionId);
+      dependencies.setSessionHandedOver(userId, sessionId, requestBody.enabled);
+
+      // 값이 실제로 바뀐 때만 알린다. 같은 버튼을 두 번 눌렀다고 폰에 같은
+      // 안내가 쌓이면, 정작 기다리던 회신이 그 사이에 묻힌다.
+      if (wasEnabled !== requestBody.enabled) {
+        dependencies.announceHandoff(requestBody.enabled);
+      }
 
       res.json({
         sessionId,

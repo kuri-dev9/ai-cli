@@ -91,11 +91,10 @@ export function isSessionNotified(userId: number, sessionId: string): boolean {
 }
 
 /**
- * 세션 단위 알림 토글. 웹 UI 와 텔레그램의 `/on`·`/off` 가 같은 값을 건드린다.
+ * 세션 단위 알림 토글. 폰의 `/on`·`/off` 가 쓴다.
  *
- * 세션 목록으로 들고 있어서 화면에서 어느 세션을 켜 두든 `/watch` 대상이
- * 바뀌지 않는다 — 텔레그램에서 A 를 보면서 웹에서 B 의 알림을 켜는 것이
- * 자연스러운 조합이고, 둘을 한 값으로 묶으면 한쪽이 다른 쪽을 말없이 끈다.
+ * 구독(`watchedSessionId`)은 건드리지 않는다 — 폰에서 `/off` 는 "여기 알림을
+ * 그만"이지 "이 대화를 놓겠다"가 아니다. 놓는 것은 `/unwatch` 다.
  */
 export function setSessionNotified(
   userId: number,
@@ -107,5 +106,34 @@ export function setSessionNotified(
 
   return writeBridgeState(userId, {
     notifiedSessionIds: enabled && sessionId ? [...remaining, sessionId] : remaining,
+  });
+}
+
+/**
+ * 웹의 넘기기 버튼. 이 대화를 폰으로 넘기거나 되돌린다.
+ *
+ * 알림만 켜는 것과 다르다. 명령이 들어갈 세션도 같이 옮겨야 폰에서 그냥
+ * 답장했을 때 이 대화로 들어온다. 둘을 따로 두면 나가기 직전에 텔레그램을 열어
+ * `/projects`, `/watch` 로 다시 고르라는 말이 되는데, 그러자고 버튼을 만든 것이
+ * 아니다.
+ *
+ * 끌 때도 둘을 같이 끈다. 하나만 끄면 폰이 계속 울린다. 그 사이 폰에서 다른
+ * 대화를 고른 상태라면 그쪽 구독은 건드리지 않는다.
+ */
+export function setSessionHandedOver(
+  userId: number,
+  sessionId: string,
+  enabled: boolean,
+): TelegramBridgeState {
+  if (!sessionId) {
+    return readBridgeState(userId);
+  }
+
+  const current = setSessionNotified(userId, sessionId, enabled);
+
+  return writeBridgeState(userId, {
+    watchedSessionId: enabled
+      ? sessionId
+      : (current.watchedSessionId === sessionId ? null : current.watchedSessionId),
   });
 }

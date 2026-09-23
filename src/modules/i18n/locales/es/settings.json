@@ -71,7 +71,7 @@
       "appearance": "Apariencia",
       "toolDisplay": "Visualización de herramientas",
       "inputSettings": "Ajustes de entrada",
-      "telegramRelay": "Telegram notifications"
+      "telegramRelay": "Telegram"
     },
     "darkMode": "Modo oscuro",
     "showRawParameters": "Mostrar parámetros sin procesar",
@@ -87,8 +87,8 @@
       "toggleAndMove": "Clic para alternar, arrastra para mover"
     },
     "telegramRelay": {
-      "label": "Notify me about this session",
-      "description": "While this is on, finished runs in this session are sent to Telegram. Replies to work you started from Telegram always arrive regardless of this toggle. For a single run, prefix your message with /bot.",
+      "label": "Hand this conversation to Telegram",
+      "description": "While on, this conversation's results arrive in Telegram and replying there continues it. Tool approvals are handled automatically within the range you configured, because the approval prompt never reaches your phone. Results of turns started from Telegram always arrive regardless of this toggle.",
       "needsSession": "Open a session first.",
       "loading": "Checking Telegram notification settings...",
       "needsToken": "Save a bot token in Settings > Telegram first.",

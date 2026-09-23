@@ -42,6 +42,14 @@ type BridgeHandle = {
 let activeBridge: BridgeHandle | null = null;
 
 /**
+ * 지금 돌고 있는 브리지의 송신구.
+ *
+ * 실행 흐름 밖에서 — 넘기기 버튼을 눌렀을 때처럼 — 한 줄 보내야 할 때 쓴다.
+ * 브리지가 꺼져 있으면 `null` 이고, 그때는 보낼 곳이 없는 것이 맞다.
+ */
+let activeBroadcast: ((text: string) => Promise<void>) | null = null;
+
+/**
  * 마지막으로 받아 둔 런타임.
  *
  * 설정 화면에서 저장을 누르면 브리지를 다시 띄워야 하는데, 라우트는 런타임을
@@ -88,7 +96,7 @@ function readErrors(sessionId: string): string[] {
  * 1. 텔레그램에서 시작한 실행은 무조건 보낸다. 사용자가 폰 앞에서 답을
  *    기다리고 있고, 이게 브리지가 존재하는 이유다. 알림 설정이 꺼져 있어도
  *    막지 않는다.
- * 2. 웹 실행은 `/bot` 접두어가 붙은 그 한 번만 보낸다.
+ * 2. 웹 실행은 넘기기를 켜 둔 대화의 것만 보낸다.
  * 3. 그 밖의 웹 실행은 세션 알림을 켜 둔 동안에만 보낸다.
  *
  * 어느 것도 아니면 조용하다. 기본이 조용한 쪽이어야 한다 — 브라우저에서
@@ -96,88 +104,34 @@ function readErrors(sessionId: string): string[] {
  * 놓친다.
  */
 export function shouldRelayCompletion(sessionId: string): boolean {
-  const run = chatRunRegistry.describeRunOrigin(sessionId);
-  if (run?.origin === 'telegram') {
+  if (chatRunRegistry.describeRunOrigin(sessionId)?.origin === 'telegram') {
     return true;
   }
-  if (run?.relayRequested) {
-    return true;
-  }
-
-  const userId = readBridgeUserId();
-  if (userId === null) {
-    return false;
-  }
-  return isSessionNotified(userId, sessionId);
+  return isSessionHandedToTelegram(sessionId);
 }
 
 /**
- * `/bot` 을 붙인 실행을 텔레그램으로 넘겨받는다.
+ * 이 대화가 지금 폰으로 넘어가 있는지.
  *
- * `/bot` 은 결과 한 번을 받고 끝나는 것이 아니라 "이 대화를 폰으로 가져간다"는
- * 뜻이다. 그래서 명령이 들어갈 세션(`watchedSessionId`)을 이쪽으로 옮기고 알림도
- * 켠다 — 그래야 폰에서 그냥 답장했을 때 보던 그 대화에 이어진다.
- *
- * 이게 없으면 자리를 뜨기 직전에 텔레그램을 열어 /projects, /watch 로 세션을 다시
- * 골라야 한다. 그 번거로움을 없애려고 만든 길이다.
- *
- * @returns 이번에 새로 넘겨받았으면 `true`. 이미 넘겨받은 대화면 `false` —
- *   `/bot` 을 연달아 쓸 때마다 같은 안내가 쌓이지 않게 한다.
+ * 넘기기 버튼이 켜 둔 값 하나만 본다. 웹소켓 쪽이 승인을 자동으로 처리할지
+ * 고를 때도 같은 값을 읽는다 — 승인 창은 붙어 있는 브라우저에만 그려지므로,
+ * 넘겨 둔 대화에서 평소처럼 물으면 폰에는 아무것도 뜨지 않은 채 거부로 끝난다.
  */
-export function claimRelayHandoff(sessionId: string): boolean {
-  const run = chatRunRegistry.describeRunOrigin(sessionId);
-  // 텔레그램에서 온 실행은 이미 이 세션을 보고 있다는 뜻이라 옮길 것이 없다.
-  if (!run?.relayRequested || run.origin === 'telegram') {
-    return false;
-  }
-
+export function isSessionHandedToTelegram(sessionId: string): boolean {
   const userId = readBridgeUserId();
-  if (userId === null) {
-    return false;
-  }
-
-  const state = readBridgeState(userId);
-  if (state.watchedSessionId === sessionId && state.notifiedSessionIds.includes(sessionId)) {
-    return false;
-  }
-
-  writeBridgeState(userId, {
-    watchedSessionId: sessionId,
-    notifiedSessionIds: [
-      ...state.notifiedSessionIds.filter((entry) => entry !== sessionId),
-      sessionId,
-    ],
-  });
-  return true;
+  return userId !== null && isSessionNotified(userId, sessionId);
 }
 
 /**
- * `/unbot` 으로 이 대화를 놓는다. `claimRelayHandoff` 의 반대.
+ * 넘기기 버튼을 눌렀다는 사실을 폰에 한 줄로 알린다.
  *
- * 구독과 알림을 함께 끈다 — 넘겨받을 때 둘을 같이 켰으므로, 놓을 때 하나만
- * 끄면 폰은 계속 울린다.
- *
- * @returns 실제로 놓았으면 `true`. 보고 있지 않던 대화면 `false` — 안 보던
- *   대화를 놓았다는 말은 무슨 일이 일어났는지만 헷갈리게 한다.
+ * 값을 바꾸는 것은 상태 계층(`setSessionNotified`)이고 여기서는 알리기만 한다.
+ * 브리지가 꺼져 있으면 보낼 곳이 없으므로 조용히 넘어간다.
  */
-export function releaseRelayHandoff(sessionId: string): boolean {
-  const userId = readBridgeUserId();
-  if (userId === null) {
-    return false;
-  }
-
-  const state = readBridgeState(userId);
-  const wasWatched = state.watchedSessionId === sessionId;
-  const wasNotified = state.notifiedSessionIds.includes(sessionId);
-  if (!wasWatched && !wasNotified) {
-    return false;
-  }
-
-  writeBridgeState(userId, {
-    watchedSessionId: wasWatched ? null : state.watchedSessionId,
-    notifiedSessionIds: state.notifiedSessionIds.filter((entry) => entry !== sessionId),
-  });
-  return true;
+export function announceRelayHandoff(enabled: boolean): void {
+  void activeBroadcast?.(enabled
+    ? '📎 이 대화를 이어받았습니다. 그냥 답장하면 여기로 들어갑니다.'
+    : '🔇 이 대화를 놓았습니다. 브라우저에서 이어집니다.');
 }
 
 /**
@@ -226,19 +180,7 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
     }
   };
 
-  const unsubscribeStarted = chatRunRegistry.onRunStarted((sessionId) => {
-    if (!claimRelayHandoff(sessionId)) {
-      return;
-    }
-    void broadcast('📎 이 대화를 이어받았습니다. 그냥 답장하면 여기로 들어갑니다.');
-  });
-
-  const unsubscribeReleased = chatRunRegistry.onRelayReleased((sessionId) => {
-    if (!releaseRelayHandoff(sessionId)) {
-      return;
-    }
-    void broadcast('🔇 이 대화를 놓았습니다. 브라우저에서 이어집니다.');
-  });
+  activeBroadcast = broadcast;
 
   const unsubscribeSettled = chatRunRegistry.onRunSettled((sessionId) => {
     if (!shouldRelayCompletion(sessionId)) {
@@ -324,8 +266,9 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
     stop() {
       stopped = true;
       abortController.abort();
-      unsubscribeStarted();
-      unsubscribeReleased();
+      if (activeBroadcast === broadcast) {
+        activeBroadcast = null;
+      }
       unsubscribeSettled();
     },
   };
