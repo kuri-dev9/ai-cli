@@ -439,6 +439,11 @@ export const api = {
     file: (storedName: string) => get(`/api/assets/files/${encodeURIComponent(storedName)}`),
     image: (filename: string, options: ApiRequestOptions = {}) =>
       get(`/api/assets/images/${encodeURIComponent(filename)}`, options),
+    // An image a provider generated during a turn (Codex's image_gen), addressed
+    // by the absolute path the transcript carries. The server serves only files
+    // inside the provider's generated-images folder.
+    generatedImage: (imagePath: string, options: ApiRequestOptions = {}) =>
+      get(`/api/assets/generated-images${query({ path: imagePath })}`, options),
   },
 
   // TaskMaster endpoints — all addressed by DB projectId post-migration.

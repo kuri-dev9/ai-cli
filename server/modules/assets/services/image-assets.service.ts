@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import mime from 'mime-types';
 
-import { getGlobalImageAssetsDir, toPosixPath } from '@/shared/image-attachments.js';
+import { getCodexGeneratedImagesDir, getGlobalImageAssetsDir, toPosixPath } from '@/shared/image-attachments.js';
 
 /**
  * Image mime types accepted for chat attachment uploads. SVG is allowed for
@@ -103,12 +103,37 @@ export function resolveAttachmentAssetFile(filename: string): string | null {
 }
 
 /**
- * Opens one stored chat asset for the assets route without exposing arbitrary
- * filesystem reads. The route translates the lookup status and streams the
- * returned direct-child file to the authenticated client.
+ * Resolves the absolute path of an image a provider generated (today: Codex's
+ * `image_gen` tool) for the assets serving route, or null when the path is
+ * empty, is not an image, or lies outside the generated-images folder. Unlike
+ * uploaded assets these live in nested per-thread folders, so containment is
+ * checked against the folder root rather than requiring a direct child.
  */
-export async function openStoredAttachmentAsset(filename: string) {
-  const resolved = resolveAttachmentAssetFile(filename);
+export function resolveGeneratedImageFile(imagePath: string): string | null {
+  const trimmed = typeof imagePath === 'string' ? imagePath.trim() : '';
+  if (!trimmed) {
+    return null;
+  }
+
+  const root = path.resolve(getCodexGeneratedImagesDir());
+  const resolved = path.resolve(trimmed);
+  if (!resolved.startsWith(root + path.sep)) {
+    return null;
+  }
+
+  const contentType = mime.lookup(resolved);
+  if (!contentType || !isAllowedImageMimeType(contentType)) {
+    return null;
+  }
+
+  return resolved;
+}
+
+/**
+ * Streams one file the asset resolvers accepted. Shared by the stored-asset
+ * and generated-image lookups so both report the same lookup statuses.
+ */
+async function openResolvedAsset(resolved: string | null) {
   if (!resolved) {
     return { status: 'invalid' as const };
   }
@@ -124,4 +149,21 @@ export async function openStoredAttachmentAsset(filename: string) {
     contentType: mime.lookup(resolved) || 'application/octet-stream',
     stream: fsSync.createReadStream(resolved),
   };
+}
+
+/**
+ * Opens one stored chat asset for the assets route without exposing arbitrary
+ * filesystem reads. The route translates the lookup status and streams the
+ * returned direct-child file to the authenticated client.
+ */
+export async function openStoredAttachmentAsset(filename: string) {
+  return openResolvedAsset(resolveAttachmentAssetFile(filename));
+}
+
+/**
+ * Opens one provider-generated image for the assets route. Only image files
+ * under the generated-images folder resolve; anything else reports `invalid`.
+ */
+export async function openGeneratedImageAsset(imagePath: string) {
+  return openResolvedAsset(resolveGeneratedImageFile(imagePath));
 }

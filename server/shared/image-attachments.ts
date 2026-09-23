@@ -111,6 +111,29 @@ export function toPosixPath(value: string): string {
   return value.replace(/\\/g, '/');
 }
 
+/**
+ * Folder where Codex's built-in `image_gen` tool saves what it draws, one
+ * subfolder per provider thread id. Read by the Codex runtime to notice new
+ * images during a live turn, and by the assets module as the only root its
+ * generated-image route may serve from.
+ */
+export function getCodexGeneratedImagesDir(): string {
+  return path.join(os.homedir(), '.codex', 'generated_images');
+}
+
+/**
+ * Describes one provider-generated image file as the attachment record the
+ * chat UI renders. The Codex runtime (live turns) and Codex history both use
+ * it so the same file produces the same row either way.
+ */
+export function describeGeneratedImage(imagePath: string): ImageAttachmentDescriptor {
+  return {
+    path: toPosixPath(imagePath),
+    name: path.basename(imagePath),
+    mimeType: EXTENSION_TO_MEDIA_TYPE[path.extname(imagePath).toLowerCase()] || 'application/octet-stream',
+  };
+}
+
 /** Resolves a project-relative image path against the run's working directory. */
 export function resolveImageAbsolutePath(cwd: string | undefined, imagePath: string): string {
   if (path.isAbsolute(imagePath)) {

@@ -8,6 +8,7 @@ import {
   buildStoredImageRecords,
   isAllowedImageMimeType,
   resolveAttachmentAssetFile,
+  resolveGeneratedImageFile,
   resolveImageAssetFile,
 } from '@/modules/assets/services/image-assets.service.js';
 
@@ -71,4 +72,23 @@ test('resolveAttachmentAssetFile uses the same direct-child boundary', () => {
     path.join(path.resolve(ASSETS_DIR), '123-notes.txt'),
   );
   assert.equal(resolveAttachmentAssetFile('../notes.txt'), null);
+});
+
+test('resolveGeneratedImageFile accepts image files below the generated-images folder', () => {
+  const root = path.resolve(path.join(os.homedir(), '.codex', 'generated_images'));
+  const nested = path.join(root, 'thread-1', 'exec-1.png');
+
+  assert.equal(resolveGeneratedImageFile(nested), nested);
+  assert.equal(resolveGeneratedImageFile(nested.replace(/\\/g, '/')), nested);
+});
+
+test('resolveGeneratedImageFile rejects paths outside the folder, non-images, and traversal', () => {
+  const root = path.resolve(path.join(os.homedir(), '.codex', 'generated_images'));
+
+  assert.equal(resolveGeneratedImageFile(''), null);
+  assert.equal(resolveGeneratedImageFile(root), null, 'the folder itself is not a file');
+  assert.equal(resolveGeneratedImageFile(path.join(os.homedir(), '.codex', 'auth.json')), null);
+  assert.equal(resolveGeneratedImageFile(path.join(root, 'thread-1', 'notes.txt')), null);
+  assert.equal(resolveGeneratedImageFile(path.join(root, '..', 'sessions', 'x.png')), null);
+  assert.equal(resolveGeneratedImageFile(path.join(root, 'thread-1', '..', '..', 'auth.png')), null);
 });

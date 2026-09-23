@@ -245,6 +245,9 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
             type: 'assistant',
             content: text,
             timestamp: msg.timestamp,
+            // A picture the assistant generated arrives as a text row with no
+            // prose, only images.
+            images,
             memoryCitations: msg.memoryCitations,
             ...sharedMetadata,
           });

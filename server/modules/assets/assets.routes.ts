@@ -6,6 +6,7 @@ import {
   buildStoredImageRecords,
   ensureImageAssetsDir,
   isAllowedImageMimeType,
+  openGeneratedImageAsset,
   openStoredAttachmentAsset,
 } from '@/modules/assets/services/image-assets.service.js';
 
@@ -118,6 +119,35 @@ router.get('/images/:filename', async (req, res) => {
     console.error('Error streaming image asset:', error);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Error reading asset' });
+    }
+  });
+});
+
+/**
+ * Serves one image a provider generated during a chat turn, addressed by the
+ * absolute path the transcript carries. The service refuses anything outside
+ * the generated-images folder, so this is not a general file reader.
+ */
+router.get('/generated-images', async (req, res) => {
+  const imagePath = typeof req.query.path === 'string' ? req.query.path : '';
+  const asset = await openGeneratedImageAsset(imagePath);
+  if (asset.status === 'invalid') {
+    return res.status(400).json({ error: 'Invalid generated image path' });
+  }
+  if (asset.status === 'missing') {
+    return res.status(404).json({ error: 'Generated image not found' });
+  }
+
+  res.setHeader('Content-Type', asset.contentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (asset.contentType === 'image/svg+xml') {
+    res.setHeader('Content-Disposition', 'attachment');
+  }
+  asset.stream.pipe(res);
+  asset.stream.on('error', (error) => {
+    console.error('Error streaming generated image:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Error reading generated image' });
     }
   });
 });

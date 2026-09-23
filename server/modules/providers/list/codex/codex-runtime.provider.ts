@@ -11,12 +11,17 @@
  * - codexRuntime.abort(sessionId) - Cancel an active session
  */
 
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+
 import { Codex } from '@openai/codex-sdk';
 import type { ModelReasoningEffort, Thread, ThreadOptions } from '@openai/codex-sdk';
 
 import {
   appendFilesInputTag,
   buildCodexInputItems,
+  describeGeneratedImage,
+  getCodexGeneratedImagesDir,
   normalizeImageDescriptors,
   createCompleteMessage,
   createNormalizedMessage,
@@ -66,6 +71,47 @@ function extractCodexTokenBudget(event: AnyRecord) {
       output: outputTokens,
     },
   };
+}
+
+/**
+ * Lists the images Codex's built-in `image_gen` tool saved during this run
+ * that have not been reported yet.
+ *
+ * The exec JSON stream carries no item for that tool — checked against
+ * codex-cli 0.153, where a generation leaves no trace between the items
+ * around it — so the file it drops under the thread's generated-images
+ * folder is the only live signal. Files older than the run belong to earlier
+ * turns of a resumed thread and are skipped; history shows those.
+ */
+async function findNewGeneratedImages(threadId: string, runStartedAtMs: number, reported: Set<string>) {
+  const folder = path.join(getCodexGeneratedImagesDir(), threadId);
+  let entries: string[];
+  try {
+    entries = await fs.readdir(folder);
+  } catch {
+    return [];
+  }
+
+  const images = [];
+  for (const entry of entries.sort()) {
+    const filePath = path.join(folder, entry);
+    const image = describeGeneratedImage(filePath);
+    if (reported.has(filePath) || !image.mimeType?.startsWith('image/')) {
+      continue;
+    }
+    let stats;
+    try {
+      stats = await fs.stat(filePath);
+    } catch {
+      continue;
+    }
+    if (!stats.isFile() || stats.mtimeMs < runStartedAtMs) {
+      continue;
+    }
+    reported.add(filePath);
+    images.push(image);
+  }
+  return images;
 }
 
 /**
@@ -302,6 +348,9 @@ async function queryCodex(
   // Session-map key: the app session id when the caller supplied one, else
   // the provider-native thread id once captured (legacy/direct API callers).
   const sessionKey = () => sessionId || capturedSessionId || null;
+  // Pictures image_gen drops during this run; see findNewGeneratedImages.
+  const runStartedAtMs = Date.now();
+  const reportedGeneratedImages = new Set<string>();
 
   try {
     codex = new Codex();
@@ -389,6 +438,22 @@ async function queryCodex(
         && !PROGRESSIVE_CODEX_ITEM_TYPES.has(event.item?.type)
       ) {
         continue;
+      }
+
+      // Looked for before the event is forwarded so the picture lands above
+      // the reply that describes it, the way Codex's own UI orders them.
+      if ((event.type === 'item.completed' || event.type === 'turn.completed') && capturedSessionId) {
+        const images = await findNewGeneratedImages(capturedSessionId, runStartedAtMs, reportedGeneratedImages);
+        if (images.length > 0) {
+          sendMessage(ws, createNormalizedMessage({
+            kind: 'text',
+            role: 'assistant',
+            content: '',
+            images,
+            sessionId: capturedSessionId || sessionId || null,
+            provider: 'codex',
+          }));
+        }
       }
 
       const transformed = transformCodexEvent(event);

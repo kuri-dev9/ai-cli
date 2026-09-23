@@ -9,6 +9,8 @@ import type { ChatImage } from '@/shared/types';
 type ChatMessageImagesProps = {
   images: ChatImage[];
   projectId?: string | null;
+  /** Which side the cards sit on: the user's bubble is right-aligned, an assistant's picture left. */
+  align?: 'start' | 'end';
 };
 
 /**
@@ -16,7 +18,8 @@ type ChatMessageImagesProps = {
  * directly; path-based attachments are fetched as blobs (a bare <img src>
  * cannot carry the auth header) — first from the global assets route
  * (`~/.cloudcli/assets`), then from the project files route as a fallback for
- * sessions recorded before attachments moved to the global store.
+ * sessions recorded before attachments moved to the global store, and last
+ * from the generated-images route for a picture a provider drew itself.
  */
 function useChatImageSrc(image: ChatImage, projectId?: string | null): { src: string | null; failed: boolean } {
   const [src, setSrc] = useState<string | null>(image.data || null);
@@ -45,6 +48,7 @@ function useChatImageSrc(image: ChatImage, projectId?: string | null): { src: st
       ...(projectId
         ? [() => api.readFileBlob(projectId, imagePath, { signal: controller.signal })]
         : []),
+      () => api.assets.generatedImage(imagePath, { signal: controller.signal }),
     ];
 
     const load = async () => {
@@ -167,19 +171,20 @@ function ChatMessageImage({ image, projectId }: { image: ChatImage; projectId?: 
 }
 
 /**
- * Image attachments for a user turn, rendered claude.ai-style: standalone
+ * Image attachments for one turn, rendered claude.ai-style: standalone
  * rounded square cards shown above the message bubble. Each thumbnail
  * expands to a fullscreen lightbox on click.
  *
- * Rendered by chat's MessageComponent for the images attached to a user turn.
+ * Rendered by chat's MessageComponent for the images attached to a user turn
+ * and for a picture the assistant generated.
  */
-export default function ChatMessageImages({ images, projectId }: ChatMessageImagesProps) {
+export default function ChatMessageImages({ images, projectId, align = 'end' }: ChatMessageImagesProps) {
   if (!images || images.length === 0) {
     return null;
   }
 
   return (
-    <div className="flex flex-wrap justify-end gap-2">
+    <div className={`flex flex-wrap gap-2 ${align === 'start' ? 'justify-start' : 'justify-end'}`}>
       {images.map((image, index) => (
         <ChatMessageImage key={image.path || image.name || index} image={image} projectId={projectId} />
       ))}

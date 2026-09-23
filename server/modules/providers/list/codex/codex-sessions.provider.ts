@@ -5,7 +5,7 @@ import readline from 'node:readline';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { codexAppServer } from '@/modules/providers/list/codex/codex-app-server.client.js';
-import { parseFilesInputTag, toImageAttachments } from '@/shared/image-attachments.js';
+import { describeGeneratedImage, parseFilesInputTag, toImageAttachments } from '@/shared/image-attachments.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import { prepareTranscriptMessages } from '@/shared/message-unification.js';
 import type {
@@ -193,6 +193,24 @@ export function extractCodexUserImages(
   }
 
   return attachments.length > 0 ? attachments : undefined;
+}
+
+/**
+ * Reads the file Codex's built-in `image_gen` tool saved, from the `Extension`
+ * item it records when a generation completes. The surrounding exec call
+ * carries the same picture only as base64, far too large for a transcript
+ * row; the saved file is what the chat shows. Returns null for any other
+ * item, for a failed generation, and for an item without a saved path.
+ */
+function readCodexGeneratedImagePath(item: unknown): string | null {
+  const record = readObjectRecord(item);
+  if (!record || record.type !== 'Extension' || record.kind !== 'image_gen.generation') {
+    return null;
+  }
+  if (record.status !== undefined && record.status !== 'completed') {
+    return null;
+  }
+  return readNonEmptyString(record.savedPath) ?? null;
 }
 
 function extractCodexTextContent(content: unknown): string {
@@ -1244,6 +1262,17 @@ async function getCodexSessionMessages(sessionId: string): Promise<CodexHistoryR
         continue;
       }
 
+      // A generated picture becomes its own assistant row, placed where the
+      // generation happened: after the call that drew it, before the reply
+      // that describes it. The live run reports it the same way.
+      if (payload.type === 'item_completed') {
+        const savedPath = readCodexGeneratedImagePath(payload.item);
+        if (savedPath) {
+          messages.push({ type: 'generated_image', timestamp, images: [describeGeneratedImage(savedPath)] });
+        }
+        continue;
+      }
+
       if (payload.type === 'sub_agent_activity' && payload.kind === 'started') {
         const eventId = readNonEmptyString(payload.event_id);
         const agentPath = readNonEmptyString(payload.agent_path);
@@ -1906,6 +1935,19 @@ export class CodexSessionsProvider implements IProviderSessions {
         provider: PROVIDER,
         kind: 'thinking',
         content: thinkingContent,
+      })];
+    }
+
+    if (raw.type === 'generated_image') {
+      return [createNormalizedMessage({
+        id: baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'text',
+        role: 'assistant',
+        content: '',
+        images: raw.images,
       })];
     }
 

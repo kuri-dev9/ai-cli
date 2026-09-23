@@ -551,3 +551,88 @@ test('an exec script that updates the plan yields the steps it set', () => {
     ],
   }]);
 });
+
+test('Codex history shows a generated image as its own row between the call and the reply', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'codex-image-history-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await mkdir(workspacePath, { recursive: true });
+  const restoreHomeDir = patchHomeDir(tempRoot);
+
+  try {
+    const providerSessionId = 'codex-image-1';
+    const savedPath = path.join(tempRoot, '.codex', 'generated_images', providerSessionId, 'exec-9.png');
+    const transcriptPath = await writeCodexTranscript(tempRoot, providerSessionId, workspacePath);
+    await writeFile(transcriptPath, `${[
+      JSON.stringify({ type: 'session_meta', payload: { id: providerSessionId, cwd: workspacePath } }),
+      JSON.stringify({
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'draw-1',
+          input: 'const r = await tools.image_gen__imagegen({ prompt: "a red circle" });',
+        },
+      }),
+      // image_gen records the picture it drew as an Extension item before the
+      // exec call's output arrives.
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'item_completed',
+          item: { type: 'Extension', kind: 'image_gen.generation', id: 'exec-9', status: 'completed', savedPath },
+        },
+      }),
+      JSON.stringify({
+        type: 'event_msg',
+        payload: {
+          type: 'item_completed',
+          item: { type: 'Extension', kind: 'image_gen.generation', id: 'exec-10', status: 'failed', savedPath: null },
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call_output',
+          call_id: 'draw-1',
+          output: [
+            { type: 'input_text', text: 'Script completed\nWall time 15.5 seconds\nOutput:\n' },
+            { type: 'input_image', image_url: 'data:image/png;base64,AAAA', detail: 'high' },
+            { type: 'input_text', text: `Generated images are saved to ${path.dirname(savedPath)} as ${savedPath} by default.` },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Here is your circle.' }] },
+      }),
+    ].join('\n')}\n`, 'utf8');
+
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-image-1', 'codex', workspacePath);
+      sessionsDb.assignProviderSessionId('app-image-1', providerSessionId);
+      await new CodexSessionSynchronizer().synchronize();
+
+      const history = await new CodexSessionsProvider().fetchHistory('app-image-1');
+      const rows = history.messages.map((message) => ({ kind: message.kind, role: message.role, content: message.content }));
+
+      assert.deepEqual(rows, [
+        { kind: 'tool_use', role: undefined, content: undefined },
+        { kind: 'text', role: 'assistant', content: '' },
+        { kind: 'text', role: 'assistant', content: 'Here is your circle.' },
+      ]);
+
+      const imageRow = history.messages[1];
+      assert.deepEqual(imageRow.images, [{
+        path: savedPath.replace(/\\/g, '/'),
+        name: 'exec-9.png',
+        mimeType: 'image/png',
+      }]);
+      // The base64 copy in the call output must never reach the transcript.
+      const bash = history.messages[0];
+      assert.ok(!String(bash.toolResult?.content || '').includes('AAAA'));
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});

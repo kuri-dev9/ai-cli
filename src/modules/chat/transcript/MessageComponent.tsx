@@ -296,6 +296,15 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               </Reasoning>
             ) : (
               <div dir="auto" className="text-sm text-gray-700 dark:text-gray-300">
+                {/* A picture the assistant generated, shown as cards like a user's attachments. */}
+                {message.images && message.images.length > 0 && (
+                  <ChatMessageImages
+                    images={message.images}
+                    projectId={selectedProject?.projectId}
+                    align="start"
+                  />
+                )}
+
                 {/* Reasoning accordion */}
                 {showThinking && message.reasoning && (
                   <Reasoning className="mb-3" defaultOpen={false}>
