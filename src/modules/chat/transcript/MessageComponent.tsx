@@ -104,6 +104,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
               <ChatMessageImages
                 images={message.images}
                 projectId={selectedProject?.projectId}
+                align="end"
               />
             )}
             {message.files && message.files.length > 0 && (

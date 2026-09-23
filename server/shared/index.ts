@@ -3,6 +3,7 @@ export {
   buildCodexInputItems,
   describeGeneratedImage,
   getCodexGeneratedImagesDir,
+  isImageAttachmentDescriptor,
   normalizeImageDescriptors,
 } from './image-attachments.js';
 export { createCompleteMessage, createNormalizedMessage } from './utils.js';

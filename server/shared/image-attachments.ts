@@ -127,11 +127,8 @@ export function getCodexGeneratedImagesDir(): string {
  * it so the same file produces the same row either way.
  */
 export function describeGeneratedImage(imagePath: string): ImageAttachmentDescriptor {
-  return {
-    path: toPosixPath(imagePath),
-    name: path.basename(imagePath),
-    mimeType: EXTENSION_TO_MEDIA_TYPE[path.extname(imagePath).toLowerCase()] || 'application/octet-stream',
-  };
+  const descriptor = { path: toPosixPath(imagePath), name: path.basename(imagePath) };
+  return { ...descriptor, mimeType: resolveImageMediaType(descriptor) ?? 'application/octet-stream' };
 }
 
 /** Resolves a project-relative image path against the run's working directory. */

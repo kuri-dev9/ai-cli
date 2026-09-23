@@ -4,6 +4,7 @@ import path from 'node:path';
 import mime from 'mime-types';
 
 import { getCodexGeneratedImagesDir, getGlobalImageAssetsDir, toPosixPath } from '@/shared/image-attachments.js';
+import { isPathInsideDirectory } from '@/shared/utils.js';
 
 /**
  * Image mime types accepted for chat attachment uploads. SVG is allowed for
@@ -110,17 +111,12 @@ export function resolveAttachmentAssetFile(filename: string): string | null {
  * checked against the folder root rather than requiring a direct child.
  */
 export function resolveGeneratedImageFile(imagePath: string): string | null {
-  const trimmed = typeof imagePath === 'string' ? imagePath.trim() : '';
-  if (!trimmed) {
+  const trimmed = imagePath.trim();
+  if (!trimmed || !isPathInsideDirectory(trimmed, getCodexGeneratedImagesDir())) {
     return null;
   }
 
-  const root = path.resolve(getCodexGeneratedImagesDir());
   const resolved = path.resolve(trimmed);
-  if (!resolved.startsWith(root + path.sep)) {
-    return null;
-  }
-
   const contentType = mime.lookup(resolved);
   if (!contentType || !isAllowedImageMimeType(contentType)) {
     return null;

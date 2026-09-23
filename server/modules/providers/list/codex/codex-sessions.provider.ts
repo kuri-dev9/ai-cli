@@ -202,15 +202,13 @@ export function extractCodexUserImages(
  * row; the saved file is what the chat shows. Returns null for any other
  * item, for a failed generation, and for an item without a saved path.
  */
-function readCodexGeneratedImagePath(item: unknown): string | null {
+function readCodexGeneratedImagePath(item: unknown): string | undefined {
   const record = readObjectRecord(item);
   if (!record || record.type !== 'Extension' || record.kind !== 'image_gen.generation') {
-    return null;
+    return undefined;
   }
-  if (record.status !== undefined && record.status !== 'completed') {
-    return null;
-  }
-  return readNonEmptyString(record.savedPath) ?? null;
+  // A failed generation saves nothing, so the path alone decides.
+  return readNonEmptyString(record.savedPath);
 }
 
 function extractCodexTextContent(content: unknown): string {
@@ -1262,13 +1260,19 @@ async function getCodexSessionMessages(sessionId: string): Promise<CodexHistoryR
         continue;
       }
 
-      // A generated picture becomes its own assistant row, placed where the
-      // generation happened: after the call that drew it, before the reply
-      // that describes it. The live run reports it the same way.
+      // A generated picture becomes an assistant row carrying only images,
+      // placed where the generation happened: after the call that drew it,
+      // before the reply that describes it. The live run reports the same
+      // shape, and an image-only user turn already used it.
       if (payload.type === 'item_completed') {
         const savedPath = readCodexGeneratedImagePath(payload.item);
         if (savedPath) {
-          messages.push({ type: 'generated_image', timestamp, images: [describeGeneratedImage(savedPath)] });
+          messages.push({
+            type: 'assistant',
+            timestamp,
+            message: { role: 'assistant', content: '' },
+            images: [describeGeneratedImage(savedPath)],
+          });
         }
         continue;
       }
@@ -1938,19 +1942,6 @@ export class CodexSessionsProvider implements IProviderSessions {
       })];
     }
 
-    if (raw.type === 'generated_image') {
-      return [createNormalizedMessage({
-        id: baseId,
-        sessionId,
-        timestamp: ts,
-        provider: PROVIDER,
-        kind: 'text',
-        role: 'assistant',
-        content: '',
-        images: raw.images,
-      })];
-    }
-
     if (raw.message?.role === 'user') {
       const content = typeof raw.message.content === 'string'
         ? raw.message.content
@@ -1992,7 +1983,11 @@ export class CodexSessionsProvider implements IProviderSessions {
             .filter(Boolean)
             .join('\n')
           : '';
-      if (!content.trim()) {
+      // A row carrying only images is a picture the assistant generated, and
+      // is the whole message; the user branch above keeps image-only turns the
+      // same way.
+      const images = Array.isArray(raw.images) && raw.images.length > 0 ? raw.images : undefined;
+      if (!content.trim() && !images) {
         return [];
       }
       return [createNormalizedMessage({
@@ -2003,6 +1998,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         kind: 'text',
         role: 'assistant',
         content,
+        images,
         memoryCitations: raw.memoryCitations,
       })];
     }

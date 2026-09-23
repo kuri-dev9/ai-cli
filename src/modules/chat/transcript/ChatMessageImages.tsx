@@ -6,11 +6,20 @@ import { X } from 'lucide-react';
 import { api } from '@/shared/api';
 import type { ChatImage } from '@/shared/types';
 
+/**
+ * Recognizes a picture a provider generated during a turn rather than one the
+ * user uploaded. Those are the only images addressed by a full path outside
+ * the workspace, and they are served by their own route.
+ */
+function isGeneratedImagePath(imagePath: string): boolean {
+  return imagePath.replace(/\\/g, '/').includes('/.codex/generated_images/');
+}
+
 type ChatMessageImagesProps = {
   images: ChatImage[];
   projectId?: string | null;
   /** Which side the cards sit on: the user's bubble is right-aligned, an assistant's picture left. */
-  align?: 'start' | 'end';
+  align: 'start' | 'end';
 };
 
 /**
@@ -43,13 +52,18 @@ function useChatImageSrc(image: ChatImage, projectId?: string | null): { src: st
     let objectUrl: string | null = null;
     const controller = new AbortController();
 
-    const candidateRequests: Array<() => Promise<Response>> = [
-      () => api.assets.image(filename, { signal: controller.signal }),
-      ...(projectId
-        ? [() => api.readFileBlob(projectId, imagePath, { signal: controller.signal })]
-        : []),
-      () => api.assets.generatedImage(imagePath, { signal: controller.signal }),
-    ];
+    // The path says which route holds the file, so only that one is asked.
+    // Trying them in turn would cost a picture the assistant generated two
+    // guaranteed failures first: its basename is not in the upload store, and
+    // its folder is not inside the project.
+    const candidateRequests: Array<() => Promise<Response>> = isGeneratedImagePath(imagePath)
+      ? [() => api.assets.generatedImage(imagePath, { signal: controller.signal })]
+      : [
+        () => api.assets.image(filename, { signal: controller.signal }),
+        ...(projectId
+          ? [() => api.readFileBlob(projectId, imagePath, { signal: controller.signal })]
+          : []),
+      ];
 
     const load = async () => {
       setFailed(false);
@@ -178,7 +192,7 @@ function ChatMessageImage({ image, projectId }: { image: ChatImage; projectId?: 
  * Rendered by chat's MessageComponent for the images attached to a user turn
  * and for a picture the assistant generated.
  */
-export default function ChatMessageImages({ images, projectId, align = 'end' }: ChatMessageImagesProps) {
+export default function ChatMessageImages({ images, projectId, align }: ChatMessageImagesProps) {
   if (!images || images.length === 0) {
     return null;
   }

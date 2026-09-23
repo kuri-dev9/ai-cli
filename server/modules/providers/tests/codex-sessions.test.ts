@@ -636,3 +636,31 @@ test('Codex history shows a generated image as its own row between the call and 
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+// 그림 줄은 assistant 메시지 모양으로 들어간다. 별도 타입으로 두면 공용
+// 진입점이 `message.role` 로 갈라내는 조건에 걸리지 않아 조용히 사라진다.
+test('Codex normalizes a generated-image row through the shared entry point', () => {
+  const image = { path: '/tmp/generated_images/thread-1/exec-1.png', name: 'exec-1.png', mimeType: 'image/png' };
+  const [normalized] = new CodexSessionsProvider().normalizeMessage({
+    type: 'assistant',
+    timestamp: '2026-09-23T02:00:00.000Z',
+    message: { role: 'assistant', content: '' },
+    images: [image],
+  }, 'app-1');
+
+  assert.equal(normalized?.kind, 'text');
+  assert.equal(normalized?.role, 'assistant');
+  assert.equal(normalized?.content, '');
+  assert.deepEqual(normalized?.images, [image]);
+});
+
+// 글도 그림도 없는 assistant 줄은 여전히 버려야 한다.
+test('Codex still drops an assistant row with neither prose nor images', () => {
+  const normalized = new CodexSessionsProvider().normalizeMessage({
+    type: 'assistant',
+    timestamp: '2026-09-23T02:00:00.000Z',
+    message: { role: 'assistant', content: '   ' },
+  }, 'app-1');
+
+  assert.deepEqual(normalized, []);
+});

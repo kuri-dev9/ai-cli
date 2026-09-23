@@ -22,6 +22,7 @@ import {
   buildCodexInputItems,
   describeGeneratedImage,
   getCodexGeneratedImagesDir,
+  isImageAttachmentDescriptor,
   normalizeImageDescriptors,
   createCompleteMessage,
   createNormalizedMessage,
@@ -74,42 +75,42 @@ function extractCodexTokenBudget(event: AnyRecord) {
 }
 
 /**
- * Lists the images Codex's built-in `image_gen` tool saved during this run
- * that have not been reported yet.
+ * Takes the pictures Codex's built-in `image_gen` tool saved during this run,
+ * recording every file it looks at so no file is examined twice.
  *
- * The exec JSON stream carries no item for that tool — checked against
- * codex-cli 0.153, where a generation leaves no trace between the items
- * around it — so the file it drops under the thread's generated-images
- * folder is the only live signal. Files older than the run belong to earlier
- * turns of a resumed thread and are skipped; history shows those.
+ * Watching the folder is the only live signal there is. Checked against
+ * codex-cli 0.153: a generation emits no SDK item at all, and the sentence
+ * naming the saved path — which the recorded transcript does carry — never
+ * reaches the streamed events either. A run that drew a picture emitted only
+ * an `agent_message` and `turn.completed` around it.
+ *
+ * Files older than the run belong to earlier turns of a resumed thread, so
+ * they are passed over; history shows those. They are still recorded as seen,
+ * because otherwise every remaining event of the turn would stat them again.
  */
-async function findNewGeneratedImages(threadId: string, runStartedAtMs: number, reported: Set<string>) {
+async function takeNewGeneratedImages(threadId: string, runStartedAtMs: number, seen: Set<string>) {
   const folder = path.join(getCodexGeneratedImagesDir(), threadId);
-  let entries: string[];
-  try {
-    entries = await fs.readdir(folder);
-  } catch {
-    return [];
-  }
+  // readdir order is unspecified, so two pictures drawn in one turn would
+  // otherwise reach the transcript in an arbitrary order.
+  const entries = await fs.readdir(folder, { withFileTypes: true }).catch(() => []);
+  const fileNames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
 
   const images = [];
-  for (const entry of entries.sort()) {
-    const filePath = path.join(folder, entry);
+  for (const name of fileNames) {
+    const filePath = path.join(folder, name);
+    if (seen.has(filePath)) {
+      continue;
+    }
+    seen.add(filePath);
+
     const image = describeGeneratedImage(filePath);
-    if (reported.has(filePath) || !image.mimeType?.startsWith('image/')) {
+    if (!isImageAttachmentDescriptor(image)) {
       continue;
     }
-    let stats;
-    try {
-      stats = await fs.stat(filePath);
-    } catch {
-      continue;
+    const mtimeMs = await fs.stat(filePath).then((stats) => stats.mtimeMs, () => 0);
+    if (mtimeMs >= runStartedAtMs) {
+      images.push(image);
     }
-    if (!stats.isFile() || stats.mtimeMs < runStartedAtMs) {
-      continue;
-    }
-    reported.add(filePath);
-    images.push(image);
   }
   return images;
 }
@@ -348,9 +349,9 @@ async function queryCodex(
   // Session-map key: the app session id when the caller supplied one, else
   // the provider-native thread id once captured (legacy/direct API callers).
   const sessionKey = () => sessionId || capturedSessionId || null;
-  // Pictures image_gen drops during this run; see findNewGeneratedImages.
+  // Pictures image_gen drops during this run; see takeNewGeneratedImages.
   const runStartedAtMs = Date.now();
-  const reportedGeneratedImages = new Set<string>();
+  const seenGeneratedImages = new Set<string>();
 
   try {
     codex = new Codex();
@@ -443,14 +444,14 @@ async function queryCodex(
       // Looked for before the event is forwarded so the picture lands above
       // the reply that describes it, the way Codex's own UI orders them.
       if ((event.type === 'item.completed' || event.type === 'turn.completed') && capturedSessionId) {
-        const images = await findNewGeneratedImages(capturedSessionId, runStartedAtMs, reportedGeneratedImages);
+        const images = await takeNewGeneratedImages(capturedSessionId, runStartedAtMs, seenGeneratedImages);
         if (images.length > 0) {
           sendMessage(ws, createNormalizedMessage({
             kind: 'text',
             role: 'assistant',
             content: '',
             images,
-            sessionId: capturedSessionId || sessionId || null,
+            sessionId: capturedSessionId,
             provider: 'codex',
           }));
         }

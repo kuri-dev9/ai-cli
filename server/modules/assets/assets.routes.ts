@@ -91,35 +91,61 @@ router.post('/files', (req, res) => {
   });
 });
 
+/** One asset lookup, as the service's open helpers report it. */
+type OpenedAsset = Awaited<ReturnType<typeof openStoredAttachmentAsset>>;
+
+/**
+ * Writes one asset lookup to the response: the matching error for a rejected
+ * or missing file, otherwise the file itself.
+ *
+ * Stored-XSS hardening lives here so every asset route gets the same
+ * treatment. The browser is never allowed to sniff a different type, and an
+ * SVG (which can carry scripts when rendered as a document) is forced to
+ * download instead of rendering inline. The chat UI is unaffected — it
+ * fetches assets as blobs and shows them through <img>, where SVG scripts
+ * never execute. `downloadAs` forces that same download for every type, which
+ * is what keeps an uploaded active format from rendering in the application.
+ */
+function streamAsset(
+  res: express.Response,
+  asset: OpenedAsset,
+  labels: { invalid: string; missing: string; readError: string },
+  downloadAs?: string,
+) {
+  if (asset.status === 'invalid') {
+    return res.status(400).json({ error: labels.invalid });
+  }
+  if (asset.status === 'missing') {
+    return res.status(404).json({ error: labels.missing });
+  }
+
+  res.setHeader('Content-Type', asset.contentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (downloadAs) {
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadAs.replace(/["\r\n]/g, '_')}"`);
+  } else if (asset.contentType === 'image/svg+xml') {
+    res.setHeader('Content-Disposition', 'attachment');
+  }
+
+  asset.stream.pipe(res);
+  asset.stream.on('error', (error) => {
+    console.error(`${labels.readError}:`, error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: labels.readError });
+    }
+  });
+}
+
 /**
  * Serves one stored image asset by filename. Only files directly inside the
  * global assets folder are reachable; traversal attempts resolve to null.
  */
 router.get('/images/:filename', async (req, res) => {
   const asset = await openStoredAttachmentAsset(req.params.filename);
-  if (asset.status === 'invalid') {
-    return res.status(400).json({ error: 'Invalid asset filename' });
-  }
-  if (asset.status === 'missing') {
-    return res.status(404).json({ error: 'Asset not found' });
-  }
-
-  res.setHeader('Content-Type', asset.contentType);
-  // Stored-XSS hardening: never let the browser sniff a different type, and
-  // force SVGs (which can carry scripts when rendered as a document) to
-  // download instead of rendering inline. The chat UI is unaffected — it
-  // fetches assets as blobs and shows them through <img>, where SVG scripts
-  // never execute.
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  if (asset.contentType === 'image/svg+xml') {
-    res.setHeader('Content-Disposition', 'attachment');
-  }
-  asset.stream.pipe(res);
-  asset.stream.on('error', (error) => {
-    console.error('Error streaming image asset:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Error reading asset' });
-    }
+  streamAsset(res, asset, {
+    invalid: 'Invalid asset filename',
+    missing: 'Asset not found',
+    readError: 'Error reading asset',
   });
 });
 
@@ -131,50 +157,23 @@ router.get('/images/:filename', async (req, res) => {
 router.get('/generated-images', async (req, res) => {
   const imagePath = typeof req.query.path === 'string' ? req.query.path : '';
   const asset = await openGeneratedImageAsset(imagePath);
-  if (asset.status === 'invalid') {
-    return res.status(400).json({ error: 'Invalid generated image path' });
-  }
-  if (asset.status === 'missing') {
-    return res.status(404).json({ error: 'Generated image not found' });
-  }
-
-  res.setHeader('Content-Type', asset.contentType);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  if (asset.contentType === 'image/svg+xml') {
-    res.setHeader('Content-Disposition', 'attachment');
-  }
-  asset.stream.pipe(res);
-  asset.stream.on('error', (error) => {
-    console.error('Error streaming generated image:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Error reading generated image' });
-    }
+  streamAsset(res, asset, {
+    invalid: 'Invalid generated image path',
+    missing: 'Generated image not found',
+    readError: 'Error reading generated image',
   });
 });
 
 /**
- * Downloads one stored non-image attachment. Content-Disposition prevents
- * uploaded HTML or other active formats from rendering in the application.
+ * Downloads one stored non-image attachment, never rendering it inline.
  */
 router.get('/files/:filename', async (req, res) => {
   const asset = await openStoredAttachmentAsset(req.params.filename);
-  if (asset.status === 'invalid') {
-    return res.status(400).json({ error: 'Invalid asset filename' });
-  }
-  if (asset.status === 'missing') {
-    return res.status(404).json({ error: 'Asset not found' });
-  }
-
-  res.setHeader('Content-Type', asset.contentType);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Content-Disposition', `attachment; filename="${req.params.filename.replace(/["\r\n]/g, '_')}"`);
-  asset.stream.pipe(res);
-  asset.stream.on('error', (error) => {
-    console.error('Error streaming attachment asset:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Error reading asset' });
-    }
-  });
+  streamAsset(res, asset, {
+    invalid: 'Invalid asset filename',
+    missing: 'Asset not found',
+    readError: 'Error reading attachment asset',
+  }, req.params.filename);
 });
 
 export default router;
