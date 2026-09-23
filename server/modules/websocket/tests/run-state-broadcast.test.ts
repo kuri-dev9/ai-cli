@@ -146,6 +146,63 @@ test('닫힌 소켓에는 보내지 않는다', async () => {
   });
 });
 
+test('그 턴을 이미 보고 있는 소켓에는 시작 알림을 보내지 않는다', async () => {
+  await withIsolatedDatabase(async () => {
+    const stop = initializeRunStateBroadcast();
+    try {
+      sessionsDb.createAppSession('app-attached-1', 'claude', '/workspace/demo');
+      const sender = new FakeConnection();
+      connectedClients.add(sender as never);
+
+      // 브라우저가 시킨 턴: 요청한 소켓이 곧 관객이다.
+      chatRunRegistry.startRun({
+        appSessionId: 'app-attached-1',
+        provider: 'claude',
+        providerSessionId: null,
+        connection: sender as never,
+        userId: 'user-1',
+      });
+
+      await flushDeferredNotifications();
+
+      // 이 알림은 "붙어서 받아 가라"는 뜻이다. 이미 붙어 있는 쪽이 받으면 다시
+      // 구독하면서 방금 받은 이벤트를 한 번 더 받게 된다.
+      assert.equal(runStateFrames(sender, 'app-attached-1').length, 0);
+    } finally {
+      stop();
+    }
+  });
+});
+
+test('끝났다는 알림은 보고 있던 소켓에도 간다', async () => {
+  await withIsolatedDatabase(async () => {
+    const stop = initializeRunStateBroadcast();
+    try {
+      sessionsDb.createAppSession('app-attached-2', 'claude', '/workspace/demo');
+      const sender = new FakeConnection();
+      connectedClients.add(sender as never);
+
+      chatRunRegistry.startRun({
+        appSessionId: 'app-attached-2',
+        provider: 'claude',
+        providerSessionId: null,
+        connection: sender as never,
+        userId: 'user-1',
+      });
+      chatRunRegistry.completeRun('app-attached-2', { exitCode: 0 });
+
+      await flushDeferredNotifications();
+
+      // 표시등을 내리는 신호라서 붙어 있든 아니든 받아야 한다.
+      const frames = runStateFrames(sender, 'app-attached-2');
+      assert.equal(frames.length, 1);
+      assert.equal(frames[0].isProcessing, false);
+    } finally {
+      stop();
+    }
+  });
+});
+
 test('두 번 초기화해도 알림이 겹쳐 붙지 않는다', async () => {
   await withIsolatedDatabase(async () => {
     const stop = initializeRunStateBroadcast();

@@ -10,9 +10,13 @@ import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/we
  * 돌고 있으니, 사용자는 명령이 먹었는지 알 길이 없어 같은 말을 한 번 더 보내게
  * 된다.
  *
- * 이벤트 스트림 전체를 여러 소켓에 중계하는 것은 별개의 큰 작업이므로, 여기서는
- * "지금 이 세션이 돌고 있는가" 한 가지만 모든 클라이언트에 알린다. 내용은 화면을
- * 새로 고치면 따라온다.
+ * 알림을 받은 화면은 그 세션을 다시 구독해서 이 턴의 이벤트와 승인 요청을
+ * 넘겨받는다. 그래서 시작 알림은 아직 이 실행을 보고 있지 않은 화면에만 보낸다 —
+ * 이미 붙어 있는 화면(그 턴을 시킨 브라우저)에까지 보내면, 그쪽이 다시 구독하며
+ * 방금 받은 이벤트를 한 번 더 받아 같은 말이 두 번 그려진다.
+ *
+ * 종료 알림은 모두에게 보낸다. 표시등을 내리는 신호라서, 붙어 있든 아니든
+ * 받아야 한다.
  */
 
 let stopBroadcast: (() => void) | null = null;
@@ -26,9 +30,13 @@ function broadcastRunState(sessionId: string, isProcessing: boolean): void {
   });
 
   connectedClients.forEach((client) => {
-    if (client.readyState === WS_OPEN_STATE) {
-      client.send(payload);
+    if (client.readyState !== WS_OPEN_STATE) {
+      return;
     }
+    if (isProcessing && chatRunRegistry.isWatchedBy(sessionId, client)) {
+      return;
+    }
+    client.send(payload);
   });
 }
 

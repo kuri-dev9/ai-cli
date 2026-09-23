@@ -372,6 +372,17 @@ export const chatRunRegistry = {
   },
 
   /**
+   * 이 소켓이 이 세션의 실행을 이미 보고 있는지.
+   *
+   * 시작 알림을 아직 붙지 않은 화면에만 보내기 위해 쓴다 — 이미 이벤트를 받고
+   * 있는 화면에 보내면, 그 화면이 다시 구독하며 방금 본 것을 되받는다.
+   */
+  isWatchedBy(appSessionId: string, connection: RealtimeClientConnection): boolean {
+    const run = runs.get(appSessionId);
+    return run ? run.writer.hasConnection(connection) : false;
+  },
+
+  /**
    * Returns buffered events with `seq` greater than `afterSeq` for replay.
    *
    * An empty array with `run.lastSeq > afterSeq` not covered by the buffer

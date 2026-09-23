@@ -140,6 +140,17 @@ export class ChatSessionWriter {
     this.connections.add(newConnection);
   }
 
+  /**
+   * 이 소켓이 이미 이 실행을 보고 있는지.
+   *
+   * "브라우저 밖에서 턴이 시작됐다"는 알림을 누구에게 보낼지 고르는 데 쓴다.
+   * 이미 보고 있는 화면에까지 보내면, 그 화면이 알림에 답해 다시 구독하면서
+   * 방금 받은 이벤트를 한 번 더 받는다.
+   */
+  hasConnection(connection: RealtimeClientConnection): boolean {
+    return this.connections.has(connection);
+  }
+
   setSessionId(sessionId: string): void {
     this.captureProviderSessionId(sessionId);
   }

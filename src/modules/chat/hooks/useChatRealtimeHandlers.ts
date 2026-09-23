@@ -44,6 +44,14 @@ type UseChatRealtimeHandlersArgs = {
   onSessionProcessing?: MarkSessionProcessing;
   onSessionIdle?: MarkSessionIdle;
   onWebSocketReconnect?: () => void;
+  /**
+   * 브라우저 밖에서(텔레그램·예약 메시지) 이 세션의 턴이 막 시작됐다.
+   *
+   * 그 턴의 이벤트는 아직 이 소켓으로 오지 않는다. 구독해서 붙어야 내용도,
+   * 승인 요청도 이쪽으로 흐른다 — 붙지 않으면 화면은 표시등만 돌고, 승인은
+   * 아무에게도 닿지 못한 채 시간이 지나 거부로 끝난다.
+   */
+  onExternalRunStarted?: (sessionId: string) => void;
   requestLatestMessages: (sessionId: string, allowNetwork?: boolean) => Promise<void>;
   sessionStore: SessionStore;
 };
@@ -77,6 +85,7 @@ export function useChatRealtimeHandlers({
   onSessionProcessing,
   onSessionIdle,
   onWebSocketReconnect,
+  onExternalRunStarted,
   requestLatestMessages,
   sessionStore,
 }: UseChatRealtimeHandlersArgs) {
@@ -196,6 +205,12 @@ export function useChatRealtimeHandlers({
 
           if (msg.isProcessing) {
             onSessionProcessing?.(sid);
+            // 서버는 이 실행을 아직 보고 있지 않은 화면에만 이 프레임을 보낸다.
+            // 그러니 받았다는 것은 "붙어 있지 않다"는 뜻이고, 지금 보고 있는
+            // 대화라면 붙어야 한다 — 보낸 글과 승인 요청이 그때부터 온다.
+            if (sid === activeViewSessionId) {
+              onExternalRunStarted?.(sid);
+            }
           } else {
             onSessionIdle?.(sid);
           }
@@ -440,6 +455,7 @@ export function useChatRealtimeHandlers({
     onSessionProcessing,
     onSessionIdle,
     onWebSocketReconnect,
+    onExternalRunStarted,
     requestLatestMessages,
     sessionStore,
   ]);

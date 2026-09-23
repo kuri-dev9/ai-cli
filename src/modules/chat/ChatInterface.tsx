@@ -282,6 +282,21 @@ function ChatInterface({
     });
   }, [isActive, requestLatestMessages, selectedProject, selectedSession, sendMessage]);
 
+  // 브라우저 밖에서 시작된 턴(텔레그램·예약 메시지)에 이 소켓을 붙인다.
+  // 구독하기 전까지 그 턴의 이벤트는 이쪽으로 오지 않는다 — 보낸 글도 보이지
+  // 않고, 승인 요청은 아무에게도 닿지 못한 채 시간이 지나 거부로 끝난다.
+  const handleExternalRunStarted = useCallback((sessionId: string) => {
+    // `seq` 는 실행마다 1 부터 다시 센다. 지난 턴에서 올려 둔 값을 그대로 보내면
+    // 이번 턴의 이벤트가 전부 "이미 본 것"으로 걸러진다. 이 턴은 아직 하나도 본
+    // 적이 없으므로 0 에서 시작한다.
+    lastSeqRef.current.delete(sessionId);
+    statusCheckSentAtRef.current.set(sessionId, Date.now());
+    sendMessage({
+      type: 'chat.subscribe',
+      sessions: [{ sessionId, lastSeq: 0 }],
+    });
+  }, [sendMessage]);
+
   useChatRealtimeHandlers({
     isActive,
     subscribe,
@@ -298,6 +313,7 @@ function ChatInterface({
     onSessionProcessing,
     onSessionIdle,
     onWebSocketReconnect: handleWebSocketReconnect,
+    onExternalRunStarted: handleExternalRunStarted,
     requestLatestMessages,
     sessionStore,
   });

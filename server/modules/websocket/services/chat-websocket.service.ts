@@ -20,7 +20,7 @@ import type {
   ProviderPermissionDecision,
   ProviderRuntimeWriter,
 } from '@/shared/types.js';
-import { parseIncomingJsonObject } from '@/shared/utils.js';
+import { createNormalizedMessage, parseIncomingJsonObject } from '@/shared/utils.js';
 
 /**
  * Trust boundary for client-supplied image attachments: chat.send options come
@@ -454,6 +454,29 @@ async function dispatchRun(
       : {}),
   };
 
+  // 브라우저가 시키지 않은 턴은 화면에 아무 말도 남기지 않은 채 시작된다.
+  // 텔레그램으로 한 줄 보내 놓고 웹 화면을 보고 있으면, 보낸 글은 보이지 않고
+  // 표시등만 도는 상태로 답이 다 끝날 때까지 기다리게 된다 — 먹은 건지 아닌지
+  // 알 수 없으니 같은 말을 한 번 더 보내게 되는 자리다.
+  //
+  // 그래서 보낸 글을 실행 스트림에 한 번 흘린다. 실행 버퍼에 남으므로 조금 뒤에
+  // 구독하는 화면도 이 줄부터 따라온다. `local_` 로 시작하는 id 는 "기록이
+  // 따라잡으면 이 줄을 지워라"는 표시다 — 잠시 뒤 REST 기록이 같은 턴을
+  // 돌려주면 화면이 이 임시 줄을 알아서 걷어낸다.
+  if (!ws && command.trim()) {
+    run.writer.send(createNormalizedMessage({
+      id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      kind: 'text',
+      role: 'user',
+      content: command,
+      sessionId,
+      provider,
+      // 밖에서 들어온 글이라는 표시. 기록을 나중에 볼 때 붙는 배지와 같은 것을
+      // 지금 바로 보여준다.
+      ...(origin === 'telegram' ? { source: 'telegram' as const } : {}),
+    }));
+  }
+
   let failure: string | null = null;
   try {
     // Runs only now that the session is reserved, because an edit rewinds the
@@ -647,6 +670,12 @@ function handleChatSubscribe(
     const run = chatRunRegistry.getRun(sessionId);
     const isProcessing = chatRunRegistry.isProcessing(sessionId);
 
+    // `seq` 는 실행마다 1 부터 다시 센다. 그래서 클라이언트가 들고 온 값이 지금
+    // 실행의 마지막 `seq` 보다 클 수 있다 — 이전 턴에서 올려 둔 값이다. 그대로
+    // 믿으면 이번 턴의 이벤트가 전부 "이미 본 것"으로 걸러져, 화면은 표시등만
+    // 돌고 내용은 새로 고칠 때까지 오지 않는다.
+    const effectiveLastSeq = lastSeq > (run?.lastSeq ?? 0) ? 0 : lastSeq;
+
     // Future live events for this run should land on the socket that asked —
     // this is what makes mid-stream page refreshes work for all providers.
     if (isProcessing) {
@@ -671,7 +700,7 @@ function handleChatSubscribe(
     // replaying them (e.g. after a page reload where the client's lastSeq is
     // 0) would duplicate messages the history fetch already returned.
     if (isProcessing) {
-      for (const event of chatRunRegistry.replayEvents(sessionId, lastSeq)) {
+      for (const event of chatRunRegistry.replayEvents(sessionId, effectiveLastSeq)) {
         sendJson(ws, event);
       }
     }
