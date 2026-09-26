@@ -1,6 +1,8 @@
 import express, { type Request, type Response } from 'express';
 
 import { claudeRateLimitService } from '@/modules/providers/services/claude-rate-limit.service.js';
+import { codexRateLimitService } from '@/modules/providers/services/codex-rate-limit.service.js';
+import { claudeUsageService } from '@/modules/providers/services/claude-usage.service.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { mcpConnectionTestService } from '@/modules/providers/services/mcp-connection-test.service.js';
@@ -807,23 +809,38 @@ router.get(
 );
 
 /**
- * Subscription usage windows (session / weekly limits). Only Claude reports
- * these; other providers answer `supported: false` so the usage screen can say
- * so instead of showing an error.
+ * Subscription usage windows (session / weekly limits).
+ *
+ * 프로바이더마다 값이 오는 길이 다르다. Claude 는 실행 중에 흘러온 이벤트를
+ * 쌓아 둔 것을 읽고, Codex 는 그때그때 ChatGPT 백엔드에 물어본다. 한도라는 것이
+ * 없는 CLI 는 `supported: false` 로 답해, 화면이 오류 대신 사유를 말하게 한다.
  */
 router.get(
   '/:provider/rate-limits',
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
-    if (provider !== 'claude') {
-      res.json(createApiSuccessResponse({ supported: false, windows: [] }));
+
+    if (provider === 'claude') {
+      // 계정에 직접 물어본 값이 있으면 그것이 낫다 — 창이 전부 오고 사용률도 붙는다.
+      // 못 읽었을 때만 실행 중에 주워 담아 둔 이벤트로 물러선다.
+      const live = await claudeUsageService.getSnapshot();
+      const snapshot = live.windows.length > 0
+        ? { ...live, source: 'live' as const }
+        : { ...claudeRateLimitService.getSnapshot(), source: 'events' as const };
+
+      res.json(createApiSuccessResponse({ supported: true, ...snapshot }));
       return;
     }
 
-    res.json(createApiSuccessResponse({
-      supported: true,
-      ...claudeRateLimitService.getSnapshot(),
-    }));
+    if (provider === 'codex') {
+      res.json(createApiSuccessResponse({
+        ...await codexRateLimitService.getSnapshot(),
+        source: 'live' as const,
+      }));
+      return;
+    }
+
+    res.json(createApiSuccessResponse({ supported: false, windows: [] }));
   }),
 );
 
