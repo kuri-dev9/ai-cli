@@ -198,7 +198,12 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
   });
 
   const poll = async (): Promise<void> => {
-    let offset = 0;
+    // 디스크에 남겨 둔 지점부터 이어 받는다. 여기서 0 부터 다시 시작하면
+    // 텔레그램은 재시작 직전에 보낸 갱신을 "아직 확인 안 됨"으로 보고 또
+    // 보낸다 — 세션이 바쁜 동안이면 그 메시지가 재시작 횟수만큼 대기열에
+    // 중복으로 쌓인다.
+    const startupUserId = readBridgeUserId();
+    let offset = startupUserId !== null ? readBridgeState(startupUserId).lastUpdateOffset : 0;
     let failures = 0;
 
     while (!stopped) {
@@ -210,6 +215,13 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
           // 처리 여부와 무관하게 offset 은 전진시킨다. 화이트리스트 밖의
           // 메시지 하나가 큐 맨 앞에 남아 폴링을 영원히 막으면 안 된다.
           offset = update.updateId + 1;
+
+          // 다음 getUpdates 호출 전에 프로세스가 죽어도(재배포, 재시작) 이
+          // 갱신을 다시 받지 않도록 즉시 디스크에 남긴다.
+          const persistUserId = readBridgeUserId();
+          if (persistUserId !== null) {
+            writeBridgeState(persistUserId, { lastUpdateOffset: offset });
+          }
 
           const message = update.message;
           if (!message) {

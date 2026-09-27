@@ -21,6 +21,14 @@ export type TelegramBridgeState = {
   notifiedSessionIds: string[];
   /** 명령이 들어가는 세션. `/watch` 로 고른다. */
   watchedSessionId: string | null;
+  /**
+   * `getUpdates` 에 다음번에 넘길 offset. 이미 받은 갱신의 update_id + 1.
+   *
+   * 메모리에만 뒀던 예전 코드는 서버가 재시작할 때마다 0 으로 돌아가, 재시작
+   * 직전에 받은 갱신을 텔레그램이 또 보냈다. 세션이 바쁜 동안이면 그 메시지가
+   * 대기열에 재시작 횟수만큼 중복으로 쌓인다 — 여기 담아 재시작을 넘긴다.
+   */
+  lastUpdateOffset: number;
 };
 
 /**
@@ -34,6 +42,7 @@ export type TelegramBridgeState = {
 const DEFAULT_STATE: TelegramBridgeState = {
   notifiedSessionIds: [],
   watchedSessionId: null,
+  lastUpdateOffset: 0,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -73,6 +82,10 @@ export function readBridgeState(userId: number): TelegramBridgeState {
       typeof raw.watchedSessionId === 'string' && raw.watchedSessionId
         ? raw.watchedSessionId
         : null,
+    lastUpdateOffset:
+      typeof raw.lastUpdateOffset === 'number' && Number.isFinite(raw.lastUpdateOffset) && raw.lastUpdateOffset >= 0
+        ? raw.lastUpdateOffset
+        : 0,
   };
 }
 
