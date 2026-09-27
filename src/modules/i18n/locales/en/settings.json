@@ -928,7 +928,7 @@
   },
   "usage": {
     "title": "Usage",
-    "description": "Subscription limit windows reported by Claude.",
+    "description": "Subscription limit windows reported by the connected CLI.",
     "refresh": "Refresh",
     "percentUsed": "{{percent}}% used",
     "percentUnknown": "not reported",
@@ -938,7 +938,8 @@
     "disclaimer": "Claude reports a limit window only when it changes, so these numbers update after a turn rather than on demand.",
     "empty": {
       "title": "No usage data yet",
-      "description": "A window appears once Claude reports it. Send a message and come back."
+      "description": "A window appears once Claude reports it. Send a message and come back.",
+      "descriptionLive": "Check that you are signed in, then refresh. The limits could not be read."
     },
     "windows": {
       "fiveHour": "Current session",
@@ -947,6 +948,17 @@
       "sevenDaySonnet": "Current week (Sonnet)",
       "sevenDayFable": "Current week (Fable)",
       "overage": "Overage"
+    },
+    "plan": "{{plan}} plan",
+    "disclaimerLive": "Read fresh on every request, so refresh updates this to the current value.",
+    "context": {
+      "title": "Current conversation context",
+      "description": "How full this conversation is — not your plan usage.",
+      "remaining": "{{tokens}} tokens left"
+    },
+    "unsupported": {
+      "title": "{{provider}} does not report usage limits",
+      "description": "This CLI has no subscription limit to query, or runs on an API key you supplied."
     }
   }
 }

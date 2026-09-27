@@ -928,7 +928,7 @@
   },
   "usage": {
     "title": "사용량",
-    "description": "Claude가 보고한 구독 한도 구간입니다.",
+    "description": "연결된 CLI 가 보고한 구독 한도 구간입니다.",
     "refresh": "새로고침",
     "percentUsed": "{{percent}}% 사용",
     "percentUnknown": "보고되지 않음",
@@ -938,7 +938,8 @@
     "disclaimer": "Claude는 한도가 바뀔 때만 구간을 보고하므로, 이 값은 요청 시점이 아니라 대화를 한 번 돌린 뒤에 갱신됩니다.",
     "empty": {
       "title": "아직 사용량 데이터가 없습니다",
-      "description": "Claude가 한 번 보고하면 구간이 나타납니다. 메시지를 보낸 뒤 다시 확인해 주세요."
+      "description": "Claude가 한 번 보고하면 구간이 나타납니다. 메시지를 보낸 뒤 다시 확인해 주세요.",
+      "descriptionLive": "로그인 상태를 확인한 뒤 새로고침해 주세요. 한도를 읽어오지 못했습니다."
     },
     "windows": {
       "fiveHour": "현재 세션",
@@ -947,6 +948,17 @@
       "sevenDaySonnet": "이번 주 (Sonnet)",
       "sevenDayFable": "이번 주 (Fable)",
       "overage": "초과 사용"
+    },
+    "plan": "{{plan}} 요금제",
+    "disclaimerLive": "요청할 때마다 새로 읽어 오므로, 새로고침을 누르면 지금 값으로 갱신됩니다.",
+    "context": {
+      "title": "현재 대화 컨텍스트",
+      "description": "이 대화가 컨텍스트 윈도우를 얼마나 채웠는지입니다. 요금제 사용량과는 다른 값입니다.",
+      "remaining": "{{tokens}} 토큰 남음"
+    },
+    "unsupported": {
+      "title": "{{provider}} 는 사용량 한도를 보고하지 않습니다",
+      "description": "이 CLI 에는 조회할 수 있는 구독 한도가 없거나, 사용자가 직접 넣은 API 키로 동작합니다."
     }
   }
 }

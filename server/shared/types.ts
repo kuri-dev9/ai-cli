@@ -1356,3 +1356,33 @@ export type CliApplication = {
 export type SandboxCommandService = {
   execute(argumentsList: string[]): Promise<number>;
 };
+
+/**
+ * 구독 한도 구간 하나.
+ *
+ * `type` 은 `five_hour`, `seven_day` 같은 창 이름이고, 일부러 좁히지 않은 문자열이다.
+ * 프로바이더가 새 창을 추가했을 때 여기서 떨구는 대신 화면까지 올려보낸다.
+ */
+export type ProviderRateLimitWindow = {
+  type: string;
+  status: 'allowed' | 'allowed_warning' | 'rejected' | null;
+  /** 0..1. 프로바이더가 알려주지 않았으면 null. */
+  utilization: number | null;
+  /** 창이 초기화되는 시각(ISO). 알려주지 않았으면 null. */
+  resetsAt: string | null;
+  /** 이 값을 읽은 시각(ISO). 화면이 얼마나 묵은 값인지 말할 수 있게. */
+  observedAt: string;
+};
+
+/** 한 프로바이더의 한도 현황. `supported: false` 는 한도를 보고하지 않는 CLI. */
+export type ProviderRateLimitSnapshot = {
+  supported: boolean;
+  windows: ProviderRateLimitWindow[];
+  /** 알 수 있는 프로바이더만. 예: Codex 의 `plus`. */
+  planType?: string;
+  /**
+   * 값이 어디서 왔는지. `live` 는 계정에 직접 물어본 것이고 `events` 는 실행 중에
+   * 흘러온 이벤트를 쌓아 둔 것이다. 화면이 갱신 시점을 다르게 설명해야 해서 붙인다.
+   */
+  source?: 'live' | 'events';
+};
