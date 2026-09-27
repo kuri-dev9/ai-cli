@@ -130,3 +130,53 @@ test('preserves both UI objects produced by an unchanged task notification', () 
   assert.equal(updated[0]?.isTaskNotification, true);
   assert.equal(updated[1]?.content, 'Detailed result');
 });
+
+test('an async agent launch shows running until its task-notification arrives', () => {
+  const launch = message('agent-launch', {
+    kind: 'tool_use',
+    toolId: 'tool-async-1',
+    toolName: 'Task',
+    toolInput: { subagent_type: 'Explore', prompt: 'find the bug' },
+  });
+  // `toolUseResult` is a real field the backend attaches to a tool_result row
+  // (see claude-sessions.provider.ts), left off `NormalizedMessage` on purpose
+  // so most call sites cannot read it untyped; widen locally to construct one.
+  const ackOverrides: Partial<NormalizedMessage> & { toolUseResult?: unknown } = {
+    kind: 'tool_result',
+    toolId: 'tool-async-1',
+    content: 'Async agent launched successfully.',
+    toolUseResult: { isAsync: true },
+  };
+  const ack = message('agent-ack', ackOverrides);
+
+  const whileRunning = normalizedToChatMessages([launch, ack]);
+  assert.equal(whileRunning.length, 1);
+  assert.equal(whileRunning[0]?.subagent?.status, 'running');
+  // The launch ack is internal bookkeeping, not the agent's answer.
+  assert.equal(whileRunning[0]?.toolResult?.content, '');
+
+  const notification = message('agent-notification', {
+    role: 'user',
+    content: [
+      '<task-notification>',
+      '<tool-use-id>tool-async-1</tool-use-id>',
+      '<status>completed</status>',
+      '<summary>Found it</summary>',
+      '<result>The bug is in foo.ts</result>',
+      '</task-notification>',
+    ].join('\n'),
+  });
+
+  const afterCompletion = normalizedToChatMessages([launch, ack, notification]);
+  const launchMessage = afterCompletion.find((msg) => msg.toolId === 'tool-async-1');
+  assert.equal(launchMessage?.subagent?.status, 'completed');
+  assert.notStrictEqual(launchMessage, whileRunning[0]);
+
+  // A later, unrelated update must not invalidate the now-resolved projection.
+  const unrelated = message('unrelated', { content: 'A later message' });
+  const afterUnrelatedUpdate = normalizedToChatMessages([launch, ack, notification, unrelated]);
+  assert.strictEqual(
+    afterUnrelatedUpdate.find((msg) => msg.toolId === 'tool-async-1'),
+    launchMessage,
+  );
+});

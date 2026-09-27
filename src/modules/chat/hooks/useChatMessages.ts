@@ -3,7 +3,7 @@
  * Converts NormalizedMessage[] from the session store into ChatMessage[] for the UI.
  */
 
-import type { ChatMessage,NormalizedMessage,SubagentActivity } from '@/shared/types';
+import type { ChatMessage,NormalizedMessage,SubagentActivity,SubagentInfo } from '@/shared/types';
 import { formatUsageLimitText } from '@/modules/chat/utils/chatFormatting';
 import { foldQuestionAnswers } from '@/modules/chat/utils/questionAnswers';
 
@@ -17,6 +17,8 @@ type ParsedTaskNotification = {
   status: string;
   summary: string;
   result: string;
+  /** Tool call the notification reports on, so it can be matched back to the launch that spawned it. */
+  toolUseId: string;
 };
 
 type ToolResultSource = NormalizedMessage['toolResult'] | NormalizedMessage | null;
@@ -26,6 +28,8 @@ type CachedMessageProjection = {
   toolResultSource: ToolResultSource;
   /** A live subagent container also depends on the newest row folded into its timeline. */
   subagentActivitySource: NormalizedMessage | null;
+  /** An async launch's status flips from "running" once its `<task-notification>` row arrives. */
+  taskNotificationSource: NormalizedMessage | null;
   messages: ChatMessage[];
 };
 
@@ -52,6 +56,7 @@ function parseTaskNotification(content: string): ParsedTaskNotification | null {
 
   const statusMatch = /<status>([\s\S]*?)<\/status>/.exec(content);
   const summaryMatch = /<summary>([\s\S]*?)<\/summary>/.exec(content);
+  const toolUseIdMatch = /<tool-use-id>([\s\S]*?)<\/tool-use-id>/.exec(content);
 
   let result = '';
   const resultOpen = content.indexOf('<result>');
@@ -68,6 +73,7 @@ function parseTaskNotification(content: string): ParsedTaskNotification | null {
     status: statusMatch?.[1]?.trim() || 'completed',
     summary: summaryMatch?.[1]?.trim() || 'Background task finished',
     result,
+    toolUseId: toolUseIdMatch?.[1]?.trim() || '',
   };
 }
 
@@ -93,6 +99,12 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
   const liveSubagentToolsById = new Map<string, SubagentActivity>();
   /** Newest folded row per container, so its cached projection knows to rebuild. */
   const lastSubagentSourceByParent = new Map<string, NormalizedMessage>();
+  /**
+   * An async agent's `<task-notification>` arrives as its own top-level row,
+   * addressed at the tool call that launched it rather than nested under it.
+   * Indexing by that id is what lets the launch's card learn it is done.
+   */
+  const taskNotificationsByToolId = new Map<string, { parsed: ParsedTaskNotification; source: NormalizedMessage }>();
   for (const msg of messages) {
     if (msg.parentToolUseId) {
       const parentId = msg.parentToolUseId;
@@ -157,6 +169,13 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
     if (msg.kind === 'tool_result' && msg.toolId) {
       toolResultMap.set(msg.toolId, msg);
     }
+
+    if (msg.kind === 'text' && msg.role === 'user' && msg.content) {
+      const notification = parseTaskNotification(msg.content);
+      if (notification?.toolUseId) {
+        taskNotificationsByToolId.set(notification.toolUseId, { parsed: notification, source: msg });
+      }
+    }
   }
 
   for (const msg of messages) {
@@ -171,14 +190,20 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
     const subagentActivitySource = msg.kind === 'tool_use' && msg.toolId
       ? lastSubagentSourceByParent.get(msg.toolId) ?? null
       : null;
+    const taskNotificationEntry = msg.kind === 'tool_use' && msg.toolId
+      ? taskNotificationsByToolId.get(msg.toolId)
+      : undefined;
+    const taskNotificationSource = taskNotificationEntry?.source ?? null;
     const cachedProjection = projectionCache.get(msg);
 
     // A tool-use projection must be rebuilt when a matching result arrives,
     // even though the original tool-use record itself is unchanged. The same
-    // holds for a subagent container when its live timeline grows.
+    // holds for a subagent container when its live timeline grows, or when the
+    // `<task-notification>` reporting an async launch's real outcome lands.
     if (
       cachedProjection?.toolResultSource === toolResultSource
       && cachedProjection.subagentActivitySource === subagentActivitySource
+      && cachedProjection.taskNotificationSource === taskNotificationSource
     ) {
       converted.push(...cachedProjection.messages);
       continue;
@@ -265,13 +290,35 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           || msg.toolName === 'Task'
           || msg.toolName === 'Agent';
 
+        // An async launch's `tool_result` is only the SDK's "accepted" ack —
+        // the agent is still working — so it must not read as done just
+        // because a result object exists. The panel stays "running" until the
+        // matching `<task-notification>` reports the real outcome. A history
+        // reload already carries the backend-computed `msg.subagent` and takes
+        // priority; this only fills the gap while a run is live.
+        const isAsyncLaunchAck = Boolean((tr as any)?.toolUseResult?.isAsync);
+        const stillAwaitingNotification = isAsyncLaunchAck && !taskNotificationEntry;
+
         const toolResult = tr
           ? {
-              content: formatToolResultContent(tr.content),
+              // The ack text ("Async agent launched successfully…") is internal
+              // bookkeeping, not an answer — showing it as the agent's "Result"
+              // until the real notification lands would read like the agent's
+              // own output for the task.
+              content: stillAwaitingNotification ? '' : formatToolResultContent(tr.content),
               isError: Boolean(tr.isError),
               toolUseResult: (tr as any).toolUseResult,
             }
           : null;
+
+        const liveAsyncSubagent: SubagentInfo | undefined = !msg.subagent && isAsyncLaunchAck
+          ? {
+              id: msg.toolId ?? '',
+              status: stillAwaitingNotification
+                ? 'running'
+                : taskNotificationEntry!.parsed.status === 'completed' ? 'completed' : 'failed',
+            }
+          : undefined;
 
         // A live turn never passes through the backend's transcript fold, so the
         // answers the user just picked have to be merged in here or the question
@@ -301,7 +348,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           toolResult,
           toolStatus: typeof msg.status === 'string' ? msg.status : undefined,
           isSubagentContainer,
-          subagent: msg.subagent,
+          subagent: msg.subagent ?? liveAsyncSubagent,
           subagentActivity,
           memoryCitations: msg.memoryCitations,
           ...sharedMetadata,
@@ -402,6 +449,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
     projectionCache.set(msg, {
       toolResultSource,
       subagentActivitySource,
+      taskNotificationSource,
       // One source record can produce zero, one, or two UI messages (task
       // notifications with a result produce two), so cache the whole slice.
       messages: converted.slice(convertedStart),
