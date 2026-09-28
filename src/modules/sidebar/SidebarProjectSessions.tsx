@@ -1,10 +1,10 @@
-import { Plus } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button } from '@/shared/ui';
 import type { LLMProvider, Project, ProjectSession, SessionWithProvider } from '@/shared/types';
 import SidebarSessionItem from '@/modules/sidebar/SidebarSessionItem';
-import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
 
 type SidebarProjectSessionsProps = {
   project: Project;
@@ -29,9 +29,30 @@ type SidebarProjectSessionsProps = {
   onDeleteSession: (sessionId: string, sessionTitle: string) => void;
   onForkSession?: (session: SessionWithProvider) => void;
   onLoadMoreSessions: (projectId: string) => void;
-  onNewSession: (project: Project) => void;
   t: TFunction;
 };
+
+/** 접혀 있을 때 위에서부터 늘 보여 주는 최근 세션 개수. */
+const RECENT_SESSION_LIMIT = 5;
+
+/**
+ * 접힌 상태에서 그릴 세션만 고른다.
+ *
+ * 최근 N개에 더해, 열려 있거나 돌고 있거나 확인을 기다리는 세션은 오래됐어도
+ * 개수 제한 없이 남긴다. 그렇지 않으면 프로젝트에 알림 점이 떠 있는데 목록을
+ * 펼쳐도 해당 세션이 안 보이는 상황이 생긴다. 순서는 원래 목록(최근순)을 따른다.
+ */
+const selectCollapsedSessions = (
+  sessions: SessionWithProvider[],
+  selectedSessionId: string | undefined,
+  activeSessions: ReadonlySet<string>,
+  attentionSessionIds: ReadonlySet<string>,
+): SessionWithProvider[] => sessions.filter((session, index) => (
+  index < RECENT_SESSION_LIMIT
+  || session.id === selectedSessionId
+  || activeSessions.has(session.id)
+  || attentionSessionIds.has(session.id)
+));
 
 function SessionListSkeleton() {
   return (
@@ -74,16 +95,28 @@ export default function SidebarProjectSessions({
   onDeleteSession,
   onForkSession,
   onLoadMoreSessions,
-  onNewSession,
   t,
 }: SidebarProjectSessionsProps) {
-  const isCompact = useCompactSidebar();
+  // 오래된 세션까지 펼쳐 보고 있는지. 프로젝트를 접었다 펼쳐도 유지되도록
+  // 프로젝트 행마다 따로 들고 있다.
+  const [showOlderSessions, setShowOlderSessions] = useState(false);
 
   if (!isExpanded) {
     return null;
   }
 
   const hasSessions = sessions.length > 0;
+  const visibleSessions = showOlderSessions
+    ? sessions
+    : selectCollapsedSessions(sessions, selectedSession?.id, activeSessions, attentionSessionIds);
+  const hiddenSessionCount = sessions.length - visibleSessions.length;
+  const canCollapse = showOlderSessions && sessions.length > RECENT_SESSION_LIMIT;
+
+  // 서버에서 더 받아 온 세션이 접힌 쪽으로 사라지면 눌러도 아무 일 없어 보이므로 함께 펼친다.
+  const loadMoreSessions = () => {
+    setShowOlderSessions(true);
+    onLoadMoreSessions(project.projectId);
+  };
 
   return (
     <div className="ml-3 space-y-1 border-l border-border pl-3">
@@ -95,7 +128,7 @@ export default function SidebarProjectSessions({
         </div>
       ) : (
         <>
-          {sessions.map((session) => (
+          {visibleSessions.map((session) => (
             <SidebarSessionItem
               key={session.id}
               project={project}
@@ -118,49 +151,56 @@ export default function SidebarProjectSessions({
             />
           ))}
 
-          {hasMoreSessions && (
+          {/*
+            더보기는 한 줄만 둔다. 접어 둔 세션이 있으면 먼저 그것을 펼치고, 받아 둔
+            세션을 다 보여 준 뒤에야 서버에서 더 받아 온다.
+          */}
+          {hiddenSessionCount > 0 ? (
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 w-full justify-center text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => onLoadMoreSessions(project.projectId)}
+              className="h-8 w-full justify-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setShowOlderSessions(true)}
+            >
+              <ChevronDown className="h-3 w-3" />
+              {t('sessions.showOlder', {
+                count: hiddenSessionCount,
+                defaultValue: 'Show {{count}} older sessions',
+              })}
+            </Button>
+          ) : hasMoreSessions ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-full justify-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={loadMoreSessions}
               disabled={isLoadingMoreSessions}
             >
-              {isLoadingMoreSessions ? t('sessions.loadingSessions') : 'Load more sessions'}
+              <ChevronDown className="h-3 w-3" />
+              {isLoadingMoreSessions
+                ? t('sessions.loadingSessions')
+                : t('sessions.showMore')}
+            </Button>
+          ) : null}
+
+          {canCollapse && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-full justify-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setShowOlderSessions(false)}
+            >
+              <ChevronUp className="h-3 w-3" />
+              {t('sessions.showRecentOnly', { defaultValue: 'Show recent only' })}
             </Button>
           )}
         </>
       )}
 
       {/*
-        목록 아래에 둔다. 맨 위에 있을 때는 프로젝트를 펼칠 때마다 가장 먼저
-        눈에 들어오는 것이 새 대화를 시작하는 버튼이었는데, 프로젝트를 펼치는
-        이유는 대개 하던 대화를 찾기 위해서다. 찾는 것을 가리고 서 있었다.
+        새 세션 버튼은 여기 두지 않는다. 세션이 쌓이면 목록 맨 아래까지 내려야
+        누를 수 있었기 때문에, 프로젝트 행의 `+` 아이콘으로 옮겼다.
       */}
-      {isCompact ? (
-        <div className="px-3 pb-1 pt-1">
-          <button
-            className="flex h-8 w-full items-center justify-center gap-2 rounded-md bg-primary text-xs font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 active:scale-[0.98]"
-            onClick={() => {
-              onProjectSelect(project);
-              onNewSession(project);
-            }}
-          >
-            <Plus className="h-3 w-3" />
-            {t('sessions.newSession')}
-          </button>
-        </div>
-      ) : (
-        <Button
-          variant="default"
-          size="sm"
-          className="flex h-8 w-full justify-start gap-2 bg-primary text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          onClick={() => onNewSession(project)}
-        >
-          <Plus className="h-3 w-3" />
-          {t('sessions.newSession')}
-        </Button>
-      )}
     </div>
   );
 }

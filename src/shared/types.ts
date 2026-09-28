@@ -1424,7 +1424,6 @@ export type SidebarProjectListProps = SessionRowActions & {
   onSaveProjectName: (projectId: string, nextName: string) => void;
   /** 이름과 홈 경로를 한 화면에서 고치는 프로젝트 설정 모달을 연다. */
   onOpenProjectSettings: (project: Project) => void;
-  onDeleteProject: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onNewSession: (project: Project) => void;
   t: TFunction;

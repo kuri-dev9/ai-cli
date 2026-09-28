@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { AlertTriangle, Loader2, Settings2, X } from 'lucide-react';
+import { AlertTriangle, Loader2, Settings2, Trash2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '@/shared/api';
@@ -14,6 +14,11 @@ type ProjectSettingsModalProps = {
   onClose: () => void;
   /** 저장이 끝난 뒤 사이드바 목록을 다시 읽게 한다. */
   onSaved: () => Promise<void> | void;
+  /**
+   * 프로젝트 제거 확인창을 연다. 사이드바 행에 있던 휴지통 버튼을 이 화면으로
+   * 옮겼다 — 자주 누를 일이 없는 데다 새 세션 버튼 옆에서 잘못 눌리기 쉬웠다.
+   */
+  onRequestDelete: () => void;
 };
 
 /**
@@ -26,6 +31,7 @@ export default function ProjectSettingsModal({
   project,
   onClose,
   onSaved,
+  onRequestDelete,
 }: ProjectSettingsModalProps) {
   const { t } = useTranslation(['common', 'sidebar']);
   const originalPath = project.fullPath || project.path || '';
@@ -181,6 +187,15 @@ export default function ProjectSettingsModal({
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-6 dark:border-gray-700">
+          <Button
+            variant="ghost"
+            className="mr-auto text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
+            onClick={onRequestDelete}
+            disabled={isSaving}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            {t('sidebar:projects.deleteProject')}
+          </Button>
           <Button variant="outline" onClick={onClose} disabled={isSaving}>
             {t('projectWizard.projectSettings.cancel')}
           </Button>

@@ -90,7 +90,6 @@ const listProps = (activeRename: ActiveSidebarRename | null): SidebarProjectList
   onCancelEditingProject: noop,
   onSaveProjectName: noop,
   onOpenProjectSettings: noop,
-  onDeleteProject: noop,
   onSessionSelect: noop,
   onDeleteSession: noop,
   onNewSession: noop,
@@ -189,7 +188,6 @@ const sessionsProps = (sessionRenameId: string | null, sessionRenameDraft: strin
   onSessionSelect: noop,
   onDeleteSession: noop,
   onLoadMoreSessions: noop,
-  onNewSession: noop,
   t,
 });
 

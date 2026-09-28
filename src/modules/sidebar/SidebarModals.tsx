@@ -23,6 +23,8 @@ type SidebarModalsProps = {
   projectSettingsTarget: Project | null;
   onCloseProjectSettings: () => void;
   onProjectSettingsSaved: () => Promise<void> | void;
+  /** 설정 모달의 제거 버튼이 부른다. 설정 모달을 닫고 제거 확인창을 띄운다. */
+  onRequestProjectDelete: (project: Project) => void;
   pendingDeletion: PendingSidebarDeletion | null;
   onCancelDeletion: () => void;
   onConfirmDeleteProject: (deleteData?: boolean) => void;
@@ -61,6 +63,7 @@ export default function SidebarModals({
   projectSettingsTarget,
   onCloseProjectSettings,
   onProjectSettingsSaved,
+  onRequestProjectDelete,
   pendingDeletion,
   onCancelDeletion,
   onConfirmDeleteProject,
@@ -96,6 +99,10 @@ export default function SidebarModals({
             project={projectSettingsTarget}
             onClose={onCloseProjectSettings}
             onSaved={onProjectSettingsSaved}
+            onRequestDelete={() => {
+              onCloseProjectSettings();
+              onRequestProjectDelete(projectSettingsTarget);
+            }}
           />,
           document.body,
         )}

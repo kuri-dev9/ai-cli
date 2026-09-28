@@ -54,7 +54,6 @@ const renderRow = (lastActivity: string) => render(
     onCancelEditingProject: noop,
     onSaveProjectName: noop,
     onOpenProjectSettings: noop,
-    onDeleteProject: noop,
     onSessionSelect: noop,
     onDeleteSession: noop,
     onLoadMoreSessions: noop,

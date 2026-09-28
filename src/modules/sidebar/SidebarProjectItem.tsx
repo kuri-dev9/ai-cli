@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import type { DragEvent } from 'react';
-import { Check, ChevronDown, ChevronRight, Settings2, Star, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, Settings2, Star, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button } from '@/shared/ui';
@@ -47,7 +47,6 @@ type SidebarProjectItemProps = {
   onOpenProjectSettings: (project: Project) => void;
   /** 그룹 사이로 끌어 옮길 때 목록 쪽에서 드래그 데이터를 채운다. */
   onDragStartProject?: (event: DragEvent<HTMLElement>, projectId: string) => void;
-  onDeleteProject: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
   onDeleteSession: (sessionId: string, sessionTitle: string) => void;
   onForkSession?: (session: SessionWithProvider) => void;
@@ -77,7 +76,7 @@ const getSessionCountDisplay = (
   hasHiddenProviders ? sessions.length : Number(project.sessionMeta?.total ?? sessions.length)
 );
 
-/** Rendered by SidebarProjectList for one project row, including its expand, rename, star and delete controls. */
+/** Rendered by SidebarProjectList for one project row, including its expand, rename, star, settings and new-session controls. */
 function SidebarProjectItem({
   project,
   selectedProject,
@@ -105,7 +104,6 @@ function SidebarProjectItem({
   onSaveProjectName,
   onOpenProjectSettings,
   onDragStartProject,
-  onDeleteProject,
   onSessionSelect,
   onDeleteSession,
   onForkSession,
@@ -172,6 +170,17 @@ function SidebarProjectItem({
 
   const saveProjectName = () => {
     onSaveProjectName(project.projectId, renameDraft);
+  };
+
+  // 프로젝트 삭제는 설정 모달 안으로 옮겼고, 그 자리를 이 버튼이 차지한다.
+  // 세션이 많아도 목록을 내리지 않고 바로 새 대화를 열 수 있게 하려는 것이다.
+  const newSessionLabel = t('tooltips.newChatInProject', {
+    projectName: project.displayName,
+    defaultValue: 'Start a new chat in {{projectName}}',
+  });
+  const startNewSession = () => {
+    onProjectSelect(project);
+    onNewSession(project);
   };
 
   const selectAndToggleProject = () => {
@@ -329,16 +338,6 @@ function SidebarProjectItem({
                 ) : (
                   <>
                     <button
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-500/10 active:scale-90 dark:border-red-800 dark:bg-red-900/30"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDeleteProject(project);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
-                    </button>
-
-                    <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 active:scale-90 dark:border-primary/30 dark:bg-primary/20"
                       onClick={(event) => {
                         event.stopPropagation();
@@ -346,6 +345,18 @@ function SidebarProjectItem({
                       }}
                     >
                       <Settings2 className="h-4 w-4 text-primary" />
+                    </button>
+
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 active:scale-90 dark:border-primary/30 dark:bg-primary/20"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        startNewSession();
+                      }}
+                      aria-label={newSessionLabel}
+                      title={newSessionLabel}
+                    >
+                      <Plus className="h-4 w-4 text-primary" />
                     </button>
 
                     <div className="flex h-6 w-6 items-center justify-center rounded-md bg-muted/30">
@@ -522,14 +533,16 @@ function SidebarProjectItem({
                   <Settings2 className="h-3 w-3" />
                 </div>
                 <div
-                  className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-red-50 group-hover:opacity-100 dark:hover:bg-red-900/20"
+                  role="button"
+                  aria-label={newSessionLabel}
+                  className="touch:opacity-100 flex h-6 w-6 cursor-pointer items-center justify-center rounded opacity-0 transition-all duration-200 hover:bg-accent group-hover:opacity-100"
                   onClick={(event) => {
                     event.stopPropagation();
-                    onDeleteProject(project);
+                    startNewSession();
                   }}
-                  title={t('tooltips.deleteProject')}
+                  title={newSessionLabel}
                 >
-                  <Trash2 className="h-3 w-3 text-red-600 dark:text-red-400" />
+                  <Plus className="h-3 w-3" />
                 </div>
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
@@ -565,7 +578,6 @@ function SidebarProjectItem({
         onDeleteSession={onDeleteSession}
         onForkSession={onForkSession}
         onLoadMoreSessions={onLoadMoreSessions}
-        onNewSession={onNewSession}
         t={t}
       />
     </div>

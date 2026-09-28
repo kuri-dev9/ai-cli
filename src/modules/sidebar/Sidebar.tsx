@@ -226,7 +226,6 @@ function Sidebar({
     onCancelEditingProject: cancelRename,
     onSaveProjectName: handleSaveProjectName,
     onOpenProjectSettings: setProjectSettingsTarget,
-    onDeleteProject: requestProjectDelete,
     onSessionSelect: handleSessionClick,
     onDeleteSession: showDeleteSessionConfirmation,
     onForkSession: forkSession,
@@ -245,6 +244,7 @@ function Sidebar({
         projectSettingsTarget={projectSettingsTarget}
         onCloseProjectSettings={() => setProjectSettingsTarget(null)}
         onProjectSettingsSaved={refreshProjects}
+        onRequestProjectDelete={requestProjectDelete}
         showSettings={showSettings}
         settingsInitialTab={settingsInitialTab}
         onCloseSettings={onCloseSettings}
