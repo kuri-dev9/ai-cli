@@ -141,11 +141,13 @@ test('an async agent launch shows running until its task-notification arrives', 
   // `toolUseResult` is a real field the backend attaches to a tool_result row
   // (see claude-sessions.provider.ts), left off `NormalizedMessage` on purpose
   // so most call sites cannot read it untyped; widen locally to construct one.
+  // Shape matches the SDK's generated `AgentOutput` type (sdk-tools.d.ts):
+  // an async launch is tagged `status: 'async_launched'`, not `isAsync`.
   const ackOverrides: Partial<NormalizedMessage> & { toolUseResult?: unknown } = {
     kind: 'tool_result',
     toolId: 'tool-async-1',
     content: 'Async agent launched successfully.',
-    toolUseResult: { isAsync: true },
+    toolUseResult: { status: 'async_launched', agentId: 'agent-1' },
   };
   const ack = message('agent-ack', ackOverrides);
 

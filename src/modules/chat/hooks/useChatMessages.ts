@@ -296,7 +296,11 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         // matching `<task-notification>` reports the real outcome. A history
         // reload already carries the backend-computed `msg.subagent` and takes
         // priority; this only fills the gap while a run is live.
-        const isAsyncLaunchAck = Boolean((tr as any)?.toolUseResult?.isAsync);
+        //
+        // The CLI's own generated tool-output schema names this
+        // `status: 'async_launched'` (see the SDK's sdk-tools.d.ts
+        // `AgentOutput` type) — there is no `isAsync` boolean on this object.
+        const isAsyncLaunchAck = (tr as any)?.toolUseResult?.status === 'async_launched';
         const stillAwaitingNotification = isAsyncLaunchAck && !taskNotificationEntry;
 
         const toolResult = tr

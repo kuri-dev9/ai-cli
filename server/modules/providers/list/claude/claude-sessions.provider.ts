@@ -490,7 +490,13 @@ async function getSessionMessages(
       // later notification does. When that notification is missing (a live run,
       // or one compacted out of the transcript), the agent's own transcript is
       // the evidence: a timeline that does not stop mid-tool-call is done.
-      const isAwaitingAsyncAgent = message.toolUseResult?.isAsync === true
+      //
+      // `status: 'async_launched'` (not `isAsync`) is what the CLI's own
+      // generated tool-output schema (`AgentOutput` in the SDK's
+      // sdk-tools.d.ts) actually names this — an `isAsync` flag never existed
+      // on this object, so every async launch used to fall straight through
+      // to "completed" the instant its ack arrived.
+      const isAwaitingAsyncAgent = message.toolUseResult?.status === 'async_launched'
         && !notification
         && (!subagent || subagent.endedMidToolCall);
 
@@ -515,7 +521,7 @@ async function getSessionMessages(
       if (notification) {
         replaceAgentToolResultContent(message, notification.result || notification.summary);
         foldedNotificationUuids.add(notification.sourceUuid);
-      } else if (message.toolUseResult?.isAsync === true) {
+      } else if (message.toolUseResult?.status === 'async_launched') {
         // Without a notification there is no answer to show, and the launch
         // acknowledgement is internal bookkeeping the user must never read.
         replaceAgentToolResultContent(message, '');

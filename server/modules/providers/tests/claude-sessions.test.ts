@@ -72,7 +72,9 @@ async function writeClaudeSubagentSession(projectDirectory: string): Promise<str
         }],
       },
       toolUseResult: {
-        isAsync: true,
+        // The CLI's generated tool-output schema (`AgentOutput` in the SDK's
+        // sdk-tools.d.ts) names this `status: 'async_launched'` — there is no
+        // `isAsync` boolean on the real object.
         status: 'async_launched',
         agentId: AGENT_ID,
         description: 'Survey the repo',
@@ -218,6 +220,111 @@ async function dropTaskNotification(parentPath: string): Promise<void> {
     'utf8',
   );
 }
+
+/**
+ * Writes an async launch with no `<task-notification>` at all, whose agent
+ * transcript ends on an unresolved tool call — the live-run shape, as opposed
+ * to `dropTaskNotification`'s "notification missing but the agent's own
+ * transcript already resolved" shape.
+ */
+async function writeStillRunningAgentSession(projectDirectory: string): Promise<string> {
+  const parentPath = path.join(projectDirectory, `${SESSION_ID}.jsonl`);
+  const subagentDirectory = path.join(projectDirectory, SESSION_ID, 'subagents');
+  await mkdir(subagentDirectory, { recursive: true });
+
+  const parentLines = [
+    {
+      type: 'assistant',
+      uuid: 'assistant-1',
+      sessionId: SESSION_ID,
+      timestamp: '2026-08-21T10:00:00.000Z',
+      message: {
+        role: 'assistant',
+        content: [{
+          type: 'tool_use',
+          id: AGENT_TOOL_USE_ID,
+          name: 'Agent',
+          input: { subagent_type: 'Explore', description: 'Survey the repo', prompt: 'Look around' },
+        }],
+      },
+    },
+    {
+      type: 'user',
+      uuid: 'launch-ack-1',
+      sessionId: SESSION_ID,
+      timestamp: '2026-08-21T10:00:01.000Z',
+      message: {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: AGENT_TOOL_USE_ID,
+          content: 'Async agent launched successfully.',
+        }],
+      },
+      toolUseResult: {
+        status: 'async_launched',
+        agentId: AGENT_ID,
+        description: 'Survey the repo',
+      },
+    },
+  ];
+  await writeFile(parentPath, `${parentLines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf8');
+
+  const agentLines = [
+    {
+      type: 'assistant',
+      isSidechain: true,
+      agentId: AGENT_ID,
+      timestamp: '2026-08-21T10:00:30.000Z',
+      message: {
+        role: 'assistant',
+        model: 'claude-opus-5',
+        content: [
+          { type: 'text', text: 'Starting the survey.' },
+          { type: 'tool_use', id: 'toolu_child_1', name: 'Read', input: { file_path: '/repo/package.json' } },
+        ],
+      },
+    },
+    // No matching tool_result row: the agent is still working the call.
+  ];
+  await writeFile(
+    path.join(subagentDirectory, `agent-${AGENT_ID}.jsonl`),
+    `${agentLines.map((line) => JSON.stringify(line)).join('\n')}\n`,
+    'utf8',
+  );
+  await writeFile(
+    path.join(subagentDirectory, `agent-${AGENT_ID}.meta.json`),
+    JSON.stringify({ agentType: 'Explore', description: 'Survey the repo', toolUseId: AGENT_TOOL_USE_ID, spawnDepth: 1 }),
+    'utf8',
+  );
+
+  return parentPath;
+}
+
+test('Claude history reports an async agent as still running before any notification or resolved tool call arrives', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-running-agent-'));
+
+  try {
+    const parentPath = await writeStillRunningAgentSession(tempRoot);
+
+    await withIsolatedDatabase(async () => {
+      const now = new Date().toISOString();
+      sessionsDb.createSession(SESSION_ID, 'claude', tempRoot, 'Subagent session', now, now, parentPath);
+
+      const history = await new ClaudeSessionsProvider().fetchHistory(SESSION_ID, {
+        providerSessionId: SESSION_ID,
+      });
+      const agentRow = history.messages.find(
+        (message) => message.kind === 'tool_use' && message.toolId === AGENT_TOOL_USE_ID,
+      );
+
+      assert.equal(agentRow?.subagent?.status, 'running');
+      assert.equal(agentRow?.toolResult?.content, '', 'the launch acknowledgement must never show as a result');
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
 
 test('Claude history reads a missing notification off the agent\'s own transcript', { concurrency: false }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-finished-agent-'));
