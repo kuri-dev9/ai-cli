@@ -41,7 +41,7 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
     {
       value: 'best',
       label: 'Best available',
-      description: 'Use Fable 5 when available, otherwise the latest Opus model.',
+      description: 'Use the latest Fable model when available, otherwise the latest Opus model.',
       effort: {
         default: 'high',
         values: [
@@ -56,8 +56,8 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
     },
     {
       value: 'fable',
-      label: 'Fable 5',
-      description: 'Most capable Claude model for the hardest, longest-running tasks.',
+      label: 'Fable',
+      description: 'Latest Fable model, the most capable for the hardest, longest-running tasks.',
       effort: {
         default: 'high',
         values: [
