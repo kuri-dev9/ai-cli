@@ -17,6 +17,7 @@ import type {
 import { useChatProviderState } from '@/modules/chat/hooks/useChatProviderState';
 import { useScheduledMessages } from '@/modules/chat/composer/useScheduledMessages';
 import { useChatSessionState } from '@/modules/chat/hooks/useChatSessionState';
+import { useBackgroundAgentActivity } from '@/modules/chat/hooks/useBackgroundAgentActivity';
 import { useChatRealtimeHandlers } from '@/modules/chat/hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState';
 import { useSessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -410,10 +411,15 @@ function ChatInterface({
     }
   }, [currentSessionId, provider, selectProviderEffort, selectedSession?.id]);
 
+  // Background agents outlive the turn that launched them, so the status tab
+  // falls back to them once the turn itself has completed.
+  const backgroundAgentActivity = useBackgroundAgentActivity(chatMessages, sessionActivity);
+  const composerActivity = sessionActivity ?? backgroundAgentActivity;
+
   // Mirrors ChatComposer's own visibility check so the message pane can
   // reserve enough bottom space to keep the floating status tab from
   // overlapping the last message.
-  const hasActivityIndicator = Boolean(sessionActivity && pendingPermissionRequests.length === 0);
+  const hasActivityIndicator = Boolean(composerActivity && pendingPermissionRequests.length === 0);
 
   const selectedProviderLabel =
     provider === 'cursor'
@@ -516,7 +522,7 @@ function ChatInterface({
           pendingPermissionRequests={pendingPermissionRequests}
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
-          activity={sessionActivity}
+          activity={composerActivity}
           isLoading={isProcessing}
           onAbortSession={handleAbortSession}
           permissionMode={permissionMode}

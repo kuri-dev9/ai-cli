@@ -252,6 +252,7 @@
       "startingNow": "Starting now"
     },
     "stop": "중지",
+    "backgroundAgents_other": "백그라운드 에이전트 {{count}}개 실행 중",
     "controls": {
       "stopGeneration": "Stop Generation",
       "pressEscToStop": "Press Esc anytime to stop"

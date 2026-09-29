@@ -252,6 +252,8 @@
       "startingNow": "Starting now"
     },
     "stop": "Stop",
+    "backgroundAgents_one": "{{count}} background agent running",
+    "backgroundAgents_other": "{{count}} background agents running",
     "controls": {
       "stopGeneration": "Stop Generation",
       "pressEscToStop": "Press Esc anytime to stop"
