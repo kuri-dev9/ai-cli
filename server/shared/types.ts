@@ -1381,8 +1381,10 @@ export type ProviderRateLimitSnapshot = {
   /** 알 수 있는 프로바이더만. 예: Codex 의 `plus`. */
   planType?: string;
   /**
-   * 값이 어디서 왔는지. `live` 는 계정에 직접 물어본 것이고 `events` 는 실행 중에
-   * 흘러온 이벤트를 쌓아 둔 것이다. 화면이 갱신 시점을 다르게 설명해야 해서 붙인다.
+   * 값이 어디서 왔는지. `live` 는 계정에 직접 물어본 것, `cli` 는 CLI 에게
+   * `/usage` 를 물어본 것, `events` 는 실행 중에 흘러온 이벤트를 쌓아 둔 것이다.
+   * 앞의 둘은 요청할 때마다 새로 읽지만 `events` 는 대화를 돌려야 움직여서,
+   * 화면이 갱신 시점을 다르게 설명해야 하므로 붙인다.
    */
-  source?: 'live' | 'events';
+  source?: 'live' | 'cli' | 'events';
 };

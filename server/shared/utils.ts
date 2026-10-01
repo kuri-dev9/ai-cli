@@ -1292,3 +1292,20 @@ export function findApplicationRoot(startDirectory: string): string {
     ? path.dirname(parentDirectory)
     : parentDirectory;
 }
+
+// ---------------------------
+//----------------- CLAUDE USAGE WINDOW NAMING UTILITIES ------------
+/**
+ * Names the weekly limit window of one model, e.g. `Fable` → `seven_day_fable`.
+ *
+ * Claude reports its per-model weekly limit under different shapes depending on
+ * where it is read from — the usage API sends a scope object, the CLI prints the
+ * model name in parentheses — but the usage screen keeps a single set of labels.
+ * Both readers must therefore agree on the name, which is the one the SDK's
+ * `rate_limit_event` already uses. Returns `null` when the display name carries
+ * no letters or digits to build a name from.
+ */
+export function buildScopedWeeklyWindowName(modelDisplayName: string): string | null {
+  const slug = modelDisplayName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return slug ? `seven_day_${slug}` : null;
+}

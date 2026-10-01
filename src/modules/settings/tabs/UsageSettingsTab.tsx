@@ -21,8 +21,11 @@ type RateLimitSnapshot = {
   supported: boolean;
   windows: RateLimitWindow[];
   planType?: string;
-  /** `live` 는 계정에 직접 물어본 값, `events` 는 실행 중에 쌓인 이벤트. */
-  source?: 'live' | 'events';
+  /**
+   * `live` 는 계정에 직접 물어본 값, `cli` 는 CLI 에게 `/usage` 를 물어본 값,
+   * `events` 는 실행 중에 쌓인 이벤트. 앞의 둘은 열 때마다 새로 읽는다.
+   */
+  source?: 'live' | 'cli' | 'events';
 };
 
 type ContextUsage = {
@@ -241,7 +244,7 @@ export default function UsageSettingsTab() {
         supported: data.supported !== false,
         windows: Array.isArray(data.windows) ? data.windows as RateLimitWindow[] : [],
         planType: typeof data.planType === 'string' ? data.planType : undefined,
-        source: data.source === 'events' ? 'events' : 'live',
+        source: data.source === 'events' || data.source === 'cli' ? data.source : 'live',
       });
     } catch (loadError) {
       console.error('Failed to load usage limits:', loadError);
@@ -271,8 +274,8 @@ export default function UsageSettingsTab() {
   }, [sortedWindows, i18n.language]);
 
   const isUnsupported = snapshot?.supported === false;
-  // 값이 언제 갱신되는지는 프로바이더가 아니라 어디서 읽었는지에 달렸다. 직접 물어본
-  // 값은 새로고침이 바로 먹고, 이벤트로 주운 값은 대화를 한 번 돌려야 움직인다.
+  // 값이 언제 갱신되는지는 프로바이더가 아니라 어디서 읽었는지에 달렸다. 지금 읽어 온
+  // 값(`live`·`cli`)은 새로고침이 바로 먹고, 이벤트로 주운 값은 대화를 한 번 돌려야 움직인다.
   const disclaimer = snapshot?.source === 'events'
     ? t('usage.disclaimer')
     : t('usage.disclaimerLive');

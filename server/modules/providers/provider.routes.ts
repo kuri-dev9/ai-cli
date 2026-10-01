@@ -811,9 +811,10 @@ router.get(
 /**
  * Subscription usage windows (session / weekly limits).
  *
- * 프로바이더마다 값이 오는 길이 다르다. Claude 는 실행 중에 흘러온 이벤트를
- * 쌓아 둔 것을 읽고, Codex 는 그때그때 ChatGPT 백엔드에 물어본다. 한도라는 것이
- * 없는 CLI 는 `supported: false` 로 답해, 화면이 오류 대신 사유를 말하게 한다.
+ * 프로바이더마다 값이 오는 길이 다르다. Claude 는 계정에 직접 묻고, 막히면 CLI 에게
+ * `/usage` 를 물어보고, 그마저 안 되면 실행 중에 흘러온 이벤트를 쌓아 둔 것을 읽는다.
+ * Codex 는 그때그때 ChatGPT 백엔드에 물어본다. 한도라는 것이 없는 CLI 는
+ * `supported: false` 로 답해, 화면이 오류 대신 사유를 말하게 한다.
  */
 router.get(
   '/:provider/rate-limits',
@@ -821,11 +822,12 @@ router.get(
     const provider = parseProvider(req.params.provider);
 
     if (provider === 'claude') {
-      // 계정에 직접 물어본 값이 있으면 그것이 낫다 — 창이 전부 오고 사용률도 붙는다.
-      // 못 읽었을 때만 실행 중에 주워 담아 둔 이벤트로 물러선다.
+      // 지금 읽어 온 값이 있으면 그것이 낫다 — 창이 전부 오고 사용률도 붙는다.
+      // (서비스가 계정 직접 조회 → CLI `/usage` 순으로 시도하고 source 를 붙여 준다.)
+      // 어느 길로도 못 읽었을 때만 실행 중에 주워 담아 둔 이벤트로 물러선다.
       const live = await claudeUsageService.getSnapshot();
       const snapshot = live.windows.length > 0
-        ? { ...live, source: 'live' as const }
+        ? { ...live, source: live.source ?? ('live' as const) }
         : { ...claudeRateLimitService.getSnapshot(), source: 'events' as const };
 
       res.json(createApiSuccessResponse({ supported: true, ...snapshot }));

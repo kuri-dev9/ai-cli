@@ -8,7 +8,8 @@
  *
  * Claude Code 가 `/usage` 를 그릴 때 쓰는 엔드포인트를 같은 자격증명으로 부르면
  * 모든 창이 사용률과 함께 한 번에 온다. 문서화된 API 가 아니므로 실패는 모두
- * 빈 결과로 떨어뜨리고, 호출한 쪽이 쌓아 둔 이벤트로 물러설 수 있게 한다.
+ * 빈 결과로 떨어뜨린다 — 그때는 CLI 에게 직접 `/usage` 를 물어보고
+ * (`claude-cli-usage.service`), 그마저 비면 호출한 쪽이 쌓아 둔 이벤트로 물러선다.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -16,8 +17,9 @@ import fsp from 'node:fs/promises';
 import https from 'node:https';
 import path from 'node:path';
 
+import { claudeCliUsageService } from '@/modules/providers/services/claude-cli-usage.service.js';
 import type { ProviderRateLimitWindow } from '@/shared/types.js';
-import { getClaudeHomeDirectory } from '@/shared/utils.js';
+import { buildScopedWeeklyWindowName, getClaudeHomeDirectory } from '@/shared/utils.js';
 
 const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -49,6 +51,8 @@ const STATUS_BY_SEVERITY: Record<string, ProviderRateLimitWindow['status']> = {
 export type ClaudeUsageSnapshot = {
   windows: ProviderRateLimitWindow[];
   planType?: string;
+  /** 어느 길로 읽었는지. `live` 는 계정에 직접, `cli` 는 `claude -p "/usage"`. */
+  source?: 'live' | 'cli';
 };
 
 type ClaudeCredentials = {
@@ -59,6 +63,8 @@ type ClaudeCredentials = {
 type ClaudeUsageServiceDependencies = {
   readCredentials: () => Promise<ClaudeCredentials | null>;
   fetchUsage: (credentials: ClaudeCredentials) => Promise<unknown>;
+  /** 직접 물어보기가 실패했을 때 CLI 에게 묻는 길. */
+  readCliUsage: () => Promise<{ windows: ProviderRateLimitWindow[] }>;
   now: () => number;
 };
 
@@ -97,7 +103,7 @@ const scopedWindowName = (scope: unknown): string | null => {
   if (!displayName) {
     return null;
   }
-  return `seven_day_${displayName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+  return buildScopedWeeklyWindowName(displayName);
 };
 
 const toWindow = (raw: unknown, observedAt: string): ProviderRateLimitWindow | null => {
@@ -224,57 +230,75 @@ export function createClaudeUsageService(
   const {
     readCredentials = defaultReadCredentials,
     fetchUsage = defaultFetchUsage,
+    readCliUsage = () => claudeCliUsageService.getSnapshot(),
     now = () => Date.now(),
   } = dependencies;
 
   let cached: { at: number; snapshot: ClaudeUsageSnapshot } | null = null;
 
+  /** 계정에 직접 물어본 값. 자격증명을 못 읽거나 요청이 실패하면 빈 목록. */
+  const readAccountSnapshot = async (): Promise<ClaudeUsageSnapshot> => {
+    const credentials = await readCredentials();
+    if (!credentials) {
+      // 로그인하지 않은 상태와 실패를 구분하지 않는다. 물러설 곳이 같다.
+      return { windows: [] };
+    }
+
+    let usage: unknown;
+    try {
+      usage = await fetchUsage(credentials);
+    } catch (error) {
+      console.warn('[Claude usage] Failed to read usage:', error);
+      return { windows: [] };
+    }
+
+    const payload = (usage ?? {}) as Record<string, unknown>;
+    const observedAt = new Date(now()).toISOString();
+    const limits = Array.isArray(payload.limits) ? payload.limits : [];
+
+    const windows = limits
+      .map((limit) => toWindow(limit, observedAt))
+      .filter((window): window is ProviderRateLimitWindow => window !== null);
+
+    // 초과 사용은 켜 둔 계정에서만 창이 된다. 꺼져 있으면 0% 막대만 남는다.
+    const extraUsage = payload.extra_usage as Record<string, unknown> | undefined;
+    if (extraUsage?.is_enabled === true) {
+      windows.push({
+        type: 'overage',
+        status: extraUsage.spend_limit_reached === true ? 'rejected' : 'allowed',
+        utilization: readUtilization(extraUsage.utilization),
+        resetsAt: null,
+        observedAt,
+      });
+    }
+
+    return { windows, planType: credentials.subscriptionType, source: 'live' };
+  };
+
   return {
-    /** 창을 하나도 못 읽으면 빈 목록. 부른 쪽이 쌓아 둔 이벤트로 물러설 수 있다. */
+    /**
+     * 화면에 그릴 창들. 계정에 직접 물어보고, 그 길이 막혀 있으면 CLI 에게
+     * `/usage` 를 물어본다. 둘 다 못 읽으면 빈 목록 — 부른 쪽이 쌓아 둔 이벤트로
+     * 물러설 수 있다.
+     */
     async getSnapshot(): Promise<ClaudeUsageSnapshot> {
       if (cached && now() - cached.at < CACHE_TTL_MS) {
         return cached.snapshot;
       }
 
-      const credentials = await readCredentials();
-      if (!credentials) {
-        // 로그인하지 않은 상태와 실패를 구분하지 않는다. 물러설 곳이 같다.
-        return { windows: [] };
+      let snapshot = await readAccountSnapshot();
+      if (snapshot.windows.length === 0) {
+        const cli = await readCliUsage();
+        if (cli.windows.length > 0) {
+          snapshot = { windows: cli.windows, source: 'cli' };
+        }
       }
 
-      let usage: unknown;
-      try {
-        usage = await fetchUsage(credentials);
-      } catch (error) {
-        console.warn('[Claude usage] Failed to read usage:', error);
-        return { windows: [] };
+      // 빈 결과는 캐시하지 않는다. 로그인을 막 끝낸 직후에도 다음 요청이 바로
+      // 값을 가져올 수 있어야 한다.
+      if (snapshot.windows.length > 0) {
+        cached = { at: now(), snapshot };
       }
-
-      const payload = (usage ?? {}) as Record<string, unknown>;
-      const observedAt = new Date(now()).toISOString();
-      const limits = Array.isArray(payload.limits) ? payload.limits : [];
-
-      const windows = limits
-        .map((limit) => toWindow(limit, observedAt))
-        .filter((window): window is ProviderRateLimitWindow => window !== null);
-
-      // 초과 사용은 켜 둔 계정에서만 창이 된다. 꺼져 있으면 0% 막대만 남는다.
-      const extraUsage = payload.extra_usage as Record<string, unknown> | undefined;
-      if (extraUsage?.is_enabled === true) {
-        windows.push({
-          type: 'overage',
-          status: extraUsage.spend_limit_reached === true ? 'rejected' : 'allowed',
-          utilization: readUtilization(extraUsage.utilization),
-          resetsAt: null,
-          observedAt,
-        });
-      }
-
-      const snapshot: ClaudeUsageSnapshot = {
-        windows,
-        planType: credentials.subscriptionType,
-      };
-      cached = { at: now(), snapshot };
       return snapshot;
     },
 
