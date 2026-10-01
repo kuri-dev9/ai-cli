@@ -243,7 +243,9 @@ const defaultRunUsageCommand = (): Promise<string | null> =>
     const cliPath = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH) ?? 'claude';
     let child;
     try {
-      child = spawn(cliPath, ['-p', '/usage', '--output-format', 'json'], {
+      // 세션을 디스크에 남기지 않는다. 남기면 화면을 열 때마다 홈 프로젝트에
+      // "/usage" 한 줄짜리 세션이 생기고 새 세션 알림까지 뜬다.
+      child = spawn(cliPath, ['-p', '/usage', '--output-format', 'json', '--no-session-persistence'], {
         // 프로젝트 디렉터리에 매이지 않게 홈에서 돌린다. `/usage` 는 파일을 보지 않는다.
         cwd: os.homedir(),
         stdio: ['ignore', 'pipe', 'ignore'],

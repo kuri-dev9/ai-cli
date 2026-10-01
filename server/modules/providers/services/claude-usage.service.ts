@@ -19,7 +19,11 @@ import path from 'node:path';
 
 import { claudeCliUsageService } from '@/modules/providers/services/claude-cli-usage.service.js';
 import type { ProviderRateLimitWindow } from '@/shared/types.js';
-import { buildScopedWeeklyWindowName, getClaudeHomeDirectory } from '@/shared/utils.js';
+import {
+  buildScopedWeeklyWindowName,
+  getClaudeHomeDirectory,
+  getClaudeKeychainServiceName,
+} from '@/shared/utils.js';
 
 const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -27,9 +31,6 @@ const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_TTL_MS = 30_000;
 
 const REQUEST_TIMEOUT_MS = 10_000;
-
-/** Claude Code 가 자격증명을 넣어 두는 macOS 키체인 항목. */
-const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 
 /**
  * `limits[].kind` → 창 이름. Claude 가 이벤트로 보내던 이름에 맞춰 둔다. 같은
@@ -168,9 +169,10 @@ const defaultReadCredentials = async (): Promise<ClaudeCredentials | null> => {
   }
 
   try {
+    // `CLAUDE_CONFIG_DIR` 를 쓰는 설치는 항목 이름 끝에 디렉터리 해시가 붙는다.
     const raw = execFileSync(
       'security',
-      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
+      ['find-generic-password', '-s', getClaudeKeychainServiceName(), '-w'],
       { encoding: 'utf8', timeout: REQUEST_TIMEOUT_MS },
     );
     return fromOauth(JSON.parse(raw) as unknown);

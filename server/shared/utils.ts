@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import {
   access,
@@ -95,6 +95,31 @@ export function getClaudeHomeDirectory(homeDirectory: string = os.homedir()): st
   // Absolute and normalized, because callers compare stored transcript paths
   // against this root to decide whether a row still belongs to the index.
   return path.resolve(expandHomePrefix(configuredDirectory, homeDirectory));
+}
+
+/**
+ * Names the macOS keychain item Claude Code stores its OAuth credentials in.
+ *
+ * With `CLAUDE_CONFIG_DIR` unset the item is `Claude Code-credentials`. Once
+ * the variable is set, Claude Code keeps one login per config directory and
+ * suffixes the item with the first 8 hex digits of the SHA-256 of that
+ * directory (`Claude Code-credentials-26fbef30`). Looking up the bare name in
+ * that setup finds nothing — or another config directory's stale login.
+ *
+ * The directory is hashed exactly as `getClaudeHomeDirectory()` resolves it,
+ * which is also the form Claude Code hashes (absolute, NFC).
+ *
+ * Consumed by the Claude auth provider (login detection) and the providers
+ * usage service (reading the token for the usage endpoint).
+ */
+export function getClaudeKeychainServiceName(homeDirectory: string = os.homedir()): string {
+  if (!process.env.CLAUDE_CONFIG_DIR?.trim()) {
+    return 'Claude Code-credentials';
+  }
+
+  const configDirectory = getClaudeHomeDirectory(homeDirectory).normalize('NFC');
+  const suffix = createHash('sha256').update(configDirectory).digest('hex').slice(0, 8);
+  return `Claude Code-credentials-${suffix}`;
 }
 
 /**

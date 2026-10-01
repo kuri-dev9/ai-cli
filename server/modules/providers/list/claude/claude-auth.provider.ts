@@ -6,7 +6,12 @@ import spawn from 'cross-spawn';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
-import { getClaudeHomeDirectory, readObjectRecord, readOptionalString } from '@/shared/utils.js';
+import {
+  getClaudeHomeDirectory,
+  getClaudeKeychainServiceName,
+  readObjectRecord,
+  readOptionalString,
+} from '@/shared/utils.js';
 
 type ClaudeCredentialsStatus = {
   authenticated: boolean;
@@ -90,7 +95,7 @@ export class ClaudeProviderAuth implements IProviderAuth {
     try {
       const result = spawn.sync(
         'security',
-        ['find-generic-password', '-s', 'Claude Code-credentials'],
+        ['find-generic-password', '-s', getClaudeKeychainServiceName()],
         { stdio: 'ignore', timeout: 5000 },
       );
       return result.status === 0;
