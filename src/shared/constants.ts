@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
-import type { FileStatusCode, LLMProvider, McpProvider, McpScope, McpTransport, SettingsMainTab } from '@/shared/types';
+import type { FileStatusCode, LLMProvider, McpProvider, McpScope, McpTransport, ProviderConnectionTone, SettingsMainTab } from '@/shared/types';
 import type { UserPreferenceKey } from '@/shared/userSettings';
 
 /** The four buckets the git changes view sorts working-tree files into. */
@@ -219,4 +219,64 @@ export const PROVIDER_PERMISSION_PREFERENCE_KEYS: Record<LLMProvider, UserPrefer
   cursor: 'cursorPermissions',
   codex: 'codexPermissions',
   opencode: 'opencodePermissions',
+};
+
+// ---------------------------
+
+//----------------- PROVIDER CONNECTION COLOURS ------------
+
+/** The Tailwind classes one connection state paints, shared by every surface that shows it. */
+type ProviderConnectionToneStyle = {
+  /** Card background and border. */
+  cardClass: string;
+  /** Headings inside the card. */
+  titleClass: string;
+  /** Body text inside the card. */
+  textClass: string;
+  /** The status badge. */
+  badgeClass: string;
+  /** The small status dot next to a provider's name. */
+  dotClass: string;
+};
+
+/**
+ * One colour per connection state, not per provider.
+ *
+ * The agents settings screen used to paint each CLI in its own hue (Claude
+ * blue, Cursor purple, Codex grey), so switching tabs changed the colour of an
+ * unchanged connection and read as a change in status. Look the colours up by
+ * `ProviderConnectionTone` instead — green means connected, red means something
+ * is wrong, and muted means not connected or not yet known, on every tab.
+ * `checking` deliberately shares the muted colours: nothing is being claimed
+ * until the check returns.
+ */
+export const PROVIDER_CONNECTION_TONES: Record<ProviderConnectionTone, ProviderConnectionToneStyle> = {
+  connected: {
+    cardClass: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800',
+    titleClass: 'text-emerald-900 dark:text-emerald-100',
+    textClass: 'text-emerald-700 dark:text-emerald-300',
+    badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+    dotClass: 'bg-emerald-500',
+  },
+  disconnected: {
+    cardClass: 'bg-muted/30 border-border',
+    titleClass: 'text-foreground',
+    textClass: 'text-muted-foreground',
+    badgeClass: 'bg-muted text-muted-foreground',
+    dotClass: 'bg-muted-foreground/50',
+  },
+  checking: {
+    cardClass: 'bg-muted/30 border-border',
+    titleClass: 'text-foreground',
+    textClass: 'text-muted-foreground',
+    badgeClass: 'bg-muted text-muted-foreground',
+    dotClass: 'bg-muted-foreground/50',
+  },
+  error: {
+    cardClass: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800',
+    titleClass: 'text-red-900 dark:text-red-100',
+    textClass: 'text-red-700 dark:text-red-300',
+    badgeClass: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
+    dotClass: 'bg-red-500',
+  },
 };

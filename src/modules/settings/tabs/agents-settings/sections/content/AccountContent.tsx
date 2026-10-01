@@ -2,9 +2,11 @@ import { Eye, EyeOff, LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Badge, Button, LLMProviderLogo } from '@/shared/ui';
+import { PROVIDER_CONNECTION_TONES } from '@/shared/constants';
 import type { AgentProvider, ProviderAuthStatus } from '@/shared/types';
 import SettingsToggle from '@/modules/settings/SettingsToggle';
 import { setProviderEnabled } from '@/shared/providerVisibility';
+import { readProviderConnectionTone } from '@/shared/utils';
 import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
 
 type AccountContentProps = {
@@ -13,56 +15,24 @@ type AccountContentProps = {
   onLogin: () => void;
 };
 
-type AgentVisualConfig = {
-  name: string;
-  bgClass: string;
-  borderClass: string;
-  textClass: string;
-  subtextClass: string;
-  buttonClass: string;
-  description?: string;
+const agentNames: Record<AgentProvider, string> = {
+  claude: 'Claude',
+  cursor: 'Cursor',
+  codex: 'Codex',
+  opencode: 'OpenCode',
 };
 
-const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
-  claude: {
-    name: 'Claude',
-    bgClass: 'bg-blue-50 dark:bg-blue-900/20',
-    borderClass: 'border-blue-200 dark:border-blue-800',
-    textClass: 'text-blue-900 dark:text-blue-100',
-    subtextClass: 'text-blue-700 dark:text-blue-300',
-    buttonClass: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800',
-  },
-  cursor: {
-    name: 'Cursor',
-    bgClass: 'bg-purple-50 dark:bg-purple-900/20',
-    borderClass: 'border-purple-200 dark:border-purple-800',
-    textClass: 'text-purple-900 dark:text-purple-100',
-    subtextClass: 'text-purple-700 dark:text-purple-300',
-    buttonClass: 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800',
-  },
-  codex: {
-    name: 'Codex',
-    bgClass: 'bg-muted/50',
-    borderClass: 'border-gray-300 dark:border-gray-600',
-    textClass: 'text-gray-900 dark:text-gray-100',
-    subtextClass: 'text-gray-700 dark:text-gray-300',
-    buttonClass: 'bg-gray-800 hover:bg-gray-900 active:bg-gray-950 dark:bg-gray-700 dark:hover:bg-gray-600 dark:active:bg-gray-500',
-  },
-  opencode: {
-    name: 'OpenCode',
-    description: 'OpenCode CLI assistant',
-    bgClass: 'bg-zinc-50 dark:bg-zinc-900/20',
-    borderClass: 'border-zinc-200 dark:border-zinc-700',
-    textClass: 'text-zinc-900 dark:text-zinc-100',
-    subtextClass: 'text-zinc-700 dark:text-zinc-300',
-    buttonClass: 'bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-950 dark:bg-zinc-700 dark:hover:bg-zinc-600',
-  },
+/** 번역이 없을 때만 쓰는 설명 문구. 이름과 달리 프로바이더마다 다를 이유가 있다. */
+const agentFallbackDescriptions: Partial<Record<AgentProvider, string>> = {
+  opencode: 'OpenCode CLI assistant',
 };
 
 /** Rendered by AgentCategoryContentSection for the "account" category to show sign-in state for one provider. */
 export default function AccountContent({ agent, authStatus, onLogin }: AccountContentProps) {
   const { t } = useTranslation('settings');
-  const config = agentConfig[agent];
+  const agentName = agentNames[agent];
+  // 카드 색은 어느 CLI 인지가 아니라 연결이 지금 어떤 상태인지를 말한다.
+  const tone = PROVIDER_CONNECTION_TONES[readProviderConnectionTone(authStatus)];
 
   const enabledProviders = useEnabledProviders();
   const isEnabled = enabledProviders.includes(agent);
@@ -80,7 +50,7 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
         />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-medium text-foreground">{config.name}</h3>
+            <h3 className="text-lg font-medium text-foreground">{agentName}</h3>
             {!isEnabled && (
               <Badge variant="secondary" className="bg-muted text-muted-foreground">
                 {t('agents.visibility.disabledBadge')}
@@ -89,7 +59,7 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
           </div>
           <p className="text-sm text-muted-foreground">
             {t(`agents.account.${agent}.description`, {
-              defaultValue: config.description || `${config.name} CLI assistant`,
+              defaultValue: agentFallbackDescriptions[agent] || `${agentName} CLI assistant`,
             })}
           </p>
         </div>
@@ -119,19 +89,19 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             checked={isEnabled}
             disabled={isEnabled && !canDisable}
             onChange={(next) => setProviderEnabled(agent, next)}
-            ariaLabel={t('agents.visibility.toggleLabel', { agent: config.name })}
+            ariaLabel={t('agents.visibility.toggleLabel', { agent: agentName })}
           />
         </div>
       </div>
 
-      <div className={`${config.bgClass} border ${config.borderClass} rounded-lg p-4`}>
+      <div className={`rounded-lg border p-4 ${tone.cardClass}`}>
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="flex-1">
-              <div className={`font-medium ${config.textClass}`}>
+              <div className={`font-medium ${tone.titleClass}`}>
                 {t('agents.connectionStatus')}
               </div>
-              <div className={`text-sm ${config.subtextClass}`}>
+              <div className={`text-sm ${tone.textClass}`}>
                 {authStatus.loading ? (
                   t('agents.authStatus.checkingAuth')
                 ) : authStatus.authenticated ? (
@@ -144,19 +114,14 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
               </div>
             </div>
             <div>
-              {authStatus.loading ? (
-                <Badge variant="secondary" className="bg-muted">
-                  {t('agents.authStatus.checking')}
-                </Badge>
-              ) : authStatus.authenticated ? (
-                <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                  {t('agents.authStatus.connected')}
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
-                  {t('agents.authStatus.disconnected')}
-                </Badge>
-              )}
+              {/* 배지도 카드와 같은 색을 쓴다 — 한 상태에 색 하나. */}
+              <Badge variant="secondary" className={tone.badgeClass}>
+                {authStatus.loading
+                  ? t('agents.authStatus.checking')
+                  : authStatus.authenticated
+                    ? t('agents.authStatus.connected')
+                    : t('agents.authStatus.disconnected')}
+              </Badge>
             </div>
           </div>
 
@@ -164,18 +129,19 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className={`font-medium ${config.textClass}`}>
+                  <div className={`font-medium ${tone.titleClass}`}>
                     {authStatus.authenticated ? t('agents.login.reAuthenticate') : t('agents.login.title')}
                   </div>
-                  <div className={`text-sm ${config.subtextClass}`}>
+                  <div className={`text-sm ${tone.textClass}`}>
                     {authStatus.authenticated
                       ? t('agents.login.reAuthDescription')
-                      : t('agents.login.description', { agent: config.name })}
+                      : t('agents.login.description', { agent: agentName })}
                   </div>
                 </div>
+                {/* 버튼의 강조도 상태를 따른다. 이미 연결돼 있으면 재로그인은 보조 행동이다. */}
                 <Button
                   onClick={onLogin}
-                  className={`${config.buttonClass} text-white`}
+                  variant={authStatus.authenticated ? 'outline' : 'default'}
                   size="sm"
                 >
                   <LogIn className="mr-2 h-4 w-4" />

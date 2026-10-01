@@ -2,7 +2,9 @@ import { EyeOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { LLMProviderLogo, PillBar, Pill } from '@/shared/ui';
+import { PROVIDER_CONNECTION_TONES } from '@/shared/constants';
 import type { AgentContextByProvider, AgentProvider } from '@/shared/types';
+import { readProviderConnectionTone } from '@/shared/utils';
 
 type AgentSelectorSectionProps = {
   agents: AgentProvider[];
@@ -34,10 +36,10 @@ export default function AgentSelectorSection({
     <div className="flex-shrink-0 border-b border-border px-3 py-2 md:px-4 md:py-3">
       <PillBar className="w-full md:w-auto">
         {agents.map((agent) => {
-          const dotColor =
-            agent === 'claude' ? 'bg-blue-500' :
-            agent === 'cursor' ? 'bg-purple-500' :
-            agent === 'opencode' ? 'bg-zinc-500' : 'bg-foreground/60';
+          const { authStatus } = agentContextById[agent];
+          // 점 색은 CLI 가 아니라 연결 상태를 말한다 — 초록은 연결됨, 빨강은 이상,
+          // 회색은 끊김. 탭을 옮겨도 같은 상태는 같은 색으로 보인다.
+          const connectionTone = readProviderConnectionTone(authStatus);
           const isDisabled = disabledAgents.includes(agent);
 
           return (
@@ -58,8 +60,11 @@ export default function AgentSelectorSection({
               </span>
               {isDisabled ? (
                 <EyeOff className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
-              ) : agentContextById[agent].authStatus.authenticated && (
-                <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${dotColor}`} />
+              ) : connectionTone !== 'checking' && (
+                // 확인 중에는 점을 띄우지 않는다. 아직 연결 여부를 말할 수 없다.
+                <span
+                  className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${PROVIDER_CONNECTION_TONES[connectionTone].dotClass}`}
+                />
               )}
             </Pill>
           );

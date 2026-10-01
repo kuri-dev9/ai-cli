@@ -1166,6 +1166,15 @@ export type ProviderAuthStatus = {
 /** The authentication state of every CLI provider at once, keyed by LLMProvider, so onboarding and settings can render each provider's connected, loading and error state from one object returned by useProviderAuthStatus. */
 export type ProviderAuthStatusMap = Record<LLMProvider, ProviderAuthStatus>;
 
+/**
+ * A provider's sign-in state reduced to the one thing its colour should say:
+ * connected, disconnected, still being checked, or broken. Derive it with
+ * `readProviderConnectionTone` and look the colours up in
+ * `PROVIDER_CONNECTION_TONES` so every screen paints the same state the same
+ * way, regardless of which CLI it belongs to.
+ */
+export type ProviderConnectionTone = 'connected' | 'disconnected' | 'checking' | 'error';
+
 // ---------------------------
 
 //----------------- QUICK SETTINGS PANEL ------------

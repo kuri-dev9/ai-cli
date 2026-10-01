@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-import type { Project, ProjectSession } from '@/shared/types';
+import type { Project, ProjectSession, ProviderAuthStatus, ProviderConnectionTone } from '@/shared/types';
 
 //----------------- DEPLOYMENT MODE ------------
 
@@ -222,4 +222,27 @@ export const getPageTitle = (
 
   const displayName = selectedProject?.displayName?.trim();
   return displayName ? `${displayName} - ${DEFAULT_PAGE_TITLE}` : DEFAULT_PAGE_TITLE;
+};
+
+// ---------------------------
+
+//----------------- PROVIDER CONNECTION STATE ------------
+
+/**
+ * Reduces a provider's auth status to the single state its colour should show.
+ *
+ * Use it with `PROVIDER_CONNECTION_TONES` wherever a CLI's connection is
+ * painted. An error outranks everything else: a provider that is signed in but
+ * failing still needs to read as broken rather than as connected.
+ */
+export const readProviderConnectionTone = (
+  authStatus: ProviderAuthStatus,
+): ProviderConnectionTone => {
+  if (authStatus.error) {
+    return 'error';
+  }
+  if (authStatus.loading) {
+    return 'checking';
+  }
+  return authStatus.authenticated ? 'connected' : 'disconnected';
 };
