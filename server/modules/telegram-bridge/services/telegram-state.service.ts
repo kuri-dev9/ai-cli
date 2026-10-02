@@ -1,4 +1,5 @@
 import { userDb, userPreferencesDb } from '@/modules/database/index.js';
+import type { LLMProvider } from '@/shared/types.js';
 
 /**
  * 브리지가 기억해야 하는 것: 어느 세션에 명령을 넣는지, 어느 세션의 웹 실행까지
@@ -29,7 +30,41 @@ export type TelegramBridgeState = {
    * 대기열에 재시작 횟수만큼 중복으로 쌓인다 — 여기 담아 재시작을 넘긴다.
    */
   lastUpdateOffset: number;
+  /**
+   * `/new` 를 받고 첫 메시지를 기다리는 중인지.
+   *
+   * 텔레그램 메뉴에서 `/new` 를 누르면 글 없이 그대로 보내진다. 그 다음에 오는
+   * 글을 새 대화의 첫 메시지로 받으려면 그 사이에 이 표시가 남아 있어야 한다.
+   * 서버가 재시작해도 이어지도록 구독과 같은 자리에 둔다.
+   */
+  pendingNewChat: PendingNewChat | null;
 };
+
+/** `/new` 로 고른 AI 와, 그 AI 로 마지막에 쓴 모델. */
+export type PendingNewChat = {
+  provider: LLMProvider;
+  /** 모르면 null — 그 AI 의 기본 모델로 시작한다. */
+  model: string | null;
+  /** 언제 `/new` 했는지(ms). 오래된 표시가 한참 뒤의 글을 가로채지 않도록 본다. */
+  createdAt: number;
+};
+
+const PROVIDER_IDS: readonly LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode'];
+
+function readPendingNewChat(value: unknown): PendingNewChat | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const provider = PROVIDER_IDS.find((id) => id === value.provider);
+  if (!provider || typeof value.createdAt !== 'number') {
+    return null;
+  }
+  return {
+    provider,
+    model: typeof value.model === 'string' && value.model ? value.model : null,
+    createdAt: value.createdAt,
+  };
+}
 
 /**
  * 기본은 조용하다.
@@ -43,6 +78,7 @@ const DEFAULT_STATE: TelegramBridgeState = {
   notifiedSessionIds: [],
   watchedSessionId: null,
   lastUpdateOffset: 0,
+  pendingNewChat: null,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -86,6 +122,7 @@ export function readBridgeState(userId: number): TelegramBridgeState {
       typeof raw.lastUpdateOffset === 'number' && Number.isFinite(raw.lastUpdateOffset) && raw.lastUpdateOffset >= 0
         ? raw.lastUpdateOffset
         : 0,
+    pendingNewChat: readPendingNewChat(raw.pendingNewChat),
   };
 }
 

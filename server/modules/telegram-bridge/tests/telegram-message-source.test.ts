@@ -18,6 +18,11 @@ import { handleTelegramCommand } from '@/modules/telegram-bridge/index.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
 import { dispatchQueuedMessages } from '@/modules/scheduled-messages/index.js';
 
+/** 답이 버튼을 달고 와도 글만 본다. */
+function replyText(reply: Awaited<ReturnType<typeof handleTelegramCommand>>): string {
+  return typeof reply === 'string' ? reply : reply?.text ?? '';
+}
+
 const SESSION_ID = 'telegram-source-session';
 
 async function withIsolatedDatabase(
@@ -123,7 +128,7 @@ test('작업 중이라 대기열을 거친 메시지도 출처가 남는다', as
     });
 
     const reply = await handleTelegramCommand('이것도 해줘', { userId, runtime });
-    assert.match(reply ?? '', /대기열에 넣었습니다/);
+    assert.match(replyText(reply), /대기열에 넣었습니다/);
     assert.equal(runs.length, 0);
 
     chatRunRegistry.completeRun(SESSION_ID, { exitCode: 0 });
@@ -188,7 +193,7 @@ test('보내지 못한 턴의 표시는 남지 않는다', async () => {
     await handleTelegramCommand('/watch 1', { userId, runtime: createRuntime(runs) });
     const reply = await handleTelegramCommand('안 될 명령', { userId, runtime });
 
-    assert.match(reply ?? '', /보내지 못했습니다/);
+    assert.match(replyText(reply), /보내지 못했습니다/);
 
     const annotated = messageSourcesDb.annotateMessageSources(SESSION_ID, [
       transcriptUserMessage('안 될 명령', 'uuid-failed'),

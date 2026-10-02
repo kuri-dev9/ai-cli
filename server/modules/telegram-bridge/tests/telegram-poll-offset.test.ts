@@ -109,8 +109,8 @@ test('재시작 직후에도 이미 받은 갱신을 대기열에 다시 넣지 
     // 첫 갱신은 구독 명령이어야 뒤이은 프롬프트가 대기열로 간다. 두 번째
     // update 로 실제 프롬프트를 보낸다.
     const server = createFakeTelegramServer([
-      { updateId: 500, message: { messageId: 1, chatId: CHAT_ID, text: '/watch 1' } },
-      { updateId: 501, message: { messageId: 2, chatId: CHAT_ID, text: '확인해줘' } },
+      { updateId: 500, message: { messageId: 1, chatId: CHAT_ID, text: '/watch 1', files: [], mediaGroupId: null } },
+      { updateId: 501, message: { messageId: 2, chatId: CHAT_ID, text: '확인해줘', files: [], mediaGroupId: null } },
     ]);
 
     const bridgeA = startTelegramBridge({

@@ -16,6 +16,11 @@ import { handleTelegramCommand, truncateForTelegram } from '@/modules/telegram-b
 import { isSessionNotified } from '@/modules/telegram-bridge/services/telegram-state.service.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
 
+/** 답이 버튼을 달고 와도 글만 본다. */
+function replyText(reply: Awaited<ReturnType<typeof handleTelegramCommand>>): string {
+  return typeof reply === 'string' ? reply : reply?.text ?? '';
+}
+
 const SESSION_ID = 'telegram-session';
 
 async function withIsolatedDatabase(
@@ -69,7 +74,7 @@ test('구독 전에는 명령을 세션으로 보내지 않는다', async () => 
       runtime: createRuntime(runs),
     });
 
-    assert.match(reply ?? '', /구독 중인 세션이 없/);
+    assert.match(replyText(reply), /구독 중인 세션이 없/);
     assert.equal(runs.length, 0);
   });
 });
@@ -97,10 +102,10 @@ test('인자 없는 /watch 는 되묻지 않고 프로젝트 목록을 보여준
       runtime: createRuntime([]),
     });
 
-    assert.match(reply ?? '', /1\. /);
-    assert.match(reply ?? '', /\/watch <번호>/);
+    assert.match(replyText(reply), /1\. /);
+    assert.match(replyText(reply), /\/watch <번호>/);
     // 예전에는 `/projects` 를 한 번 더 치게 했다.
-    assert.doesNotMatch(reply ?? '', /\/projects 로 번호를 확인/);
+    assert.doesNotMatch(replyText(reply), /\/projects 로 번호를 확인/);
   });
 });
 
@@ -111,8 +116,8 @@ test('맞는 프로젝트가 없으면 고를 수 있는 것을 다시 보여준
       runtime: createRuntime([]),
     });
 
-    assert.match(reply ?? '', /없는프로젝트/);
-    assert.match(reply ?? '', /1\. /);
+    assert.match(replyText(reply), /없는프로젝트/);
+    assert.match(replyText(reply), /1\. /);
   });
 });
 
@@ -147,7 +152,7 @@ test('/on 은 구독한 세션이 있어야 켤 수 있다', async () => {
     const reply = await handleTelegramCommand('/on', { userId, runtime });
 
     // 켤 대상이 없는데 "켰다"고 답하면, 알림이 오지 않는 이유를 영영 알 수 없다.
-    assert.match(reply ?? '', /구독 중인 세션이 없/);
+    assert.match(replyText(reply), /구독 중인 세션이 없/);
   });
 });
 
@@ -158,7 +163,7 @@ test('/on 과 /off 는 구독 중인 세션의 웹 작업 알림을 켜고 끈�
 
     await handleTelegramCommand('/on', { userId, runtime });
     assert.equal(isSessionNotified(userId, SESSION_ID), true);
-    assert.match((await handleTelegramCommand('/status', { userId, runtime })) ?? '', /웹 작업 알림: 켜짐/);
+    assert.match(replyText(await handleTelegramCommand('/status', { userId, runtime })), /웹 작업 알림: 켜짐/);
 
     await handleTelegramCommand('/off', { userId, runtime });
     assert.equal(isSessionNotified(userId, SESSION_ID), false);
@@ -166,8 +171,8 @@ test('/on 과 /off 는 구독 중인 세션의 웹 작업 알림을 켜고 끈�
     // 꺼도 "여기서 보낸 작업의 결과는 온다"는 사실이 화면에 남아 있어야 한다 —
     // 예전 문구는 알림이 통째로 꺼진 것처럼 읽혔다.
     const status = await handleTelegramCommand('/status', { userId, runtime });
-    assert.match(status ?? '', /웹 작업 알림: 꺼짐/);
-    assert.match(status ?? '', /여기서 보낸 작업의 결과는 항상 옵니다/);
+    assert.match(replyText(status), /웹 작업 알림: 꺼짐/);
+    assert.match(replyText(status), /여기서 보낸 작업의 결과는 항상 옵니다/);
   });
 });
 
@@ -194,14 +199,14 @@ test('/unwatch 는 구독과 알림을 함께 놓는다', async () => {
 
     const reply = await handleTelegramCommand('/unwatch', { userId, runtime });
 
-    assert.match(reply ?? '', /구독을 놓았습니다/);
+    assert.match(replyText(reply), /구독을 놓았습니다/);
     // 웹 작업 알림도 같이 꺼져야 한다. 구독만 놓고 알림이 남으면 `/bot` 으로
     // 넘겨받은 대화가 계속 이쪽으로 온다.
     assert.equal(isSessionNotified(userId, SESSION_ID), false);
 
     // 구독이 없으므로 그냥 보낸 글은 실행되지 않는다.
     const afterRelease = await handleTelegramCommand('이건 가면 안 된다', { userId, runtime });
-    assert.match(afterRelease ?? '', /구독 중인 세션이 없습니다/);
+    assert.match(replyText(afterRelease), /구독 중인 세션이 없습니다/);
     assert.equal(runs.length, 0);
   });
 });
@@ -212,7 +217,7 @@ test('/help 는 모든 명령을 보여준다', async () => {
     const reply = await handleTelegramCommand('/help', { userId, runtime });
 
     for (const command of ['/status', '/projects', '/watch', '/unwatch', '/on', '/off', '/allow', '/deny', '/stop']) {
-      assert.ok(reply?.includes(command), `${command} 가 /help 에 없다`);
+      assert.ok(replyText(reply).includes(command), `${command} 가 /help 에 없다`);
     }
   });
 });
@@ -226,8 +231,8 @@ test('/status 가 승인 대기를 알려준다', async () => {
 
     // 승인 대기를 푸시로 보내지 않기로 했으므로, 여기서 안 보이면 막힌 이유를
     // 알 방법이 아예 없다.
-    assert.match(reply ?? '', /승인 대기 1건/);
-    assert.match(reply ?? '', /Bash/);
+    assert.match(replyText(reply), /승인 대기 1건/);
+    assert.match(replyText(reply), /Bash/);
   });
 });
 
@@ -239,7 +244,7 @@ test('모르는 슬래시 명령은 프롬프트로 흘려보내지 않는다', 
 
     const reply = await handleTelegramCommand('/deploy', { userId, runtime });
 
-    assert.match(reply ?? '', /모르는 명령/);
+    assert.match(replyText(reply), /모르는 명령/);
     assert.equal(runs.length, 0);
   });
 });

@@ -1,12 +1,24 @@
 import { messageSourcesDb, projectsDb, sessionDraftsDb, sessionsDb } from '@/modules/database/index.js';
+import { providerAuthService, sessionsService } from '@/modules/providers/index.js';
 import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
+import type { ChatAttachmentDescriptor } from '@/shared/image-attachments.js';
+import type { LLMProvider } from '@/shared/types.js';
+import type {
+  TelegramButton,
+  TelegramIncomingFile,
+} from '@/modules/telegram-bridge/services/telegram-client.service.js';
+import { storeTelegramFiles } from '@/modules/telegram-bridge/services/telegram-files.service.js';
 import {
   isSessionNotified,
   readBridgeState,
   setSessionNotified,
   writeBridgeState,
+} from '@/modules/telegram-bridge/services/telegram-state.service.js';
+import type {
+  PendingNewChat,
+  TelegramBridgeState,
 } from '@/modules/telegram-bridge/services/telegram-state.service.js';
 
 /**
@@ -25,7 +37,56 @@ type PendingApproval = {
 type CommandContext = {
   userId: number;
   runtime: ProviderRuntimeGateway;
+  /**
+   * 사진·파일의 내용을 받는 통로. 브리지가 자기 클라이언트의 것을 넘긴다.
+   * 글만 오가는 호출(테스트 대부분)은 넘기지 않아도 된다.
+   */
+  downloadFile?: (fileId: string, signal?: AbortSignal) => Promise<Buffer>;
+  /**
+   * 이 컴퓨터에서 지금 쓸 수 있는 AI. 넘기지 않으면 설치·로그인 상태를 직접
+   * 확인한다. 테스트가 기계 상태와 무관하게 돌도록 바꿔 끼울 자리다.
+   */
+  listConnectedProviders?: () => Promise<LLMProvider[]>;
 };
+
+/**
+ * 버튼을 단 답. 브리지가 메시지 아래에 버튼을 붙여 보낸다.
+ *
+ * 텔레그램의 `/` 메뉴는 명령을 누르는 순간 인자 없이 보내 버린다. 그래서
+ * 인자가 필요한 명령은 글로 "번호를 붙여 다시 보내라"고 하는 대신 고를 거리를
+ * 버튼으로 내민다.
+ */
+export type TelegramReply = {
+  text: string;
+  buttons: TelegramButton[][];
+};
+
+/** 명령 하나의 답. 글만, 버튼을 단 글, 또는 보낼 것 없음(null). */
+type CommandResult = string | TelegramReply | null;
+
+/** 화면에 보일 AI 이름. 순서가 버튼 순서다. */
+const PROVIDER_LABELS: Record<LLMProvider, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  cursor: 'Cursor',
+  opencode: 'OpenCode',
+};
+
+const PROVIDER_IDS = Object.keys(PROVIDER_LABELS) as LLMProvider[];
+
+/** 아무 기록이 없을 때 새 대화를 여는 AI. */
+const FALLBACK_PROVIDER: LLMProvider = 'claude';
+
+/**
+ * `/new` 뒤에 첫 메시지를 기다리는 시간.
+ *
+ * 메뉴에서 `/new` 를 누르고 잊어버린 경우, 한참 뒤에 구독 중인 대화로 보내려던
+ * 글이 엉뚱하게 새 대화를 여는 것을 막는다.
+ */
+const PENDING_NEW_CHAT_TTL_MS = 10 * 60 * 1000;
+
+/** 목록 버튼이 너무 길어지지 않도록. 넘는 것은 `/watch <번호>` 로 고른다. */
+const MAX_PROJECT_BUTTONS = 20;
 
 /** 사람이 읽을 이름. 사용자 지정 이름이 없으면 폴더 이름을 쓴다. */
 function projectLabel(project: { custom_project_name: string | null; project_path: string }): string {
@@ -45,17 +106,37 @@ function listActiveProjects() {
  * 보내면 사용자는 `/projects` 를 한 번 더 쳐야 한다 — 어차피 보여줄 목록이니
  * 여기서 바로 보여주는 편이 왕복 하나를 없앤다.
  */
-function renderProjectPicker(heading: string): string {
+function renderProjectPicker(heading: string): CommandResult {
   const projects = listActiveProjects();
   if (projects.length === 0) {
     return '프로젝트가 없습니다.';
   }
-  return [
-    heading,
-    ...projects.map((project, index) => `${index + 1}. ${projectLabel(project)}`),
-    '',
-    '/watch <번호> 로 구독합니다.',
-  ].join('\n');
+  return {
+    text: [
+      heading,
+      ...projects.map((project, index) => `${index + 1}. ${projectLabel(project)}`),
+      '',
+      '아래에서 누르거나 /watch <번호> 로 구독합니다.',
+    ].join('\n'),
+    buttons: projects.slice(0, MAX_PROJECT_BUTTONS).map((project, index) => [{
+      text: `${index + 1}. ${projectLabel(project)}`,
+      data: `watch:${project.project_id}`,
+    }]),
+  };
+}
+
+/** 고른 프로젝트의 최신 대화를 구독한다. `/watch` 와 프로젝트 버튼이 같이 쓴다. */
+function watchProject(
+  project: { project_path: string; custom_project_name: string | null },
+  userId: number,
+): string {
+  const session = findLatestSession(project.project_path);
+  if (!session) {
+    return `${projectLabel(project)} 에는 아직 대화가 없습니다. /new 로 새 대화를 시작할 수 있습니다.`;
+  }
+
+  writeBridgeState(userId, { watchedSessionId: session.session_id, pendingNewChat: null });
+  return `${projectLabel(project)} 의 최신 대화를 구독한다.\n${describeSession(session.session_id)}`;
 }
 
 /** 프로젝트에서 가장 최근에 손댄 세션. `/watch` 가 고르는 대상이다. */
@@ -87,6 +168,7 @@ const HELP_TEXT = [
   '명령 목록',
   '',
   '/help            이 목록',
+  '/new [AI] [메시지] 새 대화를 시작 (AI 를 빼면 마지막에 쓴 AI)',
   '/status          지금 무엇이 돌고 있는지, 승인 대기가 있는지',
   '/projects        프로젝트 목록',
   '/watch <번호|이름> 그 프로젝트의 최신 대화를 구독',
@@ -116,24 +198,44 @@ const HELP_TEXT = [
  * 한 줄을 처리하고 사용자에게 돌려줄 답을 만든다.
  *
  * 답이 `null` 이면 아무것도 보내지 않는다.
+ *
+ * `files` 가 있으면 본문(캡션)은 명령으로 읽지 않는다 — 사진에 단 "/stop" 은
+ * 사진과 함께 모델에게 할 말이지, 사진을 버리고 턴을 멈추라는 뜻이 아니다.
  */
 export async function handleTelegramCommand(
   text: string,
   context: CommandContext,
-): Promise<string | null> {
+  files: TelegramIncomingFile[] = [],
+): Promise<CommandResult> {
   const trimmed = text.trim();
+  const state = readBridgeState(context.userId);
+
+  // `/new` 만은 사진 캡션이어도 명령으로 읽는다. "이 사진으로 새 대화" 를
+  // 말할 다른 방법이 없다.
+  if (/^\/new(\s|$)/i.test(trimmed)) {
+    return handleNewChatCommand(trimmed.slice('/new'.length).trim(), context, state, files);
+  }
+
+  if (files.length > 0 || (trimmed && !trimmed.startsWith('/'))) {
+    const pending = readActivePendingNewChat(state);
+    if (pending) {
+      return startNewChat(pending.provider, pending.model, trimmed, files, context, state);
+    }
+    return sendPrompt(trimmed, context, state.watchedSessionId, files);
+  }
+
   if (!trimmed) {
     return null;
   }
 
-  const state = readBridgeState(context.userId);
+  // 다른 명령을 쳤다면 새 대화를 열려던 것은 그만둔 것이다.
+  if (state.pendingNewChat) {
+    writeBridgeState(context.userId, { pendingNewChat: null });
+  }
+
   const [rawCommand, ...rest] = trimmed.split(/\s+/);
   const command = rawCommand.toLowerCase();
   const argument = rest.join(' ');
-
-  if (!trimmed.startsWith('/')) {
-    return sendPrompt(trimmed, context, state.watchedSessionId);
-  }
 
   switch (command) {
     case '/help':
@@ -189,13 +291,7 @@ export async function handleTelegramCommand(
         return renderProjectPicker(`"${argument}" 에 맞는 프로젝트가 없습니다.`);
       }
 
-      const session = findLatestSession(picked.project_path);
-      if (!session) {
-        return `${projectLabel(picked)} 에는 아직 대화가 없습니다. 브라우저에서 한 번 시작한 뒤 다시 /watch 해 주세요.`;
-      }
-
-      writeBridgeState(context.userId, { watchedSessionId: session.session_id });
-      return `${projectLabel(picked)} 의 최신 대화를 구독한다.\n${describeSession(session.session_id)}`;
+      return watchProject(picked, context.userId);
     }
 
     case '/status': {
@@ -273,15 +369,46 @@ export async function handleTelegramCommand(
   }
 }
 
+/**
+ * 캡션 없이 사진·파일만 보냈을 때 대신 넣는 본문.
+ *
+ * 빈 본문으로 턴을 시작하지 않는다. 대화 기록에 빈 말풍선이 남고, 출처
+ * 표시(`markMessageSource`)도 본문으로 메시지를 찾기 때문에 붙지 않는다.
+ */
+function describeAttachedFiles(files: TelegramIncomingFile[]): string {
+  return files.every((file) => file.kind === 'photo')
+    ? '보낸 사진을 확인해 주세요.'
+    : '보낸 파일을 확인해 주세요.';
+}
+
 /** 구독 중인 세션에 한 턴을 밀어넣는다. */
 async function sendPrompt(
-  prompt: string,
+  text: string,
   context: CommandContext,
   watchedSessionId: string | null,
+  files: TelegramIncomingFile[] = [],
+  /** 실행 옵션에 더 실을 것. 새 대화가 이어 쓸 모델을 넘길 때 쓴다. */
+  runOptions: Record<string, unknown> = {},
 ): Promise<string | null> {
   if (!watchedSessionId) {
     return '구독 중인 세션이 없습니다. /projects 로 고른 뒤 /watch 해 주세요.';
   }
+
+  // 구독을 확인한 뒤에 받는다. 보낼 곳도 없는 파일을 디스크에 쌓지 않는다.
+  let attachments: ChatAttachmentDescriptor[] = [];
+  if (files.length > 0) {
+    if (!context.downloadFile) {
+      return '첨부를 받을 수 없습니다.';
+    }
+    try {
+      attachments = await storeTelegramFiles(files, context.downloadFile);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return `첨부를 받지 못했습니다: ${reason}`;
+    }
+  }
+
+  const prompt = text || describeAttachedFiles(files);
 
   // 작업 중이면 거절하지 않고 줄을 세운다. 브라우저에서 실행 중인 턴 뒤에
   // 메시지를 넣는 것과 같은 길을 쓰므로, 디스패처가 턴이 끝나는 즉시 보낸다.
@@ -291,6 +418,10 @@ async function sendPrompt(
     // 텔레그램으로 돌아온다.
     sessionDraftsDb.appendQueuedMessage(context.userId, watchedSessionId, {
       content: prompt,
+      // 파일은 이미 받아 두었다. 대기열을 비우는 쪽이 이 목록을 그대로
+      // 실행 옵션에 싣는다.
+      ...(attachments.length > 0 ? { attachments } : {}),
+      ...(Object.keys(runOptions).length > 0 ? { options: runOptions } : {}),
       origin: 'telegram',
     });
     // 대기열에 들어간 것도 텔레그램에서 온 것이다. 실행은 한참 뒤일 수
@@ -310,6 +441,7 @@ async function sendPrompt(
       sessionId: watchedSessionId,
       userId: context.userId,
       content: prompt,
+      options: { ...runOptions, ...(attachments.length > 0 ? { attachments } : {}) },
       // 이 표시가 브리지의 회신 근거다. 텔레그램에서 시작한 실행은 알림 설정과
       // 무관하게 결과를 돌려보낸다.
       origin: 'telegram',
@@ -327,4 +459,214 @@ async function sendPrompt(
   // 잘 들어갔다는 말은 하지 않는다. 결과가 곧 따라오므로 확인용 한 줄은
   // 알림만 한 번 더 울리고 대화창을 밀어 올린다. 실패는 위에서 말한다.
   return null;
+}
+
+// ----------------- 새 대화 (/new) ------------
+
+/** 설치돼 있고 로그인까지 된 AI. 상태를 못 읽은 AI 는 쓸 수 없는 것으로 본다. */
+async function listConnectedProvidersOnMachine(): Promise<LLMProvider[]> {
+  const connected = await Promise.all(PROVIDER_IDS.map(async (provider) => {
+    try {
+      const status = await providerAuthService.getProviderAuthStatus(provider);
+      return status.installed && status.authenticated ? provider : null;
+    } catch {
+      return null;
+    }
+  }));
+  return connected.filter((provider): provider is LLMProvider => provider !== null);
+}
+
+/**
+ * 가장 최근에 쓴 대화. `provider` 를 주면 그 AI 의 것 중에서.
+ *
+ * 새 대화의 기본 AI·모델과 프로젝트를 여기서 이어받는다. 사용자가 방금까지
+ * 쓰던 것을 그대로 쓰는 편이 가장 덜 놀랍다.
+ */
+function findLastUsedSession(provider?: LLMProvider) {
+  const { sessions } = sessionsDb.getRecentSessionsPage(50, 0);
+  return sessions.find((session) => !provider || session.provider === provider) ?? null;
+}
+
+/** 이 AI 로 마지막에 쓴 모델. 기록이 없으면 그 AI 의 기본 모델에 맡긴다. */
+function findLastUsedModel(provider: LLMProvider): string | null {
+  const { sessions } = sessionsDb.getRecentSessionsPage(50, 0);
+  return sessions.find((session) => session.provider === provider && session.model)?.model ?? null;
+}
+
+/**
+ * AI 를 고르지 않았을 때 쓸 것: 마지막에 쓴 AI, 그게 지금 못 쓰는 것이면 Claude.
+ */
+function pickDefaultProvider(connected: LLMProvider[]): LLMProvider {
+  const lastProvider = PROVIDER_IDS.find((id) => id === findLastUsedSession()?.provider);
+  if (lastProvider && connected.includes(lastProvider)) {
+    return lastProvider;
+  }
+  return FALLBACK_PROVIDER;
+}
+
+/**
+ * 새 대화가 들어갈 프로젝트: 마지막에 쓴 대화의 프로젝트.
+ *
+ * 텔레그램에서는 프로젝트를 고르게 하지 않는다. 대화는 어딘가의 폴더에서 돌아야
+ * 하고 웹 사이드바도 프로젝트 아래에 보여 주므로, 방금까지 쓰던 곳에 둔다.
+ * 기록이 하나도 없으면 첫 번째 프로젝트.
+ */
+function pickNewChatProjectPath(): string | null {
+  return findLastUsedSession()?.project_path
+    ?? listActiveProjects()[0]?.project_path
+    ?? null;
+}
+
+function readActivePendingNewChat(state: TelegramBridgeState): PendingNewChat | null {
+  const pending = state.pendingNewChat;
+  if (!pending || Date.now() - pending.createdAt > PENDING_NEW_CHAT_TTL_MS) {
+    return null;
+  }
+  return pending;
+}
+
+function describeConnected(connected: LLMProvider[]): string {
+  return connected.length > 0
+    ? connected.map((provider) => PROVIDER_LABELS[provider]).join(', ')
+    : '없음';
+}
+
+/** 첫 메시지를 기다리는 동안 보여 줄 답. AI 를 바꿀 버튼과 취소 버튼을 단다. */
+function renderPendingNewChat(
+  provider: LLMProvider,
+  connected: LLMProvider[],
+  offerOtherProviders: boolean,
+): TelegramReply {
+  const choices = offerOtherProviders ? connected.filter((id) => id !== provider) : [];
+  return {
+    text: [
+      `새 ${PROVIDER_LABELS[provider]} 대화를 엽니다. 첫 메시지를 보내 주세요.`,
+      ...(choices.length > 0 ? ['다른 AI 로 하려면 아래에서 고르세요.'] : []),
+    ].join('\n'),
+    buttons: [
+      ...(choices.length > 0
+        ? [choices.map((id) => ({ text: PROVIDER_LABELS[id], data: `new:${id}` }))]
+        : []),
+      [{ text: '취소', data: 'new:cancel' }],
+    ],
+  };
+}
+
+/**
+ * `/new [AI] [메시지]`.
+ *
+ * 메시지가 있으면 바로 시작한다. 없으면(메뉴에서 눌렀을 때) 다음에 오는 글을
+ * 첫 메시지로 받도록 표시해 두고 기다린다.
+ */
+async function handleNewChatCommand(
+  argument: string,
+  context: CommandContext,
+  state: TelegramBridgeState,
+  files: TelegramIncomingFile[],
+): Promise<CommandResult> {
+  const connected = await (context.listConnectedProviders ?? listConnectedProvidersOnMachine)();
+
+  // 첫 낱말이 AI 이름과 정확히 같을 때만 AI 를 고른 것으로 본다. "/new claude가
+  // 뭐야" 는 기본 AI 에게 하는 질문이다.
+  const [firstWord = ''] = argument.split(/\s/, 1);
+  const named = PROVIDER_IDS.find((id) => id === firstWord.toLowerCase());
+  const prompt = named ? argument.slice(firstWord.length).trim() : argument;
+
+  if (named && !connected.includes(named)) {
+    return `${PROVIDER_LABELS[named]} 는 이 컴퓨터에서 쓸 수 없습니다 (설치·로그인 필요).\n쓸 수 있는 AI: ${describeConnected(connected)}`;
+  }
+
+  const provider = named ?? pickDefaultProvider(connected);
+  const model = findLastUsedModel(provider);
+
+  if (prompt || files.length > 0) {
+    return startNewChat(provider, model, prompt, files, context, state);
+  }
+
+  writeBridgeState(context.userId, {
+    pendingNewChat: { provider, model, createdAt: Date.now() },
+  });
+  return renderPendingNewChat(provider, connected, !named);
+}
+
+/**
+ * 새 대화를 만들고, 구독을 그리로 옮기고, 첫 메시지를 보낸다.
+ *
+ * 첫 메시지가 들어가지 못하면 만든 대화를 지우고 구독도 되돌린다. 빈 대화가
+ * 사이드바에 남고 폰은 아무도 듣지 않는 대화를 구독하게 된다.
+ */
+async function startNewChat(
+  provider: LLMProvider,
+  model: string | null,
+  text: string,
+  files: TelegramIncomingFile[],
+  context: CommandContext,
+  state: TelegramBridgeState,
+): Promise<CommandResult> {
+  const projectPath = pickNewChatProjectPath();
+  if (!projectPath) {
+    writeBridgeState(context.userId, { pendingNewChat: null });
+    return '대화를 열 프로젝트가 없습니다. 웹에서 프로젝트를 하나 추가해 주세요.';
+  }
+
+  const { sessionId } = sessionsService.createAppSession(
+    provider,
+    projectPath,
+    text || describeAttachedFiles(files),
+  );
+  writeBridgeState(context.userId, { watchedSessionId: sessionId, pendingNewChat: null });
+
+  const failure = await sendPrompt(text, context, sessionId, files, model ? { model } : {});
+  if (failure) {
+    sessionsDb.deleteSessionById(sessionId);
+    writeBridgeState(context.userId, { watchedSessionId: state.watchedSessionId });
+    return failure;
+  }
+
+  // 평소에는 보냈다는 확인을 하지 않지만, 여기서는 구독이 바뀌었다는 것을
+  // 알려야 한다. 이후에 보내는 글이 어디로 가는지가 달라진다.
+  return `🆕 새 ${PROVIDER_LABELS[provider]} 대화를 시작했습니다${model ? ` (${model})` : ''}. 이제 이 대화를 구독합니다.`;
+}
+
+// ---------------------------
+
+/**
+ * 메시지에 달린 버튼을 눌렀을 때. 브리지가 버튼 누름 갱신을 받아 부른다.
+ *
+ * 버튼은 명령 처리가 단 것이므로 해석도 여기서 한다. `toast` 는 버튼 위에
+ * 잠깐 뜨는 짧은 문구, `reply` 는 대화창에 새로 보낼 답이다.
+ */
+export async function handleTelegramButton(
+  data: string,
+  context: CommandContext,
+): Promise<{ toast: string; reply: CommandResult }> {
+  const [kind, value = ''] = data.split(':', 2);
+
+  if (kind === 'watch') {
+    const project = listActiveProjects().find((candidate) => candidate.project_id === value);
+    if (!project) {
+      return { toast: '없어진 프로젝트입니다.', reply: renderProjectPicker('프로젝트 목록이 바뀌었습니다.') };
+    }
+    return { toast: projectLabel(project), reply: watchProject(project, context.userId) };
+  }
+
+  if (kind === 'new' && value === 'cancel') {
+    writeBridgeState(context.userId, { pendingNewChat: null });
+    return { toast: '취소', reply: '새 대화를 열지 않습니다.' };
+  }
+
+  if (kind === 'new') {
+    const connected = await (context.listConnectedProviders ?? listConnectedProvidersOnMachine)();
+    const provider = PROVIDER_IDS.find((id) => id === value);
+    if (!provider || !connected.includes(provider)) {
+      return { toast: '쓸 수 없는 AI 입니다.', reply: `쓸 수 있는 AI: ${describeConnected(connected)}` };
+    }
+
+    writeBridgeState(context.userId, {
+      pendingNewChat: { provider, model: findLastUsedModel(provider), createdAt: Date.now() },
+    });
+    return { toast: PROVIDER_LABELS[provider], reply: renderPendingNewChat(provider, connected, false) };
+  }
+
+  return { toast: '더 이상 쓸 수 없는 버튼입니다.', reply: null };
 }

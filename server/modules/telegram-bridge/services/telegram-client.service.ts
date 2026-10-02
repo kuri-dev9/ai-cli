@@ -21,10 +21,34 @@ const POLL_TIMEOUT_SECONDS = 30;
  */
 const REQUEST_TIMEOUT_MS = (POLL_TIMEOUT_SECONDS + 15) * 1000;
 
+/**
+ * 메시지에 붙어 온 사진이나 파일 하나.
+ *
+ * 텔레그램은 갱신에 파일 본문을 싣지 않고 `file_id` 만 준다. 실제 내용은
+ * `downloadFile` 로 따로 받아야 한다. 명령 처리와 파일 저장 서비스가 이
+ * 모양 그대로 받아서 내려받고 저장한다.
+ */
+export type TelegramIncomingFile = {
+  fileId: string;
+  /** 사진에는 원래 이름이 없어서 메시지 번호로 지어 붙인다. */
+  name: string;
+  mimeType: string;
+  /** 텔레그램이 알려준 크기. 모르면 null — 그때는 받은 뒤에 잰다. */
+  size: number | null;
+  kind: 'photo' | 'document';
+};
+
 export type TelegramMessage = {
   messageId: number;
   chatId: number;
+  /** 본문. 사진·파일 메시지면 캡션이고, 캡션이 없으면 빈 문자열이다. */
   text: string;
+  files: TelegramIncomingFile[];
+  /**
+   * 여러 장을 한 번에 보내면(앨범) 같은 값을 단 메시지가 장마다 따로 온다.
+   * 한 턴으로 묶으려면 이 값으로 모아야 한다. 앨범이 아니면 null.
+   */
+  mediaGroupId: string | null;
 };
 
 type TelegramApiResponse<T> = {
@@ -33,19 +57,88 @@ type TelegramApiResponse<T> = {
   description?: string;
 };
 
+type RawPhotoSize = {
+  file_id?: string;
+  file_size?: number;
+  width?: number;
+  height?: number;
+};
+
+type RawDocument = {
+  file_id?: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+};
+
+type RawMessage = {
+  message_id?: number;
+  text?: string;
+  caption?: string;
+  chat?: { id?: number };
+  /** 같은 사진의 해상도별 사본. 작은 것부터 온다. */
+  photo?: RawPhotoSize[];
+  /** "파일로 보내기" 로 온 것. 압축되지 않은 원본 사진도 여기로 온다. */
+  document?: RawDocument;
+  media_group_id?: string;
+};
+
+type RawCallbackQuery = {
+  id?: string;
+  data?: string;
+  /** 버튼이 달려 있던 봇의 메시지. 아주 오래된 메시지면 빠져 올 수 있다. */
+  message?: { message_id?: number; chat?: { id?: number } };
+};
+
 type RawUpdate = {
   update_id: number;
-  message?: {
-    message_id?: number;
-    text?: string;
-    chat?: { id?: number };
-  };
+  message?: RawMessage;
+  callback_query?: RawCallbackQuery;
+};
+
+/**
+ * 메시지 아래에 붙는 버튼 하나. 누르면 `data` 가 그대로 돌아온다.
+ *
+ * 텔레그램의 `/` 메뉴는 명령을 누르는 순간 인자 없이 보내 버린다. 그래서 인자가
+ * 필요한 명령은 고를 거리를 버튼으로 돌려준다. 명령 처리가 버튼을 만들고,
+ * 브리지가 그대로 이 클라이언트에 실어 보낸다.
+ *
+ * `data` 는 텔레그램 한도상 64 바이트까지다.
+ */
+export type TelegramButton = {
+  text: string;
+  data: string;
+};
+
+/** 사용자가 버튼을 눌렀다는 갱신. 브리지가 명령 처리로 넘긴다. */
+export type TelegramButtonPress = {
+  /** `answerCallbackQuery` 에 넘길 값. 답하지 않으면 버튼이 계속 돌고 있다. */
+  queryId: string;
+  chatId: number;
+  /** 버튼이 붙어 있던 메시지. 누른 뒤 버튼을 걷어 낼 때 쓴다. */
+  messageId: number;
+  data: string;
 };
 
 export type TelegramUpdate = {
   updateId: number;
   message: TelegramMessage | null;
+  /** 버튼을 누른 갱신이면 채워진다. 그때 `message` 는 null 이다. */
+  buttonPress?: TelegramButtonPress | null;
 };
+
+function readButtonPress(query: RawCallbackQuery | undefined): TelegramButtonPress | null {
+  const chatId = query?.message?.chat?.id;
+  if (!query || typeof query.id !== 'string' || typeof chatId !== 'number') {
+    return null;
+  }
+  return {
+    queryId: query.id,
+    chatId,
+    messageId: query.message?.message_id ?? 0,
+    data: typeof query.data === 'string' ? query.data : '',
+  };
+}
 
 export type TelegramClient = ReturnType<typeof createTelegramClient>;
 
@@ -56,8 +149,97 @@ export type TelegramConnectionCheck = {
   error?: string;
 };
 
+/** 파일 하나를 올리는 데 이보다 오래 걸리면 포기한다. */
+const UPLOAD_TIMEOUT_MS = 60_000;
+
 /** 연결 확인은 사람이 버튼을 누르고 기다리는 호출이라 짧게 끊는다. */
 const CONNECTION_CHECK_TIMEOUT_MS = 10_000;
+
+/**
+ * 사진은 해상도별 사본이 여러 장 오는데, 그중 가장 큰 것 하나만 쓴다.
+ * 작은 사본은 미리보기용이라 모델에게 넘기면 글자가 뭉개진다.
+ */
+function pickLargestPhoto(photos: RawPhotoSize[]): RawPhotoSize | null {
+  let largest: RawPhotoSize | null = null;
+  for (const photo of photos) {
+    if (typeof photo.file_id !== 'string' || !photo.file_id) {
+      continue;
+    }
+    const area = (photo.width ?? 0) * (photo.height ?? 0);
+    const largestArea = largest ? (largest.width ?? 0) * (largest.height ?? 0) : -1;
+    if (area >= largestArea) {
+      largest = photo;
+    }
+  }
+  return largest;
+}
+
+function readIncomingFiles(message: RawMessage, messageId: number): TelegramIncomingFile[] {
+  const files: TelegramIncomingFile[] = [];
+
+  const photo = Array.isArray(message.photo) ? pickLargestPhoto(message.photo) : null;
+  if (photo?.file_id) {
+    // 텔레그램은 사진을 늘 JPEG 로 다시 압축해서 저장한다.
+    files.push({
+      fileId: photo.file_id,
+      name: `telegram-photo-${messageId}.jpg`,
+      mimeType: 'image/jpeg',
+      size: typeof photo.file_size === 'number' ? photo.file_size : null,
+      kind: 'photo',
+    });
+  }
+
+  const document = message.document;
+  if (typeof document?.file_id === 'string' && document.file_id) {
+    files.push({
+      fileId: document.file_id,
+      name: typeof document.file_name === 'string' && document.file_name.trim()
+        ? document.file_name.trim()
+        : `telegram-file-${messageId}`,
+      mimeType: typeof document.mime_type === 'string' && document.mime_type
+        ? document.mime_type
+        : 'application/octet-stream',
+      size: typeof document.file_size === 'number' ? document.file_size : null,
+      kind: 'document',
+    });
+  }
+
+  return files;
+}
+
+/** 텔레그램 메시지 하나를 브리지가 다루는 모양으로. 다룰 것이 없으면 null. */
+function readMessage(message: RawMessage | undefined): TelegramMessage | null {
+  const chatId = message?.chat?.id;
+  if (!message || typeof chatId !== 'number') {
+    return null;
+  }
+
+  const messageId = message.message_id ?? 0;
+  const text = typeof message.text === 'string'
+    ? message.text
+    : typeof message.caption === 'string' ? message.caption : '';
+  const files = readIncomingFiles(message, messageId);
+
+  // 스티커·위치·음성처럼 글도 파일도 아닌 것은 지금 다루지 않는다.
+  if (typeof message.text !== 'string' && files.length === 0) {
+    return null;
+  }
+
+  return {
+    messageId,
+    chatId,
+    text,
+    files,
+    mediaGroupId: typeof message.media_group_id === 'string' && message.media_group_id
+      ? message.media_group_id
+      : null,
+  };
+}
+
+/** 오류 문구에 토큰이 섞여 나가지 않도록 한 번 걸러 낸다. */
+function scrubToken(message: string, botToken: string): string {
+  return botToken ? message.split(botToken).join('***') : message;
+}
 
 /** 텔레그램이 거절하지 않도록 자르고, 잘렸다는 사실을 남긴다. */
 export function truncateForTelegram(text: string): string {
@@ -70,6 +252,7 @@ export function truncateForTelegram(text: string): string {
 
 export function createTelegramClient(botToken: string) {
   const baseUrl = `https://api.telegram.org/bot${botToken}`;
+  const fileBaseUrl = `https://api.telegram.org/file/bot${botToken}`;
 
   async function call<T>(
     method: string,
@@ -90,6 +273,37 @@ export function createTelegramClient(botToken: string) {
     return body.result as T;
   }
 
+  /**
+   * 파일을 올리는 호출. JSON 이 아니라 multipart 로 보내야 한다.
+   *
+   * 이 주소에도 토큰이 들어가므로 실패 문구에서 지운다.
+   */
+  async function upload(
+    method: 'sendPhoto' | 'sendDocument',
+    chatId: number,
+    field: 'photo' | 'document',
+    content: Buffer,
+    filename: string,
+  ): Promise<void> {
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append(field, new Blob([new Uint8Array(content)]), filename);
+
+    try {
+      const response = await fetch(`${baseUrl}/${method}`, {
+        method: 'POST',
+        body: form,
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      });
+      const body = (await response.json()) as TelegramApiResponse<unknown>;
+      if (!body.ok) {
+        throw new Error(`Telegram ${method} failed: ${body.description ?? response.status}`);
+      }
+    } catch (error) {
+      throw new Error(scrubToken(error instanceof Error ? error.message : String(error), botToken));
+    }
+  }
+
   return {
     /**
      * 다음 갱신들을 기다린다.
@@ -97,30 +311,53 @@ export function createTelegramClient(botToken: string) {
      * `offset` 은 "여기까지 처리했다"는 표시다. 이미 받은 갱신의 update_id + 1
      * 을 넘겨야 같은 메시지를 재시작 때마다 다시 처리하지 않는다.
      */
-    async getUpdates(offset: number, signal?: AbortSignal): Promise<TelegramUpdate[]> {
+    async getUpdates(
+      offset: number,
+      signal?: AbortSignal,
+      timeoutSeconds: number = POLL_TIMEOUT_SECONDS,
+    ): Promise<TelegramUpdate[]> {
       const updates = await call<RawUpdate[]>(
         'getUpdates',
         {
           offset,
-          timeout: POLL_TIMEOUT_SECONDS,
-          // 지금 처리하는 것은 일반 메시지뿐. 나머지 갱신 종류는 받아봐야
+          // 앨범의 나머지 장을 기다릴 때만 짧게 부른다. 평소에는 길게 매달린다.
+          timeout: timeoutSeconds,
+          // 일반 메시지와 버튼 누름만 처리한다. 나머지 갱신 종류는 받아봐야
           // 버리게 되므로 아예 요청하지 않는다.
-          allowed_updates: ['message'],
+          allowed_updates: ['message', 'callback_query'],
         },
         signal,
       );
 
-      return updates.map((update) => {
-        const chatId = update.message?.chat?.id;
-        const text = update.message?.text;
-        return {
-          updateId: update.update_id,
-          message:
-            typeof chatId === 'number' && typeof text === 'string'
-              ? { messageId: update.message?.message_id ?? 0, chatId, text }
-              : null,
-        };
-      });
+      return updates.map((update) => ({
+        updateId: update.update_id,
+        message: readMessage(update.message),
+        buttonPress: readButtonPress(update.callback_query),
+      }));
+    },
+
+    /**
+     * 메시지에 붙은 파일의 내용을 받는다.
+     *
+     * 두 단계다 — `getFile` 로 서버 쪽 경로를 얻고, 그 경로를 파일 전용 주소에서
+     * 내려받는다. 그 주소에는 토큰이 들어가므로 실패 문구에서 반드시 지운다.
+     * 봇 API 는 20MB 가 넘는 파일은 내주지 않는다.
+     */
+    async downloadFile(fileId: string, signal?: AbortSignal): Promise<Buffer> {
+      try {
+        const file = await call<{ file_path?: string }>('getFile', { file_id: fileId }, signal);
+        if (typeof file.file_path !== 'string' || !file.file_path) {
+          throw new Error('Telegram getFile returned no file path');
+        }
+
+        const response = await fetch(`${fileBaseUrl}/${file.file_path}`, { signal });
+        if (!response.ok) {
+          throw new Error(`Telegram file download failed: ${response.status}`);
+        }
+        return Buffer.from(await response.arrayBuffer());
+      } catch (error) {
+        throw new Error(scrubToken(error instanceof Error ? error.message : String(error), botToken));
+      }
     },
 
     /** 토큰이 살아 있는지와 어느 봇인지 확인한다. */
@@ -129,13 +366,58 @@ export function createTelegramClient(botToken: string) {
       return { username: typeof me.username === 'string' && me.username ? me.username : null };
     },
 
-    async sendMessage(chatId: number, text: string): Promise<void> {
+    /**
+     * 사진 한 장을 올린다. 텔레그램이 다시 압축해서 미리보기로 보여 준다.
+     *
+     * 10MB 를 넘거나 가로세로 비율이 너무 극단적이면 텔레그램이 거절한다.
+     * 그때는 부르는 쪽이 `sendDocument` 로 다시 보낸다.
+     */
+    async sendPhoto(chatId: number, content: Buffer, filename: string): Promise<void> {
+      await upload('sendPhoto', chatId, 'photo', content, filename);
+    },
+
+    /** 파일로 올린다. 압축하지 않고 원본 그대로 간다. 한도는 50MB. */
+    async sendDocument(chatId: number, content: Buffer, filename: string): Promise<void> {
+      await upload('sendDocument', chatId, 'document', content, filename);
+    },
+
+    async sendMessage(chatId: number, text: string, buttons?: TelegramButton[][]): Promise<void> {
       // parse_mode 를 쓰지 않는다. 보내는 내용이 코드와 경로투성이라
       // 마크다운으로 해석시키면 이스케이프 하나 틀릴 때마다 전송이 실패한다.
       await call('sendMessage', {
         chat_id: chatId,
         text: truncateForTelegram(text),
         disable_web_page_preview: true,
+        ...(buttons && buttons.length > 0
+          ? {
+            reply_markup: {
+              inline_keyboard: buttons.map((row) => row.map((button) => ({
+                text: button.text,
+                callback_data: button.data,
+              }))),
+            },
+          }
+          : {}),
+      });
+    },
+
+    /**
+     * 버튼 누름에 답한다. 답하지 않으면 텔레그램이 버튼에 로딩 표시를 한참
+     * 띄워 둔다. `text` 를 주면 화면 위에 잠깐 떴다 사라진다.
+     */
+    async answerButtonPress(queryId: string, text?: string): Promise<void> {
+      await call('answerCallbackQuery', { callback_query_id: queryId, ...(text ? { text } : {}) });
+    },
+
+    /**
+     * 메시지에 달린 버튼을 걷어 낸다. 이미 고른 목록의 버튼을 나중에 또
+     * 누르면 그때와 상황이 달라서 엉뚱한 것이 골라진다.
+     */
+    async clearButtons(chatId: number, messageId: number): Promise<void> {
+      await call('editMessageReplyMarkup', {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: [] },
       });
     },
 
@@ -250,11 +532,6 @@ function pickChatName(chat: RawDiscoveryChat): string {
     return chat.username.trim();
   }
   return '';
-}
-
-/** 오류 문구에 토큰이 섞여 나가지 않도록 한 번 걸러 낸다. */
-function scrubToken(message: string, botToken: string): string {
-  return botToken ? message.split(botToken).join('***') : message;
 }
 
 /**

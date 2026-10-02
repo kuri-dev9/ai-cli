@@ -1,10 +1,23 @@
 import { chatRunRegistry } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import type { NormalizedMessage } from '@/shared/types.js';
-import { handleTelegramCommand } from '@/modules/telegram-bridge/services/telegram-commands.service.js';
+import {
+  handleTelegramButton,
+  handleTelegramCommand,
+} from '@/modules/telegram-bridge/services/telegram-commands.service.js';
+import type { TelegramReply } from '@/modules/telegram-bridge/services/telegram-commands.service.js';
 import { createTelegramClient } from '@/modules/telegram-bridge/services/telegram-client.service.js';
-import type { TelegramClient } from '@/modules/telegram-bridge/services/telegram-client.service.js';
+import type {
+  TelegramButtonPress,
+  TelegramClient,
+  TelegramMessage,
+  TelegramUpdate,
+} from '@/modules/telegram-bridge/services/telegram-client.service.js';
 import { readTelegramSettings } from '@/modules/telegram-bridge/services/telegram-settings.service.js';
+import {
+  readTurnImageCandidates,
+  relayTurnImages,
+} from '@/modules/telegram-bridge/services/telegram-turn-images.service.js';
 import {
   isSessionNotified,
   readBridgeState,
@@ -22,6 +35,36 @@ import {
 
 /** 연속 실패 시 재시도 간격. 마지막 값에서 더 늘리지 않는다. */
 const RETRY_BACKOFF_MS = [1_000, 5_000, 15_000, 60_000];
+
+/**
+ * 앨범의 나머지 장을 기다리는 시간(초).
+ *
+ * 텔레그램은 여러 장을 한 번에 보내도 장마다 갱신을 따로 만들고, long polling
+ * 은 첫 장이 도착하자마자 돌아오므로 나머지가 다음 응답으로 밀릴 수 있다.
+ * 그동안 짧게 한 번 더 물어보고, 그 사이 더 오는 것이 없으면 다 왔다고 본다.
+ */
+const ALBUM_WAIT_SECONDS = 2;
+
+/** 아직 다 오지 않았을 수 있는 앨범. 장마다 온 메시지를 모아 둔다. */
+type PendingAlbum = {
+  chatId: number;
+  mediaGroupId: string;
+  messages: TelegramMessage[];
+};
+
+/**
+ * 앨범의 장들을 메시지 하나로 합친다.
+ *
+ * 캡션은 보통 한 장에만 붙지만, 여러 장에 붙어 오면 순서대로 잇는다.
+ */
+function mergeAlbum(album: PendingAlbum): TelegramMessage {
+  const [first] = album.messages;
+  return {
+    ...first,
+    text: album.messages.map((message) => message.text.trim()).filter(Boolean).join('\n\n'),
+    files: album.messages.flatMap((message) => message.files),
+  };
+}
 
 type BridgeConfig = {
   botToken: string;
@@ -142,6 +185,7 @@ export function announceRelayHandoff(enabled: boolean): void {
  */
 const BOT_COMMAND_MENU = [
   { command: 'help', description: '명령 목록' },
+  { command: 'new', description: '[AI] [메시지] 새 대화 시작' },
   { command: 'status', description: '무엇이 돌고 있는지' },
   { command: 'projects', description: '프로젝트 목록' },
   { command: 'watch', description: '<번호|이름> 그 프로젝트의 최신 대화를 구독' },
@@ -187,15 +231,94 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
       return;
     }
 
+    // 기록은 여기서 동기로 다 읽어 둔다. 대기열에 다음 메시지가 있으면 곧바로
+    // 새 실행이 같은 세션 자리를 차지해서, 한 박자 늦게 읽으면 다른 턴의 것이다.
+    const imageCandidates = readTurnImageCandidates(sessionId);
     const errors = readErrors(sessionId);
+    const finalText = readFinalAssistantText(sessionId);
+    let summary = finalText ? `✅ 완료\n\n${finalText}` : '✅ 완료 (남긴 답변 없음)';
     if (errors.length > 0) {
-      void broadcast(`⚠ 오류로 끝났습니다.\n\n${errors.join('\n')}`);
+      summary = `⚠ 오류로 끝났습니다.\n\n${errors.join('\n')}`;
+    }
+
+    // 그림은 설명 뒤에 온다. 오류로 끝났어도 그 전에 만든 그림은 보낸다.
+    void (async () => {
+      await broadcast(summary);
+      if (imageCandidates && imageCandidates.paths.length > 0) {
+        await relayTurnImages(client, [...allowed], imageCandidates);
+      }
+    })().catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error('[TelegramBridge] Failed to relay the turn result', { sessionId, error: reason });
+    });
+  });
+
+  /** 명령 처리의 답을 보낸다. 버튼이 달린 답이면 버튼째 보낸다. */
+  const sendReply = async (chatId: number, reply: string | TelegramReply | null): Promise<void> => {
+    if (!reply) {
+      return;
+    }
+    if (typeof reply === 'string') {
+      await client.sendMessage(chatId, reply);
+      return;
+    }
+    await client.sendMessage(chatId, reply.text, reply.buttons);
+  };
+
+  /**
+   * 버튼을 눌렀을 때. 메시지와 달리 먼저 텔레그램에 "받았다"고 답해야 버튼의
+   * 로딩 표시가 멈춘다.
+   */
+  const handleButtonPress = async (press: TelegramButtonPress): Promise<void> => {
+    const userId = readBridgeUserId();
+    if (userId === null) {
+      await client.answerButtonPress(press.queryId);
       return;
     }
 
-    const finalText = readFinalAssistantText(sessionId);
-    void broadcast(finalText ? `✅ 완료\n\n${finalText}` : '✅ 완료 (남긴 답변 없음)');
-  });
+    try {
+      const { toast, reply } = await handleTelegramButton(press.data, {
+        userId,
+        runtime: config.runtime,
+      });
+      await client.answerButtonPress(press.queryId, toast);
+      // 고른 목록의 버튼은 걷어 낸다. 남겨 두면 한참 뒤에 눌렀을 때 그때와
+      // 상황이 달라 엉뚱한 것이 골라진다.
+      await client.clearButtons(press.chatId, press.messageId).catch(() => {});
+      await sendReply(press.chatId, reply);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error('[TelegramBridge] Button failed', { error: reason });
+      await client.answerButtonPress(press.queryId).catch(() => {});
+      await client.sendMessage(press.chatId, `처리하지 못했습니다: ${reason}`);
+    }
+  };
+
+  /** 화이트리스트를 통과한 메시지 하나(또는 합친 앨범 하나)를 처리한다. */
+  const handleMessage = async (message: TelegramMessage): Promise<void> => {
+    const userId = readBridgeUserId();
+    if (userId === null) {
+      await client.sendMessage(message.chatId, '아직 사용자가 없습니다. 웹에서 먼저 가입해 주세요.');
+      return;
+    }
+
+    try {
+      const reply = await handleTelegramCommand(
+        message.text,
+        {
+          userId,
+          runtime: config.runtime,
+          downloadFile: (fileId, signal) => client.downloadFile(fileId, signal),
+        },
+        message.files,
+      );
+      await sendReply(message.chatId, reply);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error('[TelegramBridge] Command failed', { error: reason });
+      await client.sendMessage(message.chatId, `처리하지 못했습니다: ${reason}`);
+    }
+  };
 
   const poll = async (): Promise<void> => {
     // 디스크에 남겨 둔 지점부터 이어 받는다. 여기서 0 부터 다시 시작하면
@@ -205,10 +328,15 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
     const startupUserId = readBridgeUserId();
     let offset = startupUserId !== null ? readBridgeState(startupUserId).lastUpdateOffset : 0;
     let failures = 0;
+    let pendingAlbum: PendingAlbum | null = null;
 
     while (!stopped) {
       try {
-        const updates = await client.getUpdates(offset, abortController.signal);
+        // 앨범을 모으는 중이면 짧게 묻는다. 길게 매달리면 나머지 장이 없을
+        // 때 앨범이 30 초 동안 실행되지 않는다.
+        const updates: TelegramUpdate[] = pendingAlbum
+          ? await client.getUpdates(offset, abortController.signal, ALBUM_WAIT_SECONDS)
+          : await client.getUpdates(offset, abortController.signal);
         failures = 0;
 
         for (const update of updates) {
@@ -221,6 +349,16 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
           const persistUserId = readBridgeUserId();
           if (persistUserId !== null) {
             writeBridgeState(persistUserId, { lastUpdateOffset: offset });
+          }
+
+          // 버튼은 화이트리스트 밖에서 눌릴 수 없지만(우리가 보낸 메시지에만
+          // 달린다) 그룹에 봇이 초대된 경우를 생각해 똑같이 막는다.
+          const press = update.buttonPress;
+          if (press) {
+            if (allowed.has(press.chatId)) {
+              await handleButtonPress(press);
+            }
+            continue;
           }
 
           const message = update.message;
@@ -238,25 +376,32 @@ export function startTelegramBridge(config: BridgeConfig): BridgeHandle {
             continue;
           }
 
-          const userId = readBridgeUserId();
-          if (userId === null) {
-            await client.sendMessage(message.chatId, '아직 사용자가 없습니다. 웹에서 먼저 가입해 주세요.');
+          // 다른 메시지가 끼어들었다면 모으던 앨범은 다 온 것이다. 먼저 보낸
+          // 앨범이 뒤에 보낸 글보다 늦게 실행되지 않도록 여기서 먼저 처리한다.
+          if (
+            pendingAlbum
+            && (pendingAlbum.mediaGroupId !== message.mediaGroupId || pendingAlbum.chatId !== message.chatId)
+          ) {
+            // 처리 전에 비운다. 처리 중에 예외가 나도 같은 앨범을 두 번 보내지 않는다.
+            const album = pendingAlbum;
+            pendingAlbum = null;
+            await handleMessage(mergeAlbum(album));
+          }
+
+          if (message.mediaGroupId) {
+            pendingAlbum ??= { chatId: message.chatId, mediaGroupId: message.mediaGroupId, messages: [] };
+            pendingAlbum.messages.push(message);
             continue;
           }
 
-          try {
-            const reply = await handleTelegramCommand(message.text, {
-              userId,
-              runtime: config.runtime,
-            });
-            if (reply) {
-              await client.sendMessage(message.chatId, reply);
-            }
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : String(error);
-            console.error('[TelegramBridge] Command failed', { error: reason });
-            await client.sendMessage(message.chatId, `처리하지 못했습니다: ${reason}`);
-          }
+          await handleMessage(message);
+        }
+
+        // 기다리는 동안 아무것도 더 오지 않았으면 앨범은 다 왔다.
+        if (pendingAlbum && updates.length === 0) {
+          const album = pendingAlbum;
+          pendingAlbum = null;
+          await handleMessage(mergeAlbum(album));
         }
       } catch (error) {
         if (stopped || abortController.signal.aborted) {
