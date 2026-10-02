@@ -9,6 +9,11 @@ import SidebarProjectGroupHeader from '@/modules/sidebar/SidebarProjectGroupHead
 import SidebarProjectItem from '@/modules/sidebar/SidebarProjectItem';
 import SidebarProjectsState from '@/modules/sidebar/SidebarProjectsState';
 import { partitionProjectsByGroup, useProjectGroups } from '@/modules/sidebar/projectGroups';
+import {
+  DRAG_SCROLL_IDLE_MS,
+  computeDragScrollSpeed,
+  findScrollableAncestor,
+} from '@/modules/sidebar/utils/dragAutoScroll';
 
 /** 드래그 중인 프로젝트를 식별하는 데이터 타입. */
 const PROJECT_DRAG_TYPE = 'application/x-project-id';
@@ -73,6 +78,18 @@ export default function SidebarProjectList({
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const newGroupInputRef = useRef<HTMLInputElement>(null);
+  const listRootRef = useRef<HTMLDivElement>(null);
+  /**
+   * 드래그 중 자동 스크롤의 진행 상태. 렌더와 무관한 rAF 루프라 전부 ref 로
+   * 들고 있는다 — speed 는 dragover 때마다 갱신되고, 루프는 speed 가 0 이
+   * 되거나 dragover 가 끊기면 스스로 멈춘다.
+   */
+  const dragScrollRef = useRef({
+    frame: 0,
+    speed: 0,
+    lastDragOverAt: 0,
+    container: null as HTMLElement | null,
+  });
 
   const state = (
     <SidebarProjectsState
@@ -106,6 +123,55 @@ export default function SidebarProjectList({
     event.dataTransfer.setData(PROJECT_DRAG_TYPE, projectId);
     event.dataTransfer.effectAllowed = 'move';
   }, []);
+
+  // 컴포넌트가 사라지면 돌던 자동 스크롤 루프도 같이 멈춘다.
+  useEffect(() => {
+    const state = dragScrollRef.current;
+    return () => {
+      if (state.frame) {
+        cancelAnimationFrame(state.frame);
+        state.frame = 0;
+      }
+    };
+  }, []);
+
+  /**
+   * 목록 어디에서든 dragover 가 올라올 때마다 포인터 위치로 스크롤 속도를
+   * 다시 정한다. 드롭 허용 여부와는 무관하므로 preventDefault 는 하지 않는다
+   * — 그건 각 드롭 대상(그룹 머리글, 미분류 영역)의 몫이다.
+   */
+  const handleListDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes(PROJECT_DRAG_TYPE)) {
+      return;
+    }
+
+    const state = dragScrollRef.current;
+    state.lastDragOverAt = performance.now();
+    if (!state.container) {
+      state.container = findScrollableAncestor(listRootRef.current);
+    }
+    const container = state.container;
+    if (!container) {
+      return;
+    }
+
+    const rect = container.getBoundingClientRect();
+    state.speed = computeDragScrollSpeed(event.clientY, rect.top, rect.bottom);
+
+    if (state.speed !== 0 && state.frame === 0) {
+      const step = () => {
+        const current = dragScrollRef.current;
+        const idle = performance.now() - current.lastDragOverAt > DRAG_SCROLL_IDLE_MS;
+        if (!current.container || current.speed === 0 || idle) {
+          current.frame = 0;
+          return;
+        }
+        current.container.scrollTop += current.speed;
+        current.frame = requestAnimationFrame(step);
+      };
+      state.frame = requestAnimationFrame(step);
+    }
+  };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>, targetId: string) => {
     if (!event.dataTransfer.types.includes(PROJECT_DRAG_TYPE)) {
@@ -197,7 +263,11 @@ export default function SidebarProjectList({
   };
 
   return (
-      <div className="pb-safe-area-inset-bottom md:space-y-1">
+      <div
+        ref={listRootRef}
+        onDragOver={handleListDragOver}
+        className="pb-safe-area-inset-bottom md:space-y-1"
+      >
         {!showProjects ? (
           state
         ) : (

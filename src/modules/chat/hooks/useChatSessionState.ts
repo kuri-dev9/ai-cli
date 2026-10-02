@@ -41,6 +41,51 @@ const DETACH_FROM_BOTTOM_PX = 50;
 const REATTACH_TO_BOTTOM_PX = 8;
 
 /**
+ * 휠·터치처럼 방향을 아는 입력으로 바닥에 다가올 때 다시 붙는 거리.
+ *
+ * 위의 8px 선은 방향을 모르는 `scroll` 이벤트용이라 인색할 수밖에 없는데,
+ * 스트리밍 중에는 바닥이 계속 내려가서 8px 안에 드는 것 자체가 거의
+ * 불가능했다 — 아래로 내려도 따라가기가 다시 켜지지 않았다. 사용자가
+ * 아래 방향으로 굴려서 이 거리 안까지 온 것은 바닥을 쫓겠다는 의도가
+ * 분명하므로 훨씬 관대하게 붙는다.
+ */
+const DIRECTED_REATTACH_TO_BOTTOM_PX = 120;
+
+/**
+ * 방향이 있는 스크롤 입력(휠 deltaY, 터치 이동량)이 따라가기 상태를 어떻게
+ * 바꾸는지 판정한다. 위로 올리면 즉시 놓고, 아래로 내려 바닥 근처에 오면
+ * 다시 붙는다. 그 밖에는 건드리지 않는다(null).
+ */
+export function resolveFollowIntent(
+  deltaY: number,
+  distanceFromBottom: number,
+): 'release' | 'follow' | null {
+  if (deltaY < 0) {
+    return 'release';
+  }
+  if (deltaY > 0 && distanceFromBottom < DIRECTED_REATTACH_TO_BOTTOM_PX) {
+    return 'follow';
+  }
+  return null;
+}
+
+/**
+ * ResizeObserver 가 지켜볼 본문 요소.
+ *
+ * 메시지가 있으면 스크롤 컨테이너의 첫 자식은 본문이 아니라 내보내기
+ * 메뉴(sticky) 래퍼다 — 그걸 관찰하면 스트리밍으로 답이 자라도 아무 일도
+ * 일어나지 않아서, 화면이 위에 멈춘 채 메시지 경계에서만 점프했다. 그래서
+ * ChatMessagesPane 이 본문 div 에 붙여 둔 표식을 찾는다.
+ */
+export function findTranscriptContentElement(container: HTMLElement): Element {
+  return (
+    container.querySelector('[data-chat-scroll-content]')
+    ?? container.firstElementChild
+    ?? container
+  );
+}
+
+/**
  * Finds the rendered row for a resolved search target.
  *
  * Only an exact timestamp match counts while retries remain: the widened window
@@ -666,6 +711,13 @@ export function useChatSessionState({
 
     const tick = () => {
       if (!pendingInitialScrollRef.current || !scrollContainerRef.current) return;
+      // 높이가 안정되기 전이라도 사용자가 위로 올렸으면 그 자리를 이긴다.
+      // 이 루프는 최대 1초간 매 프레임 바닥으로 끌어내리므로, 양보하지
+      // 않으면 열리자마자 올려 본 사용자를 계속 도로 끌어내린다.
+      if (isUserScrolledUpRef.current) {
+        pendingInitialScrollRef.current = false;
+        return;
+      }
       container.scrollTop = container.scrollHeight;
       if (container.scrollHeight === lastHeight) {
         stableCount++;
@@ -1041,7 +1093,7 @@ export function useChatSessionState({
       return;
     }
 
-    const content = container.firstElementChild ?? container;
+    const content = findTranscriptContentElement(container);
     const observer = new ResizeObserver(() => {
       // 사용자가 위를 보고 있으면 절대 끌어내리지 않는다.
       if (isUserScrolledUpRef.current) {
@@ -1058,11 +1110,12 @@ export function useChatSessionState({
   }, [isActive, scrollToBottom]);
 
   /**
-   * 휠을 위로 굴리는 즉시 따라가기를 멈춘다.
+   * 휠 방향으로 따라가기를 끄고 켠다.
    *
    * `scroll` 이벤트만으로는 사용자가 올린 것인지 우리가 내린 것인지 구분할 수
    * 없다. 답이 자라는 속도가 빠르면 사용자가 위로 올려도 곧바로 다시 끌려
-   * 내려가서, 읽던 자리를 붙잡을 수 없었다. 휠 방향은 의도가 분명하다.
+   * 내려가서, 읽던 자리를 붙잡을 수 없었다. 휠 방향은 의도가 분명하다 —
+   * 위로 굴리면 즉시 놓고, 아래로 굴려 바닥 근처에 오면 다시 붙는다.
    */
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -1070,35 +1123,48 @@ export function useChatSessionState({
       return;
     }
 
-    const handleWheelUp = (event: WheelEvent) => {
-      if (event.deltaY < 0) {
+    const applyIntent = (deltaY: number) => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const intent = resolveFollowIntent(deltaY, scrollHeight - scrollTop - clientHeight);
+      if (intent === 'release') {
         isUserScrolledUpRef.current = true;
         setIsUserScrolledUp(true);
+      } else if (intent === 'follow') {
+        isUserScrolledUpRef.current = false;
+        setIsUserScrolledUp(false);
+        // 즉시 바닥까지 붙인다. 플래그만 바꾸면 다음 scroll 이벤트가
+        // "바닥에서 50px 이상 떨어져 있네" 하고 도로 놓아 버린다.
+        scrollToBottom();
       }
     };
 
-    // 모바일에서는 휠이 없다. 손가락을 아래로 끌면(= 위로 스크롤) 같은 의도다.
+    const handleWheel = (event: WheelEvent) => {
+      applyIntent(event.deltaY);
+    };
+
+    // 모바일에서는 휠이 없다. 손가락 이동을 같은 의도로 읽는다 — 아래로
+    // 끌면(= 위로 스크롤) 놓고, 위로 끌면(= 아래로 스크롤) 다시 붙는다.
     let touchStartY = 0;
     const handleTouchStart = (event: TouchEvent) => {
       touchStartY = event.touches[0]?.clientY ?? 0;
     };
     const handleTouchMove = (event: TouchEvent) => {
       const currentY = event.touches[0]?.clientY ?? 0;
-      if (currentY - touchStartY > 8) {
-        isUserScrolledUpRef.current = true;
-        setIsUserScrolledUp(true);
+      const moved = touchStartY - currentY;
+      if (Math.abs(moved) > 8) {
+        applyIntent(moved);
       }
     };
 
-    container.addEventListener('wheel', handleWheelUp, { passive: true });
+    container.addEventListener('wheel', handleWheel, { passive: true });
     container.addEventListener('touchstart', handleTouchStart, { passive: true });
     container.addEventListener('touchmove', handleTouchMove, { passive: true });
     return () => {
-      container.removeEventListener('wheel', handleWheelUp);
+      container.removeEventListener('wheel', handleWheel);
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchmove', handleTouchMove);
     };
-  }, [isActive]);
+  }, [isActive, scrollToBottom]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;

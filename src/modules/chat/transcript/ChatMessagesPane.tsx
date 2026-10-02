@@ -188,7 +188,16 @@ function ChatMessagesPane({
           </div>
         </div>
       )}
-      <div className="mx-auto w-full max-w-[54.25rem] space-y-3 px-4 sm:space-y-4">
+      {/*
+        data-chat-scroll-content: useChatSessionState 의 ResizeObserver 가
+        스트리밍으로 자라는 본문을 찾을 때 쓰는 표식. 이 div 앞에 내보내기
+        메뉴(sticky) 래퍼가 조건부로 끼어들기 때문에 firstElementChild 로는
+        본문을 집을 수 없다.
+      */}
+      <div
+        data-chat-scroll-content
+        className="mx-auto w-full max-w-[54.25rem] space-y-3 px-4 sm:space-y-4"
+      >
       {(isLoadingSessionMessages || isProcessing) && chatMessages.length === 0 ? (
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400">
           <div className="flex items-center justify-center space-x-2">

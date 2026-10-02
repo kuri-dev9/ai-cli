@@ -39,16 +39,19 @@ export default function ProjectSettingsModal({
   const [projectPath, setProjectPath] = useState(originalPath);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 그룹은 사이드바에서만 쓰는 보기 설정이라 저장 버튼을 기다리지 않는다 —
-  // 고르는 즉시 반영되고, 이 화면의 저장/취소는 이름과 경로에만 해당한다.
+  // 그룹도 이 화면의 다른 항목과 같은 규칙을 따른다 — 고르기만 해서는 바뀌지
+  // 않고, 저장을 눌러야 사이드바에 반영된다. 취소하면 원래 그룹에 그대로 남는다.
   const { groups, assignments, assignProject } = useProjectGroups();
-  const currentGroupId = assignments[project.projectId] ?? '';
+  const savedGroupId = assignments[project.projectId] ?? '';
+  const [groupId, setGroupId] = useState(savedGroupId);
 
   const trimmedPath = projectPath.trim();
   const trimmedDisplayName = displayName.trim();
   const pathChanged = trimmedPath !== originalPath;
   const nameChanged = trimmedDisplayName !== (project.displayName || '');
-  const canSave = !isSaving && trimmedPath.length > 0 && (pathChanged || nameChanged);
+  const groupChanged = groupId !== savedGroupId;
+  const canSave =
+    !isSaving && trimmedPath.length > 0 && (pathChanged || nameChanged || groupChanged);
 
   const handleSave = useCallback(async () => {
     setIsSaving(true);
@@ -68,6 +71,12 @@ export default function ProjectSettingsModal({
         }
       }
 
+      // 서버 작업이 모두 성공한 뒤에만 그룹을 옮긴다. 경로/이름이 실패해 이
+      // 화면이 열린 채 남았을 때 그룹만 먼저 바뀌어 있으면 안 된다.
+      if (groupChanged) {
+        assignProject(project.projectId, groupId || null);
+      }
+
       await onSaved();
       onClose();
     } catch (saveError) {
@@ -80,6 +89,9 @@ export default function ProjectSettingsModal({
       setIsSaving(false);
     }
   }, [
+    assignProject,
+    groupChanged,
+    groupId,
     nameChanged,
     onClose,
     onSaved,
@@ -136,8 +148,9 @@ export default function ProjectSettingsModal({
                 {t('sidebar:groups.field', { defaultValue: 'Group' })}
               </label>
               <select
-                value={currentGroupId}
-                onChange={(event) => assignProject(project.projectId, event.target.value || null)}
+                value={groupId}
+                onChange={(event) => setGroupId(event.target.value)}
+                disabled={isSaving}
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <option value="">{t('sidebar:groups.ungrouped', { defaultValue: 'Ungrouped' })}</option>
