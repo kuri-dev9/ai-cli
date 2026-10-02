@@ -244,6 +244,10 @@ export const api = {
   // `upToAnchorId` (all of it when omitted). The source is left untouched.
   forkSession: (sessionId: string, body: { upToAnchorId?: string; title?: string } = {}) =>
     post(`/api/providers/sessions/${encodeURIComponent(sessionId)}/fork`, body),
+  // Moves a session into another project. It keeps its id; the conversation
+  // continues from a copy made in the target project's directory.
+  moveSession: (sessionId: string, projectId: string) =>
+    post(`/api/providers/sessions/${encodeURIComponent(sessionId)}/move`, { projectId }),
   renameSession: (sessionId: string, summary: string) =>
     put(`/api/providers/sessions/${sessionId}`, { summary }),
 

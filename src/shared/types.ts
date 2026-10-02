@@ -1395,6 +1395,8 @@ export type SessionRowActions = {
   onDeleteSession: (sessionId: string, sessionTitle: string) => void;
   /** Branches a session into an independent one. Rows hide it for providers that cannot. */
   onForkSession?: (session: SessionWithProvider) => void;
+  /** Opens the project picker that moves a session elsewhere. Rows hide it for providers that cannot. */
+  onMoveSession?: (session: SessionWithProvider) => void;
 };
 
 export type SidebarProjectListProps = SessionRowActions & {
@@ -1493,6 +1495,14 @@ export type ActiveSidebarRename =
  * open — they are portalled at the same z-index and would stack. The project
  * variant carries the session count the dialog warns with.
  */
+/** A session the user chose to move, held while the sidebar's project picker is open; `fromProjectId` is left out of the choices. */
+export type PendingSessionMove = {
+  sessionId: string;
+  sessionTitle: string;
+  provider: LLMProvider;
+  fromProjectId: string | null;
+};
+
 export type PendingSidebarDeletion =
   | { kind: 'project'; project: Project; sessionCount: number }
   | { kind: 'session'; sessionId: string; sessionTitle: string; isArchived: boolean };

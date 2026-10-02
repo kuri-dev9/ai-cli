@@ -122,7 +122,8 @@
     "restoreProjectError": "프로젝트 복원 오류. 다시 시도해주세요.",
     "restoreSessionFailed": "세션 복원 실패. 다시 시도해주세요.",
     "restoreSessionError": "세션 복원 오류. 다시 시도해주세요.",
-    "forkSessionError": "이 세션을 분기하지 못했습니다. 다시 시도해 주세요."
+    "forkSessionError": "이 세션을 분기하지 못했습니다. 다시 시도해 주세요.",
+    "moveSessionError": "이 세션을 옮기지 못했습니다."
   },
   "version": {
     "updateAvailable": "업데이트 가능",
@@ -179,5 +180,12 @@
     "moveDown": "그룹 아래로",
     "field": "그룹",
     "fieldHelp": "그룹은 사이드바 정리 방식만 바꿉니다 — 실제 폴더는 옮기지 않습니다."
+  },
+  "moveSession": {
+    "title": "다른 프로젝트로 이동",
+    "description": "고른 프로젝트 폴더에서 대화를 이어 갑니다. 원래 대화 기록 파일은 디스크에 그대로 남습니다.",
+    "filterPlaceholder": "프로젝트 찾기",
+    "noProjects": "옮길 수 있는 다른 프로젝트가 없습니다.",
+    "moving": "옮기는 중…"
   }
 }

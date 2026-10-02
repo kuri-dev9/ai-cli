@@ -80,6 +80,14 @@ export interface IProviderFork {
     jsonlPath: string;
     /** The session's working directory — how providers scope a session lookup. */
     projectPath: string;
+    /**
+     * Working directory the copy should belong to, when it differs from
+     * `projectPath`. Moving a session to another project forks it with this
+     * set, and the copy must record the new directory where the session
+     * indexer reads it — otherwise the next sync files it under the old
+     * project again. Omitted for an ordinary fork, which stays put.
+     */
+    targetProjectPath?: string;
     upToAnchorId?: string;
     title?: string;
   }): Promise<{ providerSessionId: string; jsonlPath: string }>;

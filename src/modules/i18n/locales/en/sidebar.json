@@ -123,7 +123,8 @@
     "restoreProjectError": "Error restoring project. Please try again.",
     "restoreSessionFailed": "Failed to restore session. Please try again.",
     "restoreSessionError": "Error restoring session. Please try again.",
-    "forkSessionError": "Could not fork this session. Please try again."
+    "forkSessionError": "Could not fork this session. Please try again.",
+    "moveSessionError": "Could not move this session."
   },
   "version": {
     "updateAvailable": "Update available",
@@ -180,5 +181,12 @@
     "moveDown": "Move group down",
     "field": "Group",
     "fieldHelp": "Groups only change how the sidebar is organized — no folders are moved."
+  },
+  "moveSession": {
+    "title": "Move to another project",
+    "description": "The conversation continues in the chosen project's folder. The original transcript is kept on disk.",
+    "filterPlaceholder": "Find a project",
+    "noProjects": "No other project to move to.",
+    "moving": "Moving…"
   }
 }

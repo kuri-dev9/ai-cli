@@ -19,7 +19,7 @@ type SidebarRecentConversationsProps = {
   currentTime: Date;
   /**
    * The same row state and callbacks the Projects list hands its rows, so a
-   * conversation can be renamed, copied, forked or archived from here too.
+   * conversation can be renamed, copied, forked, moved or archived from here too.
    */
   sessionActions: SessionRowActions;
   onConversationSelect: (
@@ -214,6 +214,14 @@ export default function SidebarRecentConversations({
                 // which is all a recents row knows about the session.
                 onFork={sessionActions.onForkSession
                   ? () => sessionActions.onForkSession?.({
+                    id: conversation.sessionId,
+                    summary: conversation.sessionTitle,
+                    __provider: conversation.provider,
+                    __projectId: conversation.projectId ?? undefined,
+                  })
+                  : undefined}
+                onMove={sessionActions.onMoveSession
+                  ? () => sessionActions.onMoveSession?.({
                     id: conversation.sessionId,
                     summary: conversation.sessionTitle,
                     __provider: conversation.provider,

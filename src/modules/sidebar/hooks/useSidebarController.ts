@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next';
 import { api } from '@/shared/api';
 import { subscribeToUserPreferences } from '@/shared/userSettings';
 import { usePaletteOps } from '@/modules/command-palette';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode } from '@/shared/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSessionMove, PendingSidebarDeletion, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode } from '@/shared/types';
 import {
   filterProjects,
   getVisibleLastActivity,
@@ -66,7 +66,7 @@ type UseSidebarControllerArgs = {
 export function useSidebarController({
   projects,
   selectedProject,
-  selectedSession: _selectedSession,
+  selectedSession,
   activeSessions,
   isLoading,
   isMobile,
@@ -97,6 +97,12 @@ export function useSidebarController({
   // project and session dialogs are portalled at the same z-index and would
   // otherwise stack. See PendingSidebarDeletion.
   const [pendingDeletion, setPendingDeletion] = useState<PendingSidebarDeletion | null>(null);
+  // The session whose project picker is open. Held here rather than in the
+  // row because the row may unmount (search, collapse) while the picker stays up.
+  const [pendingMove, setPendingMove] = useState<PendingSessionMove | null>(null);
+  // True while a move request is in flight, so the picker can lock its choices
+  // instead of letting a second click start a second fork.
+  const [isMovingSession, setIsMovingSession] = useState(false);
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [searchMode, setSearchMode] = useState<SidebarSearchMode>('projects');
   const [conversationResults, setConversationResults] = useState<ConversationSearchResults | null>(null);
@@ -1157,6 +1163,68 @@ export function useSidebarController({
     [onSessionSelect, t],
   );
 
+  /** Opens the project picker for one session. */
+  const requestMoveSession = useCallback((session: SessionWithProvider) => {
+    setPendingMove({
+      sessionId: session.id,
+      sessionTitle: String(session.summary ?? session.title ?? ''),
+      provider: session.__provider,
+      fromProjectId: typeof session.__projectId === 'string' ? session.__projectId : null,
+    });
+  }, []);
+
+  const cancelMoveSession = useCallback(() => {
+    if (!isMovingSession) {
+      setPendingMove(null);
+    }
+  }, [isMovingSession]);
+
+  /**
+   * Moves the pending session into `projectId` and follows it there.
+   *
+   * The session keeps its id, so an open conversation stays open; it is
+   * re-selected with its new project so the header and file tree switch over.
+   */
+  const confirmMoveSession = useCallback(
+    async (projectId: string) => {
+      if (!pendingMove || isMovingSession) {
+        return;
+      }
+
+      const move = pendingMove;
+      setIsMovingSession(true);
+      try {
+        const response = await api.moveSession(move.sessionId, projectId);
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(payload?.error?.message || payload?.message || `HTTP ${response.status}`);
+        }
+
+        setPendingMove(null);
+        setRecentConversations((previous) => previous.map((conversation) => (
+          conversation.sessionId === move.sessionId ? { ...conversation, projectId } : conversation
+        )));
+        await onRefresh();
+
+        if (selectedSession?.id === move.sessionId) {
+          onSessionSelect({
+            id: move.sessionId,
+            summary: move.sessionTitle,
+            __provider: move.provider,
+            __projectId: projectId,
+          } as ProjectSession);
+        }
+      } catch (error) {
+        console.error('[Sidebar] Error moving session:', error);
+        const reason = error instanceof Error ? error.message : String(error);
+        alert(`${t('messages.moveSessionError', 'Could not move this session.')}\n${reason}`);
+      } finally {
+        setIsMovingSession(false);
+      }
+    },
+    [isMovingSession, onRefresh, onSessionSelect, pendingMove, selectedSession, t],
+  );
+
   const collapseSidebar = useCallback(() => {
     setSidebarVisible(false);
   }, [setSidebarVisible]);
@@ -1200,6 +1268,11 @@ export function useSidebarController({
     toggleProject,
     handleSessionClick,
     forkSession,
+    pendingMove,
+    isMovingSession,
+    requestMoveSession,
+    cancelMoveSession,
+    confirmMoveSession,
     toggleStarProject,
     isProjectStarred,
     getProjectSessions,

@@ -391,6 +391,20 @@ const parseSessionForkPayload = (payload: unknown): { upToAnchorId?: string; tit
   };
 };
 
+/** The target is named by project id, the same handle every project route uses. */
+const parseSessionMovePayload = (payload: unknown): { projectId: string } => {
+  const projectId = payload && typeof payload === 'object'
+    ? (payload as Record<string, unknown>).projectId
+    : undefined;
+  if (typeof projectId !== 'string' || !projectId.trim()) {
+    throw new AppError('projectId is required.', {
+      code: 'PROJECT_ID_REQUIRED',
+      statusCode: 400,
+    });
+  }
+  return { projectId: projectId.trim() };
+};
+
 const parseSessionRenameSummary = (payload: unknown): string => {
   if (!payload || typeof payload !== 'object') {
     throw new AppError('Request body must be an object.', {
@@ -949,6 +963,16 @@ router.post(
     const sessionId = parseSessionId(req.params.sessionId);
     const result = await sessionsService.forkSessionById(sessionId, parseSessionForkPayload(req.body));
     res.status(201).json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/sessions/:sessionId/move',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const { projectId } = parseSessionMovePayload(req.body);
+    const result = await sessionsService.moveSessionToProject(sessionId, projectId);
+    res.json(createApiSuccessResponse(result));
   }),
 );
 

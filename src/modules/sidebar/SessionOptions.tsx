@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Check, Edit2, GitBranch, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { Check, Edit2, FolderInput, GitBranch, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { ActionMenu } from '@/shared/ui';
@@ -29,6 +29,8 @@ type SessionOptionsProps = {
   onDeleteSession: (sessionId: string, sessionTitle: string) => void;
   /** Bound by the caller, which owns the session object the fork needs. */
   onFork?: () => void;
+  /** Opens the project picker; bound by the caller like `onFork`. */
+  onMove?: () => void;
   /** Withheld where the row has nowhere to send a delete. */
   canDelete?: boolean;
   className?: string;
@@ -58,6 +60,7 @@ export default function SessionOptions({
   onSaveEditingSession,
   onDeleteSession,
   onFork,
+  onMove,
   canDelete = true,
   className,
   t,
@@ -71,6 +74,10 @@ export default function SessionOptions({
   // provider id here; the request is cached module-side, so every row shares one.
   const forkableProviders = useSessionForkingProviders();
   const canFork = Boolean(onFork) && forkableProviders.has(provider) && !isProcessing;
+  // Moving is a fork into another project under the hood, so it needs the same
+  // capability — and the same idle session, since a running turn is still
+  // writing the transcript being copied.
+  const canMove = Boolean(onMove) && forkableProviders.has(provider) && !isProcessing;
 
   // While editing, dismiss only when the click lands outside the rename panel,
   // matching Escape and the cancel button.
@@ -181,6 +188,13 @@ export default function SessionOptions({
               description: 'Continue from a copy, leaving this one untouched.',
               icon: GitBranch,
               onSelect: onFork,
+            }] : []),
+            ...(canMove && onMove ? [{
+              key: 'move',
+              label: 'Move to project',
+              description: 'Continue this conversation in another project.',
+              icon: FolderInput,
+              onSelect: onMove,
             }] : []),
             ...(canDelete && !isProcessing ? [{
               key: 'delete',

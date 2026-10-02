@@ -311,6 +311,103 @@ export const sessionsService = {
   },
 
   /**
+   * Moves a conversation into another project and keeps it going there.
+   *
+   * A conversation is tied to its working directory on the provider side —
+   * Claude keeps transcripts in one folder per directory, and both indexers
+   * file a transcript under the directory it records — so changing the row's
+   * project alone would not survive the next sync, and Claude could not resume
+   * it. Instead the conversation is forked into the target directory and this
+   * session is pointed at the copy, the same way an edit rewinds a Codex
+   * session.
+   *
+   * The session keeps its id, so open tabs, links and anything else that
+   * names it keep working. The original transcript stays on disk untouched and
+   * is recorded as superseded so the indexer does not offer it back.
+   */
+  async moveSessionToProject(
+    sessionId: string,
+    targetProjectId: string,
+  ): Promise<{ sessionId: string; projectId: string; projectPath: string }> {
+    const source = sessionsDb.getSessionById(sessionId);
+    if (!source) {
+      throw new AppError(`Session "${sessionId}" was not found.`, {
+        code: 'SESSION_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+
+    const target = projectsDb.getProjectById(targetProjectId);
+    if (!target || target.isArchived) {
+      throw new AppError('The target project was not found.', {
+        code: 'PROJECT_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+    if (target.project_path === source.project_path) {
+      throw new AppError('The session is already in that project.', {
+        code: 'MOVE_SAME_PROJECT',
+        statusCode: 400,
+      });
+    }
+
+    const provider = source.provider as LLMProvider;
+    const fork = providerRegistry.resolveProvider(provider).fork;
+    if (!fork) {
+      throw new AppError(`Sessions cannot be moved for provider "${provider}".`, {
+        code: 'MOVE_NOT_SUPPORTED',
+        statusCode: 409,
+      });
+    }
+
+    // A session that has never run has nothing on the provider side to carry
+    // over; there is no transcript to fork.
+    if (!source.provider_session_id || !source.jsonl_path || !source.project_path) {
+      throw new AppError('This session has not produced a transcript yet.', {
+        code: 'MOVE_SOURCE_NOT_READY',
+        statusCode: 409,
+      });
+    }
+
+    // A running turn is still appending to the transcript being copied; the
+    // copy would miss the end of it and the run would write to the old file.
+    if (chatRunRegistry.isProcessing(sessionId)) {
+      throw new AppError('Stop the running turn before moving this session.', {
+        code: 'MOVE_SESSION_RUNNING',
+        statusCode: 409,
+      });
+    }
+
+    const moved = await fork.forkSession({
+      providerSessionId: source.provider_session_id,
+      jsonlPath: source.jsonl_path,
+      projectPath: source.project_path,
+      targetProjectPath: target.project_path,
+      title: source.custom_name ?? undefined,
+    });
+
+    sessionsDb.markProviderSessionSuperseded({
+      providerSessionId: source.provider_session_id,
+      provider,
+      sessionId,
+      jsonlPath: source.jsonl_path,
+    });
+    sessionsDb.repointSessionToProviderSession(sessionId, {
+      providerSessionId: moved.providerSessionId,
+      jsonlPath: moved.jsonlPath,
+      projectPath: target.project_path,
+    });
+
+    await broadcastSessionUpserted(sessionId);
+
+    return {
+      sessionId,
+      projectId: target.project_id,
+      projectPath: target.project_path,
+    };
+  },
+
+  /**
    * Resolves the provider-native id only for an explicit user copy action.
    * Normal session payloads continue to expose only the stable app id.
    */

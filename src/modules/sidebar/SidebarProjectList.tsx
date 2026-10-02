@@ -51,6 +51,7 @@ export default function SidebarProjectList({
   onSessionSelect,
   onDeleteSession,
   onForkSession,
+  onMoveSession,
   onNewSession,
   onStartEditingSession,
   onCancelEditingSession,
@@ -182,6 +183,7 @@ export default function SidebarProjectList({
         onSessionSelect={onSessionSelect}
         onDeleteSession={onDeleteSession}
         onForkSession={onForkSession}
+        onMoveSession={onMoveSession}
         onLoadMoreSessions={onLoadMoreSessions}
         activeSessions={activeSessions}
         attentionSessionIds={attentionSessionIds}

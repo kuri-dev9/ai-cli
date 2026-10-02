@@ -144,6 +144,14 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
+    // A transcript a session has left behind — today, the original of a
+    // conversation moved to another project — stays on disk on purpose but is
+    // nobody's conversation any more. Re-indexing it would put the moved
+    // conversation back in its old project as a second sidebar entry.
+    if (sessionsDb.isProviderSessionSuperseded(parsed.sessionId, this.provider)) {
+      return null;
+    }
+
     // App-created sessions are keyed by an app id, so disk-discovered provider
     // ids must be resolved through the provider-id mapping first.
     const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)

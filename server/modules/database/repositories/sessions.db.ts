@@ -304,20 +304,37 @@ export const sessionsDb = {
    */
   repointSessionToProviderSession(
     sessionId: string,
-    input: { providerSessionId: string; jsonlPath: string },
+    input: {
+      providerSessionId: string;
+      jsonlPath: string;
+      /**
+       * Moves the session to another project in the same step. Only moving a
+       * session between projects sets this; a rewind stays where it was.
+       */
+      projectPath?: string;
+    },
   ): void {
     const db = getConnection();
+    const session = input.projectPath ? this.getSessionById(sessionId) : null;
+    const projectPath = input.projectPath && session
+      ? normalizeProjectPathForProvider(session.provider, input.projectPath)
+      : null;
 
     db.transaction(() => {
+      if (projectPath) {
+        // The project is a foreign key of the session row.
+        projectsDb.createProjectPath(projectPath);
+      }
       db.prepare('DELETE FROM sessions WHERE session_id = ? AND session_id <> ?')
         .run(input.providerSessionId, sessionId);
       db.prepare(
         `UPDATE sessions SET
            provider_session_id = ?,
            jsonl_path = ?,
+           project_path = COALESCE(?, project_path),
            updated_at = CURRENT_TIMESTAMP
          WHERE session_id = ?`
-      ).run(input.providerSessionId, input.jsonlPath, sessionId);
+      ).run(input.providerSessionId, input.jsonlPath, projectPath, sessionId);
     })();
   },
 

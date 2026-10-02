@@ -6,10 +6,11 @@ import type { TFunction } from 'i18next';
 import { Button } from '@/shared/ui';
 import { Settings } from '@/modules/settings';
 import { VersionUpgradeModal } from '@/modules/version-upgrade';
-import type { InstallMode, PendingSidebarDeletion, Project, ReleaseInfo, SettingsProject } from '@/shared/types';
+import type { InstallMode, PendingSessionMove, PendingSidebarDeletion, Project, ReleaseInfo, SettingsProject } from '@/shared/types';
 import { normalizeProjectForSettings } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import { ProjectCreationWizard } from '@/modules/project-creation-wizard';
 import { ProjectSettingsModal } from '@/modules/project-settings';
+import MoveSessionModal from '@/modules/sidebar/modals/MoveSessionModal';
 
 type SidebarModalsProps = {
   projects: Project[];
@@ -29,6 +30,11 @@ type SidebarModalsProps = {
   onCancelDeletion: () => void;
   onConfirmDeleteProject: (deleteData?: boolean) => void;
   onConfirmDeleteSession: (hardDelete?: boolean) => void;
+  /** null 이면 프로젝트 이동 창이 닫혀 있다. */
+  pendingMove: PendingSessionMove | null;
+  isMovingSession: boolean;
+  onConfirmMoveSession: (projectId: string) => void;
+  onCancelMoveSession: () => void;
   showVersionModal: boolean;
   onCloseVersionModal: () => void;
   releaseInfo: ReleaseInfo | null;
@@ -51,7 +57,7 @@ function TypedSettings(props: TypedSettingsProps) {
   return <SettingsComponent {...props} />;
 }
 
-/** Rendered by Sidebar to host its settings, new-project, delete-confirmation and version modals in one place. */
+/** Rendered by Sidebar to host its settings, new-project, delete-confirmation, move-session and version modals in one place. */
 export default function SidebarModals({
   projects,
   showSettings,
@@ -68,6 +74,10 @@ export default function SidebarModals({
   onCancelDeletion,
   onConfirmDeleteProject,
   onConfirmDeleteSession,
+  pendingMove,
+  isMovingSession,
+  onConfirmMoveSession,
+  onCancelMoveSession,
   showVersionModal,
   onCloseVersionModal,
   releaseInfo,
@@ -225,6 +235,19 @@ export default function SidebarModals({
               </div>
             </div>
           </div>,
+          document.body,
+        )}
+
+      {pendingMove &&
+        ReactDOM.createPortal(
+          <MoveSessionModal
+            move={pendingMove}
+            projects={projects}
+            isMoving={isMovingSession}
+            onConfirm={onConfirmMoveSession}
+            onCancel={onCancelMoveSession}
+            t={t}
+          />,
           document.body,
         )}
 

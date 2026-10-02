@@ -167,6 +167,15 @@ test('the fork callback reaches the rows that render the fork action', () => {
   assert.equal(recordedProjectRowProps[0].onForkSession, onForkSession);
 });
 
+test('the move callback reaches the rows that render the move action', () => {
+  // Optional at every hop for the same reason as `onForkSession`, so dropping
+  // it would type-check and only show up as a missing menu item.
+  const onMoveSession = () => {};
+  render(React.createElement(SidebarProjectList, { ...listProps(null), onMoveSession }));
+
+  assert.equal(recordedProjectRowProps[0].onMoveSession, onMoveSession);
+});
+
 const sessionsProps = (sessionRenameId: string | null, sessionRenameDraft: string) => ({
   project: PROJECT_A,
   isExpanded: true,

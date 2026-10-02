@@ -158,6 +158,19 @@ export function isPathInsideDirectory(candidatePath: string, directoryPath: stri
     && !path.isAbsolute(relativePath);
 }
 
+/**
+ * Names the folder under `<claude-home>/projects/` that holds one working
+ * directory's transcripts: every character other than an ASCII letter, digit
+ * or `-` becomes `-` (`/Users/me/app` → `-Users-me-app`).
+ *
+ * Consumed by the providers token-usage service (finding a transcript a row
+ * has no path for) and the Claude fork provider (placing a conversation moved
+ * to another project where Claude will look for it on resume).
+ */
+export function encodeClaudeProjectDirName(projectPath: string): string {
+  return projectPath.replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
 // ---------------------------
 //----------------- NORMALIZED MESSAGE HELPER INPUT TYPES ------------
 /**

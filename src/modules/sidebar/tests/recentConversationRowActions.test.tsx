@@ -142,3 +142,25 @@ test('a session needing attention gets the amber dot', () => {
   const rows = container.querySelectorAll('[data-testid="recent-conversation-row"]');
   assert.equal(rows.length, 2);
 });
+
+test('moving from a conversation row hands over that row\'s session and project', () => {
+  const moved: unknown[] = [];
+  renderList(
+    [conversation('s1', { provider: 'codex', projectId: 'project-9' })],
+    makeActions({ onMoveSession: (session) => moved.push(session) }),
+  );
+
+  (recordedOptionsProps[0].onMove as () => void)();
+
+  assert.deepEqual(moved, [{
+    id: 's1',
+    summary: 'title of s1',
+    __provider: 'codex',
+    __projectId: 'project-9',
+  }]);
+});
+
+test('a row offers no move when the list cannot move sessions', () => {
+  renderList([conversation('s1')], makeActions());
+  assert.equal(recordedOptionsProps[0].onMove, undefined);
+});
