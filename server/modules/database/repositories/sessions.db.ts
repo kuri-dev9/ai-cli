@@ -20,6 +20,36 @@ type SessionRow = {
   updated_at: string;
 };
 
+/**
+ * 폴더 목록을 "그 폴더와 그 아래가 아닌 세션" 조건으로 바꾼다.
+ *
+ * 접두어만 보면 `/a/llm-sim` 이 `/a/llm-sim-v2` 까지 잡으므로 구분자까지 붙여
+ * 비교한다. LIKE 는 대소문자를 무시하고 `%`·`_` 를 해석하므로, 글자 그대로
+ * 비교하는 `substr` 을 쓴다 — 화면 쪽 판정(`isPathInQuietFolders`)과 같은 규칙이다.
+ * 경로가 없는 세션은 어느 폴더에도 속하지 않으므로 남긴다. NULL 을 그대로
+ * 비교하면 NOT(...) 이 NULL 이 되어 오히려 빠져 버린다.
+ */
+function buildExcludedFoldersClause(excludedFolders: readonly string[]): { sql: string; params: string[] } {
+  const clauses: string[] = [];
+  const params: string[] = [];
+
+  for (const folder of excludedFolders) {
+    const normalized = normalizeProjectPath(folder).replace(/[\\/]+$/, '');
+    // 루트(`/`, `C:\`)는 모든 세션을 지우는 조건이 되므로 받지 않는다.
+    if (!normalized || /^[A-Za-z]:$/.test(normalized)) {
+      continue;
+    }
+    const prefix = `${normalized}${normalized.includes('\\') ? '\\' : '/'}`;
+    clauses.push(
+      `AND NOT (COALESCE(sessions.project_path, '') = ?
+        OR substr(COALESCE(sessions.project_path, ''), 1, length(?)) = ?)`,
+    );
+    params.push(normalized, prefix, prefix);
+  }
+
+  return { sql: clauses.join('\n'), params };
+}
+
 type RecentSessionsPage = {
   sessions: SessionRow[];
   total: number;
@@ -560,11 +590,18 @@ export const sessionsDb = {
    * and correctly ordered across projects instead of flattening only the
    * per-project slices already loaded by the client.
    */
-  getRecentSessionsPage(limit: number, offset: number): RecentSessionsPage {
+  /**
+   * `excludedFolders` 는 그 폴더 자신과 그 아래 프로젝트의 세션을 페이지와 개수
+   * 양쪽에서 뺀다. 사이드바 "대화" 탭이 조용한 폴더(자동 실행 세션)를 거르는 데
+   * 쓴다 — 화면에서 거르면 한 페이지가 통째로 비어 버릴 수 있어서 여기서 거른다.
+   */
+  getRecentSessionsPage(limit: number, offset: number, excludedFolders: readonly string[] = []): RecentSessionsPage {
     const db = getConnection();
+    const exclusion = buildExcludedFoldersClause(excludedFolders);
     const visibilityClause = `
       sessions.isArchived = 0
       AND (projects.isArchived IS NULL OR projects.isArchived = 0)
+      ${exclusion.sql}
     `;
     const rows = db
       .prepare(
@@ -576,7 +613,7 @@ export const sessionsDb = {
                   sessions.session_id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(limit, offset) as SessionRow[];
+      .all(...exclusion.params, limit, offset) as SessionRow[];
     const countRow = db
       .prepare(
         `SELECT COUNT(*) AS count
@@ -584,7 +621,7 @@ export const sessionsDb = {
          LEFT JOIN projects ON projects.project_path = sessions.project_path
          WHERE ${visibilityClause}`
       )
-      .get() as { count: number } | undefined;
+      .get(...exclusion.params) as { count: number } | undefined;
 
     return {
       sessions: normalizeSessionRows(rows),

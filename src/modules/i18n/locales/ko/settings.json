@@ -272,6 +272,15 @@
       "alphabetical": "알파벳순",
       "recentActivity": "최근 활동순"
     },
+    "quietFolders": {
+      "title": "조용한 폴더",
+      "description": "이 폴더 아래 프로젝트는 사이드바 맨 아래 접힌 묶음 하나로 모입니다. 새 세션이 생겨도 위로 올라오거나 표시가 붙지 않고, 대화 탭에도 나오지 않습니다. 스크립트가 CLI 를 자동으로 돌리는 폴더에 쓰세요.",
+      "placeholder": "/절대/경로/폴더",
+      "add": "추가",
+      "remove": "빼기",
+      "invalid": "루트가 아닌 절대 경로(/ 로 시작)를 입력하세요.",
+      "duplicate": "이미 목록에 있는 폴더입니다."
+    },
     "codeEditor": {
       "title": "코드 에디터",
       "theme": {

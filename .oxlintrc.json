@@ -103,6 +103,7 @@
           "src/shared/fontSettings.ts",
           "src/shared/chatDrafts.ts",
           "src/shared/sessionAttention.ts",
+          "src/shared/quietFolders.ts",
           "src/shared/syntaxHighlighter.ts"
         ],
         "mode": "file"

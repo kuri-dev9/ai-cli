@@ -10,6 +10,7 @@ import type { ServerEvent,
   ProjectSession,IsSessionProcessing } from '@/shared/types';
 import { mergeProjectSelectionMetadata } from '@/modules/project-workspace/utils/projectSelectionMetadata';
 import { readSelectedProvider } from '@/shared/selectedProvider';
+import { isPathInQuietFolders, readQuietFolders } from '@/shared/quietFolders';
 import {
   findUnseenSessionIds,
   readPersistedAttentionIds,
@@ -469,13 +470,26 @@ export function useProjectsState({
     sessionLookupRef.current = null;
   }, [sessionId]);
 
-  const markSessionAttention = useCallback((targetSessionId?: string | null) => {
+  const markSessionAttention = useCallback((targetSessionId?: string | null, projectPath?: string | null) => {
     if (!targetSessionId) {
       return;
     }
 
     const viewedSessionId = selectedSessionRef.current?.id ?? sessionId ?? null;
     if (targetSessionId === viewedSessionId) {
+      return;
+    }
+
+    // 조용한 폴더 아래 세션은 표시를 남기지 않는다. 자동 실행이 쉬지 않고 새
+    // 세션을 만드는데, 표시가 쌓이면 정작 사람이 답을 기다리는 세션이 묻힌다.
+    // 경로를 받지 못한 이벤트는 이미 불러온 프로젝트에서 세션을 찾아 경로를 얻는다.
+    const resolvedProjectPath = projectPath ?? (() => {
+      const owner = projectsRef.current.find((project) => (
+        getProjectSessions(project).some((session) => session.id === targetSessionId)
+      ));
+      return owner ? owner.fullPath || owner.path : null;
+    })();
+    if (isPathInQuietFolders(resolvedProjectPath, readQuietFolders().paths)) {
       return;
     }
 
@@ -796,7 +810,7 @@ export function useProjectsState({
       ) {
         setExternalMessageUpdate((prev) => prev + 1);
       } else {
-        markSessionAttention(upsert.sessionId);
+        markSessionAttention(upsert.sessionId, upsert.project?.fullPath || upsert.project?.path || null);
       }
 
       setProjects((previousProjects) => {

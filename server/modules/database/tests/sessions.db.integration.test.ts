@@ -167,6 +167,25 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
   });
 });
 
+test('recent sessions skip excluded folders exactly, keeping siblings and other-case paths', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createSession('inside', 'claude', '/work/quiet/run-1', 'Inside', '2026-10-01T09:00:00.000Z', '2026-10-01T09:00:00.000Z');
+    sessionsDb.createSession('folder-itself', 'claude', '/work/quiet', 'Itself', '2026-10-01T10:00:00.000Z', '2026-10-01T10:00:00.000Z');
+    sessionsDb.createSession('sibling', 'claude', '/work/quiet-v2', 'Sibling', '2026-10-01T11:00:00.000Z', '2026-10-01T11:00:00.000Z');
+    // LIKE 였다면 대소문자를 무시해 이것까지 빠진다.
+    sessionsDb.createSession('other-case', 'claude', '/work/QUIET/run-2', 'Other case', '2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z');
+    sessionsDb.createSession('underscore', 'claude', '/work/a_b/run', 'Underscore', '2026-10-01T13:00:00.000Z', '2026-10-01T13:00:00.000Z');
+
+    const page = sessionsDb.getRecentSessionsPage(10, 0, ['/work/quiet/', '/work/axb', '/']);
+
+    assert.deepEqual(
+      page.sessions.map((session) => session.session_id),
+      ['underscore', 'other-case', 'sibling'],
+    );
+    assert.equal(page.total, 3);
+  });
+});
+
 test('getLastActivityByProjectPath aggregates the newest session per project and provider', async () => {
   await withIsolatedDatabase(() => {
     // 같은 프로젝트에 provider 두 개. codex 쪽이 더 최근이다.
