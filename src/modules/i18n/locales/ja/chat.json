@@ -2,7 +2,8 @@
   "codeBlock": {
     "copy": "コピー",
     "copied": "コピーしました",
-    "copyCode": "コードをコピー"
+    "copyCode": "コードをコピー",
+    "playMedia": "再生"
   },
   "copyMessage": {
     "copy": "メッセージをコピー",

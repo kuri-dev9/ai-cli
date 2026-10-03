@@ -2,7 +2,8 @@
   "codeBlock": {
     "copy": "복사",
     "copied": "복사됨",
-    "copyCode": "코드 복사"
+    "copyCode": "코드 복사",
+    "playMedia": "재생"
   },
   "copyMessage": {
     "copy": "메시지 복사",

@@ -2,7 +2,8 @@
   "codeBlock": {
     "copy": "Copy",
     "copied": "Copied",
-    "copyCode": "Copy code"
+    "copyCode": "Copy code",
+    "playMedia": "Play"
   },
   "copyMessage": {
     "copy": "Copy message",

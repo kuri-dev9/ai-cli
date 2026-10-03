@@ -7,7 +7,7 @@ import rehypeKatex from 'rehype-katex';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTranslation } from 'react-i18next';
 
-import { MermaidDiagram } from '@/modules/code-editor';
+import { getPreviewKind, MermaidDiagram } from '@/modules/code-editor';
 import { normalizeInlineCodeFences } from '@/modules/chat/utils/chatFormatting';
 import { copyTextToClipboard } from '@/shared/utils';
 import { SyntaxHighlighter } from '@/shared/syntaxHighlighter';
@@ -62,6 +62,21 @@ const MATH_DELIMITER = /\$\$|\\\(|\\\[/;
 
 const EMPTY_PLUGINS: never[] = [];
 
+// An inline code span holding a path to something the in-app player can open —
+// a track an external tool wrote to its own folder, for example — is rendered
+// as a play button instead of inert text. The span must be a bare path: a
+// separator, no whitespace. That keeps prose and shell snippets such as
+// `afplay ~/song.flac` (which also ends in a media extension) out of it.
+const playableMediaReference = (value: string): string | null => {
+  const cleaned = value.trim();
+  if (!cleaned || /\s/.test(cleaned) || !/[\\/]/.test(cleaned)) {
+    return null;
+  }
+
+  const kind = getPreviewKind(cleaned);
+  return kind === 'audio' || kind === 'video' ? cleaned : null;
+};
+
 type CodeBlockProps = {
   node?: any;
   className?: string;
@@ -73,6 +88,7 @@ type CodeBlockProps = {
 // `node` is destructured out so react-markdown's hast node never reaches the DOM.
 const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: CodeBlockProps) => {
   const { t } = useTranslation('chat');
+  const { openFileInEditor } = usePaletteOps();
   const [copied, setCopied] = useState(false);
   // Fenced blocks carry a trailing newline in the tree; trim it so the
   // highlighter doesn't render an empty final line.
@@ -82,6 +98,26 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
   const shouldInline = !forceBlock && !/[\r\n]/.test(raw);
 
   if (shouldInline) {
+    const mediaReference = playableMediaReference(raw);
+
+    if (mediaReference) {
+      return (
+        <button
+          type="button"
+          onClick={() => openFileInEditor(mediaReference)}
+          className={`inline-flex items-center gap-1 whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted px-1.5 py-0.5 text-left font-mono text-[0.875em] text-blue-600 hover:underline dark:text-blue-400 ${className || ''
+            }`}
+          title={t('codeBlock.playMedia')}
+          aria-label={`${t('codeBlock.playMedia')}: ${mediaReference}`}
+        >
+          <svg aria-hidden="true" className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+          {children}
+        </button>
+      );
+    }
+
     return (
       <code
         className={`whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[0.875em] text-foreground ${className || ''

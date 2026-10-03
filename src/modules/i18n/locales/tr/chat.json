@@ -2,7 +2,8 @@
   "codeBlock": {
     "copy": "Kopyala",
     "copied": "Kopyalandı",
-    "copyCode": "Kodu kopyala"
+    "copyCode": "Kodu kopyala",
+    "playMedia": "Oynat"
   },
   "copyMessage": {
     "copy": "Mesajı kopyala",
