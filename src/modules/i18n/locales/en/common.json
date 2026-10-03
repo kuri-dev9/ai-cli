@@ -387,11 +387,19 @@
     "title": "Media",
     "refresh": "Refresh",
     "close": "Close",
-    "empty": "No media folders are connected yet.",
-    "openSettings": "Connect a folder in Settings",
+    "empty": "No media folders are connected to this project.",
     "folderEmpty": "No playable files in this folder.",
     "folderUnavailable": "This folder could not be read.",
     "unsupported": "Your browser cannot play this file.",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "folders": {
+      "label": "Media folders",
+      "help": "Folders the media panel scans for playable audio and video in this project. Absolute paths only.",
+      "placeholder": "/absolute/path/to/folder",
+      "add": "Add",
+      "remove": "Remove",
+      "invalid": "Enter an absolute folder path.",
+      "duplicate": "That folder is already on the list."
+    }
   }
 }

@@ -271,11 +271,19 @@
     "title": "媒体",
     "refresh": "刷新",
     "close": "关闭",
-    "empty": "尚未连接媒体文件夹。",
-    "openSettings": "在设置中连接文件夹",
+    "empty": "此项目未连接媒体文件夹。",
     "folderEmpty": "此文件夹中没有可播放的文件。",
     "folderUnavailable": "无法读取此文件夹。",
     "unsupported": "您的浏览器无法播放此文件。",
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "folders": {
+      "label": "媒体文件夹",
+      "help": "本项目的媒体面板扫描可播放音频和视频的文件夹。仅限绝对路径。",
+      "placeholder": "/文件夹/绝对/路径",
+      "add": "添加",
+      "remove": "移除",
+      "invalid": "请输入绝对文件夹路径。",
+      "duplicate": "该文件夹已在列表中。"
+    }
   }
 }

@@ -271,11 +271,19 @@
     "title": "Médias",
     "refresh": "Actualiser",
     "close": "Fermer",
-    "empty": "Aucun dossier multimédia connecté pour le moment.",
-    "openSettings": "Connecter un dossier dans les Paramètres",
+    "empty": "Aucun dossier multimédia n’est connecté à ce projet.",
     "folderEmpty": "Aucun fichier lisible dans ce dossier.",
     "folderUnavailable": "Ce dossier n’a pas pu être lu.",
     "unsupported": "Votre navigateur ne peut pas lire ce fichier.",
-    "loading": "Chargement…"
+    "loading": "Chargement…",
+    "folders": {
+      "label": "Dossiers multimédias",
+      "help": "Dossiers que le panneau multimédia parcourt dans ce projet pour trouver l’audio et la vidéo lisibles. Chemins absolus uniquement.",
+      "placeholder": "/chemin/absolu/vers/le/dossier",
+      "add": "Ajouter",
+      "remove": "Retirer",
+      "invalid": "Saisis un chemin de dossier absolu.",
+      "duplicate": "Ce dossier est déjà dans la liste."
+    }
   }
 }

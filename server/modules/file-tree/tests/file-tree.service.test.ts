@@ -638,14 +638,15 @@ function createMediaLibraryService(tree: Record<string, Array<[string, boolean]>
   const statted: string[] = [];
   const fileSystem = createFakeFileSystem({
     access: async () => undefined,
-    stat: async (candidatePath) => ({
-      ...createStats(Boolean(tree[candidatePath]), 0o755),
-      size: 0,
-    }),
-    lstat: async (candidatePath) => {
+    // `stat` follows a symlink, `lstat` does not. The sizes differ on purpose so
+    // a listing that reads the link instead of its target is caught.
+    stat: async (candidatePath) => {
       statted.push(candidatePath);
-      return { ...createStats(false, 0o644), size: 1234 };
+      return tree[candidatePath]
+        ? { ...createStats(true, 0o755), size: 0 }
+        : { ...createStats(false, 0o644), size: 1234 };
     },
+    lstat: async () => ({ ...createStats(false, 0o644), size: 73 }),
     openDirectory: createDirectoryReader((directoryPath) => {
       const entries = tree[directoryPath];
       if (!entries) {
@@ -688,6 +689,19 @@ test('listMediaFiles reports only playable files and skips everything else', asy
     'a media folder listing must not expose non-media files',
   );
   assert.equal(result.path, root);
+  assert.equal(result.files[0].size, 1234);
+});
+
+test('listMediaFiles reports the size of what a symlink points at, not the link', async () => {
+  // A media folder commonly holds symlinks into the tool's own output folder.
+  // Reading the link itself would report a few dozen bytes for a whole track.
+  const root = path.resolve('media-library-root', 'tracks');
+  const { services } = createMediaLibraryService({
+    [root]: [['linked.flac', false]],
+  }, AUDIO_MIME);
+
+  const result = await services.listMediaFiles(root);
+
   assert.equal(result.files[0].size, 1234);
 });
 

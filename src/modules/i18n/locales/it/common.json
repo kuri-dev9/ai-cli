@@ -271,11 +271,19 @@
     "title": "Media",
     "refresh": "Aggiorna",
     "close": "Chiudi",
-    "empty": "Nessuna cartella multimediale collegata.",
-    "openSettings": "Collega una cartella nelle Impostazioni",
+    "empty": "Nessuna cartella multimediale collegata a questo progetto.",
     "folderEmpty": "Nessun file riproducibile in questa cartella.",
     "folderUnavailable": "Non è stato possibile leggere questa cartella.",
     "unsupported": "Il tuo browser non può riprodurre questo file.",
-    "loading": "Caricamento…"
+    "loading": "Caricamento…",
+    "folders": {
+      "label": "Cartelle multimediali",
+      "help": "Cartelle che il pannello multimediale esamina in questo progetto per audio e video riproducibili. Solo percorsi assoluti.",
+      "placeholder": "/percorso/assoluto/alla/cartella",
+      "add": "Aggiungi",
+      "remove": "Rimuovi",
+      "invalid": "Inserisci un percorso di cartella assoluto.",
+      "duplicate": "Quella cartella è già nell’elenco."
+    }
   }
 }

@@ -163,15 +163,6 @@
         "label": "Taille de police",
         "description": "Taille de police de l'éditeur en pixels"
       }
-    },
-    "mediaFolders": {
-      "title": "Dossiers multimédias",
-      "description": "Dossiers que le panneau multimédia parcourt pour trouver l'audio et la vidéo lisibles. C'est un affichage, pas un projet : ils n'apparaissent ni dans la barre latérale ni dans l'onglet Fichiers.",
-      "placeholder": "/chemin/absolu/vers/le/dossier",
-      "add": "Ajouter",
-      "remove": "Retirer",
-      "invalid": "Saisis un chemin de dossier absolu.",
-      "duplicate": "Ce dossier est déjà dans la liste."
     }
   },
   "mcpForm": {

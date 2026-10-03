@@ -271,11 +271,19 @@
     "title": "Medya",
     "refresh": "Yenile",
     "close": "Kapat",
-    "empty": "Henüz bağlı medya klasörü yok.",
-    "openSettings": "Ayarlar’da bir klasör bağla",
+    "empty": "Bu projeye bağlı medya klasörü yok.",
     "folderEmpty": "Bu klasörde oynatılabilir dosya yok.",
     "folderUnavailable": "Bu klasör okunamadı.",
     "unsupported": "Tarayıcınız bu dosyayı oynatamıyor.",
-    "loading": "Yükleniyor…"
+    "loading": "Yükleniyor…",
+    "folders": {
+      "label": "Medya klasörleri",
+      "help": "Bu projede medya panelinin oynatılabilir ses ve videoları taradığı klasörler. Yalnızca mutlak yollar.",
+      "placeholder": "/klasöre/mutlak/yol",
+      "add": "Ekle",
+      "remove": "Kaldır",
+      "invalid": "Mutlak bir klasör yolu girin.",
+      "duplicate": "Bu klasör zaten listede."
+    }
   }
 }

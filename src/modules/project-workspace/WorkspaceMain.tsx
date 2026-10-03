@@ -14,6 +14,7 @@ import { useFileOpenResolver } from '@/modules/project-workspace/hooks/useFileOp
 import { EditorSidebar, getPreviewKind, useEditorSidebar } from '@/modules/code-editor';
 import { MediaLibraryPanel } from '@/modules/media-library';
 import type { CodeEditorDiffInfo } from '@/shared/types';
+import { useMediaFolders } from '@/shared/hooks/useMediaFolders';
 import WorkspaceHeader from '@/modules/project-workspace/WorkspaceHeader';
 import WorkspaceStateView from '@/modules/project-workspace/WorkspaceStateView';
 import WorkspaceErrorBoundary from '@/modules/project-workspace/WorkspaceErrorBoundary';
@@ -93,6 +94,11 @@ function WorkspaceMain({
     selectedProject,
     isMobile,
   });
+
+  // 폴더를 연결한 프로젝트에서만 미디어 패널을 쓸 수 있다. 연결한 적이 없으면
+  // 헤더에 음표 버튼도 두지 않는다 — 열어 봐야 빈 패널이다.
+  const mediaFolders = useMediaFolders(selectedProject?.projectId);
+  const hasMediaFolders = mediaFolders.length > 0;
 
   // 오른쪽 미디어 패널. 한 번 열리면 에디터로 전환해도 내려가지 않는다 —
   // 숨기기만 하므로 듣던 곡이 끊기지 않는다.
@@ -177,7 +183,7 @@ function WorkspaceMain({
         isMobile={isMobile}
         onMenuClick={onMenuClick}
         onNewSession={handleNewSessionInProject}
-        onToggleMediaLibrary={handleToggleMediaLibrary}
+        onToggleMediaLibrary={hasMediaFolders ? handleToggleMediaLibrary : null}
         mediaLibraryOpen={mediaLibraryOpen}
       />
 
@@ -255,15 +261,15 @@ function WorkspaceMain({
 
         {/* 한 번 열면 계속 마운트된 채로 둔다. 에디터를 열면 가려질 뿐이라
             듣던 곡이 끊기지 않고, 돌아오면 그 지점부터 이어진다. */}
-        {mediaLibraryOpen && (
+        {mediaLibraryOpen && hasMediaFolders && (
           <div
             className={`min-h-0 shrink-0 border-l border-border ${editingFile ? 'hidden' : 'flex'
               } ${isMobile ? 'w-full' : 'w-[380px]'}`}
           >
             <MediaLibraryPanel
+              projectId={selectedProject.projectId}
               openedFilePath={openedMediaPath}
               onClose={handleCloseMediaLibrary}
-              onShowSettings={onShowSettings}
             />
           </div>
         )}

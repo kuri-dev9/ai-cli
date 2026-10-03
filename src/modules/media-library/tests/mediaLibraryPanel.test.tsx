@@ -4,7 +4,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import MediaLibraryPanel from '@/modules/media-library/MediaLibraryPanel';
-import { addMediaFolder, readMediaFolders, removeMediaFolder } from '@/shared/mediaFolders';
+import { writeMediaFolders } from '@/shared/mediaFolders';
 import { storeAuthToken } from '@/shared/authToken';
 
 const makeToken = () => {
@@ -12,6 +12,8 @@ const makeToken = () => {
   const now = Math.floor(Date.now() / 1000);
   return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ iat: now - 60, exp: now + 3600 })}.sig`;
 };
+
+const PROJECT = 'project-1';
 
 const TRACKS = {
   files: [
@@ -30,7 +32,7 @@ beforeEach(() => {
   localStorage.clear();
   // User settings keep an in-memory mirror that clearing storage does not
   // touch, so the list has to be emptied through its own API.
-  readMediaFolders().slice().forEach(removeMediaFolder);
+  writeMediaFolders(PROJECT, []);
   storeAuthToken(makeToken());
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -48,10 +50,10 @@ afterEach(() => {
 });
 
 test('a connected folder lists its tracks and plays one in place', async () => {
-  addMediaFolder('/Users/me/tracks');
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
 
   const { container, findByText } = render(
-    <MediaLibraryPanel openedFilePath={null} onClose={() => undefined} />,
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
   );
 
   // The folder header shows the folder name, not the whole path.
@@ -70,26 +72,23 @@ test('a connected folder lists its tracks and plays one in place', async () => {
   });
 });
 
-test('with no folders connected the panel explains how to add one', async () => {
-  const onShowSettings = vi.fn();
+test('a project with no folders connected lists nothing', async () => {
   const { container } = render(
-    <MediaLibraryPanel openedFilePath={null} onClose={() => undefined} onShowSettings={onShowSettings} />,
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
   );
 
-  // Matched by structure rather than by label: the rendered language depends on
-  // the environment, and this assertion is about the wiring, not the wording.
-  await waitFor(() => assert.equal(container.querySelectorAll('button').length, 3));
-  const buttons = container.querySelectorAll('button');
-  fireEvent.click(buttons[buttons.length - 1]);
-
-  assert.equal(onShowSettings.mock.calls.length, 1);
+  await waitFor(() => assert.ok(container.textContent));
   assert.equal(container.querySelector('audio'), null, 'an empty library plays nothing');
   assert.equal(container.querySelector('section'), null, 'no folder sections are listed');
 });
 
 test('a file opened from outside plays at the top, above the folders', async () => {
   const { container } = render(
-    <MediaLibraryPanel openedFilePath="/Users/me/.soriforge/tracks/new.flac" onClose={() => undefined} />,
+    <MediaLibraryPanel
+      projectId={PROJECT}
+      openedFilePath="/Users/me/.soriforge/tracks/new.flac"
+      onClose={() => undefined}
+    />,
   );
 
   await waitFor(() => {

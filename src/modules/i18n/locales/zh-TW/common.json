@@ -271,11 +271,19 @@
     "title": "媒體",
     "refresh": "重新整理",
     "close": "關閉",
-    "empty": "尚未連接媒體資料夾。",
-    "openSettings": "在設定中連接資料夾",
+    "empty": "此專案未連接媒體資料夾。",
     "folderEmpty": "此資料夾中沒有可播放的檔案。",
     "folderUnavailable": "無法讀取此資料夾。",
     "unsupported": "您的瀏覽器無法播放此檔案。",
-    "loading": "載入中…"
+    "loading": "載入中…",
+    "folders": {
+      "label": "媒體資料夾",
+      "help": "本專案的媒體面板掃描可播放音訊和影片的資料夾。僅限絕對路徑。",
+      "placeholder": "/資料夾/絕對/路徑",
+      "add": "新增",
+      "remove": "移除",
+      "invalid": "請輸入絕對資料夾路徑。",
+      "duplicate": "該資料夾已在清單中。"
+    }
   }
 }

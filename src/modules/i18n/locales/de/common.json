@@ -241,11 +241,19 @@
     "title": "Medien",
     "refresh": "Aktualisieren",
     "close": "Schließen",
-    "empty": "Es sind noch keine Medienordner verbunden.",
-    "openSettings": "Ordner in den Einstellungen verbinden",
+    "empty": "Mit diesem Projekt sind keine Medienordner verbunden.",
     "folderEmpty": "Keine abspielbaren Dateien in diesem Ordner.",
     "folderUnavailable": "Dieser Ordner konnte nicht gelesen werden.",
     "unsupported": "Dein Browser kann diese Datei nicht abspielen.",
-    "loading": "Wird geladen …"
+    "loading": "Wird geladen …",
+    "folders": {
+      "label": "Medienordner",
+      "help": "Ordner, die das Medienpanel in diesem Projekt nach abspielbarem Audio und Video durchsucht. Nur absolute Pfade.",
+      "placeholder": "/absoluter/pfad/zum/ordner",
+      "add": "Hinzufügen",
+      "remove": "Entfernen",
+      "invalid": "Gib einen absoluten Ordnerpfad ein.",
+      "duplicate": "Dieser Ordner steht bereits auf der Liste."
+    }
   }
 }

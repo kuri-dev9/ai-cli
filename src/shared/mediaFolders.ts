@@ -1,16 +1,18 @@
 import { readUserPreference, writeUserPreference } from '@/shared/userSettings';
 
 /**
- * 플레이어 패널이 훑을 폴더 목록.
+ * 프로젝트마다 플레이어 패널이 훑을 폴더 목록.
  *
  * 만들어진 음원·영상은 프로젝트 안이 아니라 도구가 쓰는 제 폴더에 쌓이는 경우가
- * 많다. 그런 폴더를 여기에 적어 두면 어느 프로젝트를 열고 있든 오른쪽 패널에서
- * 목록을 보고 바로 들을 수 있다.
+ * 많다. 그런 폴더를 프로젝트 설정에 적어 두면 그 프로젝트를 열었을 때 오른쪽
+ * 패널에서 목록을 보고 바로 들을 수 있다.
  *
  * 프로젝트 등록이 아니라 보기 방식이다. 사이드바에도, 파일 탭에도 나타나지
- * 않는다. 목록은 사용자 설정(`auth.db`)에 살기 때문에 기기 사이에서 따라온다.
+ * 않는다. 프로젝트별로 두는 이유는 폴더가 그 프로젝트의 작업물이기 때문이다 —
+ * 다른 프로젝트를 열었을 때 남의 음원 목록이 따라다닐 이유가 없다.
  *
- * 경로 규칙은 [[quietFolders]] 와 같은 이유로 같다 — 절대 경로만 받는다.
+ * 저장은 프로젝트 그룹과 같은 모양이다: 사용자 설정(`auth.db`)에 프로젝트 id 를
+ * 키로 둔 객체 하나. 기기 사이에서 따라온다.
  */
 
 const PREFERENCE_KEY = 'mediaFolders';
@@ -19,7 +21,11 @@ const EMPTY_PATHS: string[] = [];
 
 /** 정규화 결과 캐시. `useSyncExternalStore` 가 같은 값에 같은 참조를 받아야 한다. */
 let cachedRaw: unknown;
-let cachedPaths: string[] = EMPTY_PATHS;
+let cachedByProject: Record<string, string[]> = {};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
 
 /**
  * 비교할 수 있는 모양으로 경로를 맞춘다. 맞출 수 없으면 빈 문자열.
@@ -43,7 +49,7 @@ export function normalizeMediaFolderPath(input: string): string {
   return collapsed;
 }
 
-function normalize(raw: unknown): string[] {
+function normalizePaths(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
     return EMPTY_PATHS;
   }
@@ -58,36 +64,49 @@ function normalize(raw: unknown): string[] {
   return paths;
 }
 
-/** 지금 저장된 폴더 목록. 설정한 적이 없으면 빈 목록이다. */
-export function readMediaFolders(): string[] {
+function readByProject(): Record<string, string[]> {
   const raw = readUserPreference<unknown>(PREFERENCE_KEY, null);
   if (raw !== cachedRaw) {
     cachedRaw = raw;
-    const next = normalize(raw);
-    // 내용이 같으면 같은 배열을 유지한다 — 이 배열에 매달린 목록 다시 읽기가
-    // 설정을 저장할 때마다 돌지 않게 하려는 것이다.
-    const same = next.length === cachedPaths.length
-      && next.every((path, index) => path === cachedPaths[index]);
-    cachedPaths = same ? cachedPaths : next;
+    const next: Record<string, string[]> = {};
+    if (isRecord(raw)) {
+      for (const [projectId, paths] of Object.entries(raw)) {
+        const normalized = normalizePaths(paths);
+        if (normalized.length > 0) {
+          // 내용이 같으면 이전 배열을 그대로 둔다 — 이 배열에 매달린 목록 다시
+          // 읽기가 다른 프로젝트의 설정을 고칠 때마다 돌지 않게 하려는 것이다.
+          const previous = cachedByProject[projectId];
+          const same = previous
+            && previous.length === normalized.length
+            && previous.every((path, index) => path === normalized[index]);
+          next[projectId] = same ? previous : normalized;
+        }
+      }
+    }
+    cachedByProject = next;
   }
-  return cachedPaths;
+  return cachedByProject;
 }
 
-/** 폴더 하나를 더한다. 실제로 더했으면 true — 형식이 틀렸거나 이미 있으면 false. */
-export function addMediaFolder(input: string): boolean {
-  const normalized = normalizeMediaFolderPath(input);
-  const current = readMediaFolders();
-  if (!normalized || current.includes(normalized)) {
-    return false;
+/** 이 프로젝트에 연결된 폴더 목록. 없으면 빈 목록이다. */
+export function readMediaFolders(projectId: string | null | undefined): string[] {
+  if (!projectId) {
+    return EMPTY_PATHS;
   }
-  writeUserPreference(PREFERENCE_KEY, [...current, normalized]);
-  return true;
+  return readByProject()[projectId] ?? EMPTY_PATHS;
 }
 
-/** 폴더 하나를 뺀다. 그 폴더의 파일은 패널에서 사라질 뿐 디스크는 그대로다. */
-export function removeMediaFolder(folderPath: string): void {
-  const current = readMediaFolders();
-  writeUserPreference(PREFERENCE_KEY, current.filter((entry) => entry !== folderPath));
+/** 이 프로젝트의 폴더 목록을 통째로 바꾼다. 빈 목록이면 항목 자체를 지운다. */
+export function writeMediaFolders(projectId: string, paths: readonly string[]): void {
+  const current = readByProject();
+  const normalized = normalizePaths(paths);
+  const next = { ...current };
+  if (normalized.length > 0) {
+    next[projectId] = normalized;
+  } else {
+    delete next[projectId];
+  }
+  writeUserPreference(PREFERENCE_KEY, next);
 }
 
 /** 경로에서 사람이 읽을 폴더 이름만 꺼낸다. 목록 머리글에 쓴다. */

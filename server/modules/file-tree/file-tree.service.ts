@@ -447,7 +447,10 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       let size = 0;
       let modifiedAt: string | null = null;
       try {
-        const stats = await fileSystem.lstat(entryPath);
+        // `stat`, not `lstat`: a library commonly holds symlinks into the tool's
+        // own output folder, and the link's own size (a few dozen bytes) is not
+        // what the player should report.
+        const stats = await fileSystem.stat(entryPath);
         size = stats.size;
         modifiedAt = stats.mtime.toISOString();
       } catch {

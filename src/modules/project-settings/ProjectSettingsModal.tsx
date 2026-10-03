@@ -5,8 +5,11 @@ import { useTranslation } from 'react-i18next';
 import { api } from '@/shared/api';
 import { Button, Input } from '@/shared/ui';
 import { ErrorBanner, WorkspacePathField } from '@/modules/project-creation-wizard';
+import MediaFoldersField from '@/modules/project-settings/MediaFoldersField';
 import { updateProjectPathRequest } from '@/modules/project-settings/utils/projectSettingsApi';
 import { useProjectGroups } from '@/modules/sidebar';
+import { useMediaFolders } from '@/shared/hooks/useMediaFolders';
+import { writeMediaFolders } from '@/shared/mediaFolders';
 import type { Project } from '@/shared/types';
 
 type ProjectSettingsModalProps = {
@@ -44,14 +47,21 @@ export default function ProjectSettingsModal({
   const { groups, assignments, assignProject } = useProjectGroups();
   const savedGroupId = assignments[project.projectId] ?? '';
   const [groupId, setGroupId] = useState(savedGroupId);
+  // 미디어 폴더도 같은 규칙이다 — 더하거나 빼기만 해서는 바뀌지 않고, 저장을
+  // 눌러야 반영된다. 취소하면 원래 목록 그대로 남는다.
+  const savedMediaFolders = useMediaFolders(project.projectId);
+  const [mediaFolders, setMediaFolders] = useState<string[]>(savedMediaFolders);
 
   const trimmedPath = projectPath.trim();
   const trimmedDisplayName = displayName.trim();
   const pathChanged = trimmedPath !== originalPath;
   const nameChanged = trimmedDisplayName !== (project.displayName || '');
   const groupChanged = groupId !== savedGroupId;
-  const canSave =
-    !isSaving && trimmedPath.length > 0 && (pathChanged || nameChanged || groupChanged);
+  const mediaFoldersChanged = mediaFolders.length !== savedMediaFolders.length
+    || mediaFolders.some((folder, index) => folder !== savedMediaFolders[index]);
+  const canSave = !isSaving
+    && trimmedPath.length > 0
+    && (pathChanged || nameChanged || groupChanged || mediaFoldersChanged);
 
   const handleSave = useCallback(async () => {
     setIsSaving(true);
@@ -77,6 +87,10 @@ export default function ProjectSettingsModal({
         assignProject(project.projectId, groupId || null);
       }
 
+      if (mediaFoldersChanged) {
+        writeMediaFolders(project.projectId, mediaFolders);
+      }
+
       await onSaved();
       onClose();
     } catch (saveError) {
@@ -92,6 +106,8 @@ export default function ProjectSettingsModal({
     assignProject,
     groupChanged,
     groupId,
+    mediaFolders,
+    mediaFoldersChanged,
     nameChanged,
     onClose,
     onSaved,
@@ -197,6 +213,12 @@ export default function ProjectSettingsModal({
               </div>
             )}
           </div>
+
+          <MediaFoldersField
+            folders={mediaFolders}
+            disabled={isSaving}
+            onChange={setMediaFolders}
+          />
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-6 dark:border-gray-700">

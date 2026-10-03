@@ -3,15 +3,21 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'vitest';
 
 import {
-  addMediaFolder,
   mediaFolderLabel,
   normalizeMediaFolderPath,
   readMediaFolders,
-  removeMediaFolder,
+  writeMediaFolders,
 } from '@/shared/mediaFolders';
+
+const PROJECT = 'project-1';
+const OTHER_PROJECT = 'project-2';
 
 beforeEach(() => {
   localStorage.clear();
+  // User settings keep an in-memory mirror that clearing storage does not
+  // touch, so each project's list has to be emptied through its own API.
+  writeMediaFolders(PROJECT, []);
+  writeMediaFolders(OTHER_PROJECT, []);
 });
 
 test('normalizeMediaFolderPath accepts absolute paths and tidies them', () => {
@@ -30,31 +36,40 @@ test('normalizeMediaFolderPath rejects what cannot be resolved or would be a mis
   assert.equal(normalizeMediaFolderPath('   '), '');
 });
 
-test('addMediaFolder stores normalized paths and refuses duplicates', () => {
-  assert.equal(addMediaFolder('/Users/me/tracks/'), true);
-  assert.deepEqual(readMediaFolders(), ['/Users/me/tracks']);
+test('folders are stored per project and do not leak into another one', () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
 
-  // Same folder written differently must not be added twice.
-  assert.equal(addMediaFolder('/Users//me/tracks'), false);
-  assert.equal(addMediaFolder('not-absolute'), false);
-  assert.deepEqual(readMediaFolders(), ['/Users/me/tracks']);
+  assert.deepEqual(readMediaFolders(PROJECT), ['/Users/me/tracks']);
+  assert.deepEqual(readMediaFolders(OTHER_PROJECT), []);
+  // A workspace with no project selected has nowhere to read from.
+  assert.deepEqual(readMediaFolders(null), []);
 });
 
-test('removeMediaFolder drops one folder and leaves the rest', () => {
-  addMediaFolder('/Users/me/tracks');
-  addMediaFolder('/Users/me/renders');
+test('writeMediaFolders normalizes and drops duplicates and junk', () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks/', '/Users//me/tracks', 'not-absolute', '/']);
 
-  removeMediaFolder('/Users/me/tracks');
-
-  assert.deepEqual(readMediaFolders(), ['/Users/me/renders']);
+  assert.deepEqual(readMediaFolders(PROJECT), ['/Users/me/tracks']);
 });
 
-test('readMediaFolders returns the same array while the list is unchanged', () => {
-  addMediaFolder('/Users/me/tracks');
+test('clearing a project removes its entry without touching the others', () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+  writeMediaFolders(OTHER_PROJECT, ['/Users/me/renders']);
 
-  // Callers use the result as an effect dependency; a new array each read would
-  // re-fetch every folder listing on every unrelated preference write.
-  assert.equal(readMediaFolders(), readMediaFolders());
+  writeMediaFolders(PROJECT, []);
+
+  assert.deepEqual(readMediaFolders(PROJECT), []);
+  assert.deepEqual(readMediaFolders(OTHER_PROJECT), ['/Users/me/renders']);
+});
+
+test('readMediaFolders returns the same array while that project is unchanged', () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+  const first = readMediaFolders(PROJECT);
+
+  // Editing another project must not hand this one a new array: callers use the
+  // result as an effect dependency and would re-fetch every folder listing.
+  writeMediaFolders(OTHER_PROJECT, ['/Users/me/renders']);
+
+  assert.equal(readMediaFolders(PROJECT), first);
 });
 
 test('mediaFolderLabel shows the folder name rather than the whole path', () => {

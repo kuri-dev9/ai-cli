@@ -9,10 +9,11 @@ import { useMediaFolders } from '@/shared/hooks/useMediaFolders';
 import { mediaFolderLabel } from '@/shared/mediaFolders';
 
 type MediaLibraryPanelProps = {
+  /** 폴더 목록을 어느 프로젝트에서 읽을지. */
+  projectId: string | null | undefined;
   /** 바깥에서 열어 준 파일. 목록보다 먼저, 맨 위에 펼쳐 둔다. */
   openedFilePath: string | null;
   onClose: () => void;
-  onShowSettings?: () => void;
 };
 
 const kindOf = (contentType: string): 'audio' | 'video' =>
@@ -26,12 +27,12 @@ const kindOf = (contentType: string): 'audio' | 'video' =>
  * 에디터로 전환해도 소리는 끊기지 않는다.
  */
 export default function MediaLibraryPanel({
+  projectId,
   openedFilePath,
   onClose,
-  onShowSettings,
 }: MediaLibraryPanelProps) {
   const { t } = useTranslation();
-  const folders = useMediaFolders();
+  const folders = useMediaFolders(projectId);
   const { contents, reload } = useMediaFolderContents(folders);
   // 펼쳐 둔 파일들. 여러 곡을 나란히 열어 두고 비교할 수 있다.
   const [openPaths, setOpenPaths] = useState<string[]>([]);
@@ -77,28 +78,25 @@ export default function MediaLibraryPanel({
 
   return (
     <div className="flex h-full w-full flex-col bg-background">
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5">
-        <h3 className="truncate text-sm font-medium">{t('mediaLibrary.title')}</h3>
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={reload}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            title={t('mediaLibrary.refresh')}
-            aria-label={t('mediaLibrary.refresh')}
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            title={t('mediaLibrary.close')}
-            aria-label={t('mediaLibrary.close')}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+      <div className="flex shrink-0 items-center justify-end gap-0.5 border-b border-border px-2 py-1">
+        <button
+          type="button"
+          onClick={reload}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title={t('mediaLibrary.refresh')}
+          aria-label={t('mediaLibrary.refresh')}
+        >
+          <RefreshCw className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title={t('mediaLibrary.close')}
+          aria-label={t('mediaLibrary.close')}
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -114,18 +112,7 @@ export default function MediaLibraryPanel({
         )}
 
         {folders.length === 0 && (
-          <div className="flex flex-col items-center gap-3 p-6 text-center">
-            <p className="text-sm text-muted-foreground">{t('mediaLibrary.empty')}</p>
-            {onShowSettings && (
-              <button
-                type="button"
-                onClick={onShowSettings}
-                className="text-sm text-blue-600 hover:underline dark:text-blue-400"
-              >
-                {t('mediaLibrary.openSettings')}
-              </button>
-            )}
-          </div>
+          <p className="p-6 text-center text-sm text-muted-foreground">{t('mediaLibrary.empty')}</p>
         )}
 
         {contents === null && folders.length > 0 && (
