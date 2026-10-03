@@ -310,6 +310,9 @@ export const api = {
   // The playable files inside one configured media folder, newest first.
   listMediaFolder: (folderPath: string, options: ApiRequestOptions = {}) =>
     get(`/api/file-tree/media/list${query({ path: folderPath })}`, options),
+  deleteMediaFile: (filePath: string) => del('/api/file-tree/media/file', { path: filePath }),
+  moveMediaFile: (filePath: string, targetFolder: string) =>
+    post('/api/file-tree/media/move', { path: filePath, targetFolder }),
   saveFile: (projectId: string, filePath: string, content: string) =>
     put(`/api/file-tree/projects/${projectId}/file`, { filePath, content }),
   getFiles: (projectId: string, options: ApiRequestOptions = {}) =>

@@ -286,6 +286,10 @@
       "duplicate": "すでに一覧にあるフォルダです。"
     },
     "sortByDate": "日付",
-    "sortByName": "名前"
+    "sortByName": "名前",
+    "delete": "削除",
+    "moveTo": "{{folder}} へ移動",
+    "confirmDelete": "「{{name}}」を削除しますか？元に戻せません。",
+    "actionFailed": "実行できませんでした。"
   }
 }

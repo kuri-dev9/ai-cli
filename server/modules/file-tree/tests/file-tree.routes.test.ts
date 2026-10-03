@@ -22,6 +22,8 @@ function createFakeServices(overrides: Partial<FileTreeServices> = {}): FileTree
     openFile: unexpectedOperation,
     openMediaFile: unexpectedOperation,
     listMediaFiles: unexpectedOperation,
+    deleteMediaFile: unexpectedOperation,
+    moveMediaFile: unexpectedOperation,
     saveTextFile: unexpectedOperation,
     listProjectFiles: unexpectedOperation,
     createEntry: unexpectedOperation,
@@ -382,4 +384,68 @@ test('a HEAD on the media route answers from the headers without reading the fil
 
   assert.equal(stream.destroyed, true, 'a metadata request must not read the file off disk');
   assert.equal(stream.readableEnded, false, 'the bytes must never have been consumed');
+});
+
+test('media delete route forwards the path to the service', async () => {
+  const deleted: string[] = [];
+  const services = createFakeServices({
+    deleteMediaFile: async (filePath) => {
+      deleted.push(filePath);
+      return { success: true as const, path: filePath };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/file-tree/media/file`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/Users/me/tracks/song.flac' }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  assert.deepEqual(deleted, ['/Users/me/tracks/song.flac']);
+});
+
+test('media move route forwards both the file and the target folder', async () => {
+  const moves: Array<[string, string]> = [];
+  const services = createFakeServices({
+    moveMediaFile: async (filePath, targetFolder) => {
+      moves.push([filePath, targetFolder]);
+      return { success: true as const, path: `${targetFolder}/song.flac` };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/file-tree/media/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/Users/me/tracks/song.flac', targetFolder: '/Users/me/keep' }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  assert.deepEqual(moves, [['/Users/me/tracks/song.flac', '/Users/me/keep']]);
+});
+
+test('media mutation routes refuse an incomplete request without calling the service', async () => {
+  const services = createFakeServices();
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const noPath = await fetch(`${baseUrl}/api/file-tree/media/file`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(noPath.status, 400);
+
+    const noTarget = await fetch(`${baseUrl}/api/file-tree/media/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/Users/me/tracks/song.flac' }),
+    });
+    assert.equal(noTarget.status, 400);
+  });
 });

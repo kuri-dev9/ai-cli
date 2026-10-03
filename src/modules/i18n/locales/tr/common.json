@@ -286,6 +286,10 @@
       "duplicate": "Bu klasör zaten listede."
     },
     "sortByDate": "Tarih",
-    "sortByName": "Ad"
+    "sortByName": "Ad",
+    "delete": "Sil",
+    "moveTo": "{{folder}} klasörüne taşı",
+    "confirmDelete": "\"{{name}}\" silinsin mi? Bu geri alınamaz.",
+    "actionFailed": "Bu işlem yapılamadı."
   }
 }

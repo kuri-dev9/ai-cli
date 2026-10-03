@@ -402,6 +402,10 @@
       "duplicate": "That folder is already on the list."
     },
     "sortByDate": "Date",
-    "sortByName": "Name"
+    "sortByName": "Name",
+    "delete": "Delete",
+    "moveTo": "Move to {{folder}}",
+    "confirmDelete": "Delete \"{{name}}\"? This cannot be undone.",
+    "actionFailed": "That did not work."
   }
 }

@@ -286,6 +286,10 @@
       "duplicate": "Ce dossier est déjà dans la liste."
     },
     "sortByDate": "Date",
-    "sortByName": "Nom"
+    "sortByName": "Nom",
+    "delete": "Supprimer",
+    "moveTo": "Déplacer vers {{folder}}",
+    "confirmDelete": "Supprimer « {{name}} » ? C’est irréversible.",
+    "actionFailed": "Cela n’a pas fonctionné."
   }
 }

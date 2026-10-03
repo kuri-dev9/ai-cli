@@ -1225,6 +1225,13 @@ export type FileTreeServices = {
    * never reported, so this cannot be used to enumerate arbitrary directories.
    */
   listMediaFiles(folderPath: string): Promise<{ path: string; files: FileTreeMediaEntry[] }>;
+  /** Deletes one playable file. Same containment and media-only rules as playback. */
+  deleteMediaFile(filePath: string): Promise<{ success: true; path: string }>;
+  /**
+   * Moves one playable file into another folder, keeping its name. Refuses to
+   * overwrite: the file being replaced is a take no undo would bring back.
+   */
+  moveMediaFile(filePath: string, targetFolderPath: string): Promise<{ success: true; path: string }>;
   saveTextFile(projectId: string, filePath: string, content: string): Promise<{
     success: true;
     path: string;

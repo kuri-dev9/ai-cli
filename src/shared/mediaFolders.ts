@@ -108,8 +108,3 @@ export function writeMediaFolders(projectId: string, paths: readonly string[]): 
   }
   writeUserPreference(PREFERENCE_KEY, next);
 }
-
-/** 경로에서 사람이 읽을 폴더 이름만 꺼낸다. 목록 머리글에 쓴다. */
-export function mediaFolderLabel(folderPath: string): string {
-  return folderPath.split('/').filter(Boolean).pop() ?? folderPath;
-}

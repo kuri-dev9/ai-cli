@@ -401,6 +401,10 @@
       "duplicate": "이미 목록에 있는 폴더입니다."
     },
     "sortByDate": "날짜",
-    "sortByName": "이름"
+    "sortByName": "이름",
+    "delete": "삭제",
+    "moveTo": "{{folder}} 로 이동",
+    "confirmDelete": "\"{{name}}\" 을(를) 삭제할까요? 되돌릴 수 없습니다.",
+    "actionFailed": "작업하지 못했습니다."
   }
 }

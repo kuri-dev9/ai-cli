@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'vitest';
 
 import {
-  mediaFolderLabel,
   normalizeMediaFolderPath,
   readMediaFolders,
   writeMediaFolders,
@@ -70,9 +69,4 @@ test('readMediaFolders returns the same array while that project is unchanged', 
   writeMediaFolders(OTHER_PROJECT, ['/Users/me/renders']);
 
   assert.equal(readMediaFolders(PROJECT), first);
-});
-
-test('mediaFolderLabel shows the folder name rather than the whole path', () => {
-  assert.equal(mediaFolderLabel('/Users/me/.soriforge/tracks'), 'tracks');
-  assert.equal(mediaFolderLabel('/'), '/');
 });

@@ -256,6 +256,10 @@
       "duplicate": "Эта папка уже в списке."
     },
     "sortByDate": "Дата",
-    "sortByName": "Имя"
+    "sortByName": "Имя",
+    "delete": "Удалить",
+    "moveTo": "Переместить в {{folder}}",
+    "confirmDelete": "Удалить «{{name}}»? Это необратимо.",
+    "actionFailed": "Не удалось выполнить."
   }
 }

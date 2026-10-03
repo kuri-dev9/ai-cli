@@ -286,6 +286,10 @@
       "duplicate": "该文件夹已在列表中。"
     },
     "sortByDate": "日期",
-    "sortByName": "名称"
+    "sortByName": "名称",
+    "delete": "删除",
+    "moveTo": "移动到 {{folder}}",
+    "confirmDelete": "删除“{{name}}”？此操作无法撤销。",
+    "actionFailed": "操作未成功。"
   }
 }

@@ -125,7 +125,6 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
             <span className="mt-1 block">
               <MediaPlayer
                 filePath={mediaReference}
-                label={mediaReference.split('/').pop() ?? mediaReference}
                 kind={getPreviewKind(mediaReference) === 'video' ? 'video' : 'audio'}
                 autoPlay
               />

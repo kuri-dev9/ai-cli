@@ -256,6 +256,10 @@
       "duplicate": "Dieser Ordner steht bereits auf der Liste."
     },
     "sortByDate": "Datum",
-    "sortByName": "Name"
+    "sortByName": "Name",
+    "delete": "Löschen",
+    "moveTo": "Nach {{folder}} verschieben",
+    "confirmDelete": "„{{name}}“ löschen? Das lässt sich nicht rückgängig machen.",
+    "actionFailed": "Das hat nicht geklappt."
   }
 }

@@ -286,6 +286,10 @@
       "duplicate": "Quella cartella è già nell’elenco."
     },
     "sortByDate": "Data",
-    "sortByName": "Nome"
+    "sortByName": "Nome",
+    "delete": "Elimina",
+    "moveTo": "Sposta in {{folder}}",
+    "confirmDelete": "Eliminare «{{name}}»? Non è reversibile.",
+    "actionFailed": "Non ha funzionato."
   }
 }

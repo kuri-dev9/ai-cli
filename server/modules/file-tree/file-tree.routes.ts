@@ -215,6 +215,19 @@ export function createFileTreeRouter(
     response.json(await services.listMediaFiles(folderPath));
   }, logger));
 
+  router.delete('/media/file', createRouteHandler(async (request, response) => {
+    const body = readBody(request);
+    const filePath = readRequiredString(body.path, 'path', 'Invalid file path');
+    response.json(await services.deleteMediaFile(filePath));
+  }, logger));
+
+  router.post('/media/move', createRouteHandler(async (request, response) => {
+    const body = readBody(request);
+    const filePath = readRequiredString(body.path, 'path', 'Invalid file path');
+    const targetFolder = readRequiredString(body.targetFolder, 'targetFolder', 'Invalid target folder');
+    response.json(await services.moveMediaFile(filePath, targetFolder));
+  }, logger));
+
   router.put('/projects/:projectId/file', createRouteHandler(async (request, response) => {
     const body = readBody(request);
     const filePath = readRequiredString(body.filePath, 'filePath', 'Invalid file path');

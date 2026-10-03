@@ -769,3 +769,127 @@ test('listMediaFiles rejects a file that is not a directory', async () => {
     },
   );
 });
+
+/** Builds a service whose filesystem records the mutations it is asked for. */
+function createMediaMutationService(options: {
+  mimeType?: string;
+  existingPaths?: string[];
+  renameError?: NodeJS.ErrnoException;
+} = {}) {
+  const workspaceRoot = path.resolve('media-library-root');
+  const unlinked: string[] = [];
+  const renamed: Array<[string, string]> = [];
+  const existing = new Set(options.existingPaths ?? []);
+  const fileSystem = createFakeFileSystem({
+    access: async (candidatePath) => {
+      if (!existing.has(candidatePath)) {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }
+    },
+    stat: async (candidatePath) => ({
+      ...createStats(candidatePath.endsWith('tracks'), 0o755),
+      size: 0,
+    }),
+    unlink: async (candidatePath) => {
+      unlinked.push(candidatePath);
+    },
+    rename: async (from, to) => {
+      if (options.renameError) {
+        throw options.renameError;
+      }
+      renamed.push([from, to]);
+    },
+  });
+  const base = createDependencies(fileSystem, workspaceRoot);
+  const services = createFileTreeService({
+    ...base,
+    resolveMimeType: () => options.mimeType ?? 'audio/flac',
+  });
+
+  return { services, workspaceRoot, unlinked, renamed };
+}
+
+test('deleteMediaFile removes the file it was pointed at', async () => {
+  const { services, unlinked } = createMediaMutationService();
+  const track = path.resolve('media-library-root', 'tracks/song.flac');
+
+  const result = await services.deleteMediaFile(track);
+
+  assert.equal(result.success, true);
+  assert.deepEqual(unlinked, [track]);
+});
+
+test('deleteMediaFile refuses anything that is not playable media', async () => {
+  // The panel must never become a way to delete source or config files.
+  const { services, unlinked } = createMediaMutationService({ mimeType: 'text/plain' });
+
+  await assert.rejects(
+    () => services.deleteMediaFile(path.resolve('media-library-root', '.env')),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 415);
+      return true;
+    },
+  );
+  assert.deepEqual(unlinked, [], 'a rejected file must never be unlinked');
+});
+
+test('moveMediaFile moves the file into the target folder keeping its name', async () => {
+  const { services, renamed } = createMediaMutationService();
+  const track = path.resolve('media-library-root', 'tracks/song.flac');
+  const target = path.resolve('media-library-root', 'archive-tracks');
+
+  const result = await services.moveMediaFile(track, target);
+
+  assert.deepEqual(renamed, [[track, path.join(target, 'song.flac')]]);
+  assert.equal(result.path, path.join(target, 'song.flac'));
+});
+
+test('moveMediaFile refuses to overwrite a file already in the target', async () => {
+  const target = path.resolve('media-library-root', 'archive-tracks');
+  const { services, renamed } = createMediaMutationService({
+    existingPaths: [path.join(target, 'song.flac')],
+  });
+
+  await assert.rejects(
+    () => services.moveMediaFile(path.resolve('media-library-root', 'tracks/song.flac'), target),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 409);
+      return true;
+    },
+  );
+  assert.deepEqual(renamed, [], 'the take being replaced must survive');
+});
+
+test('moveMediaFile refuses a non-media file and a target outside the workspace', async () => {
+  const { services: textService } = createMediaMutationService({ mimeType: 'text/plain' });
+  await assert.rejects(
+    () => textService.moveMediaFile('/Users/me/notes.txt', '/Users/me/tracks'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 415);
+      return true;
+    },
+  );
+
+  const fileSystem = createFakeFileSystem({});
+  const base = createDependencies(fileSystem, path.resolve('media-library-root'));
+  const guarded = createFileTreeService({
+    ...base,
+    resolveMimeType: () => 'audio/flac',
+    workspace: {
+      rootPath: path.resolve('media-library-root'),
+      validatePath: async () => ({ valid: false, error: 'Path is outside the workspace root' }),
+    },
+  });
+
+  await assert.rejects(
+    () => guarded.moveMediaFile('/Users/me/song.flac', '/etc'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 403);
+      return true;
+    },
+  );
+});

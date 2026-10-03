@@ -286,6 +286,10 @@
       "duplicate": "Esa carpeta ya está en la lista."
     },
     "sortByDate": "Fecha",
-    "sortByName": "Nombre"
+    "sortByName": "Nombre",
+    "delete": "Eliminar",
+    "moveTo": "Mover a {{folder}}",
+    "confirmDelete": "¿Eliminar «{{name}}»? No se puede deshacer.",
+    "actionFailed": "No se pudo completar."
   }
 }

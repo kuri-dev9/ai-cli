@@ -27,9 +27,26 @@ export function formatMediaDate(value: string | null | undefined, locale: string
     return null;
   }
 
-  return parsed.toLocaleDateString(locale, {
+  return parsed.toLocaleString(locale, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
+}
+
+/**
+ * 평균 비트레이트. 크기와 길이를 알면 나오므로 파일을 다시 읽지 않는다.
+ *
+ * 가변 비트레이트라면 구간마다 다르겠지만, 곡 하나를 가늠하는 데에는 평균이면
+ * 충분하다. 둘 중 하나라도 모르면 null.
+ */
+export function formatMediaBitrate(bytes: number | null, seconds: number | null): string | null {
+  if (!bytes || !seconds || !Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+
+  const kilobitsPerSecond = Math.round((bytes * 8) / seconds / 1000);
+  return kilobitsPerSecond > 0 ? `${kilobitsPerSecond} kbps` : null;
 }

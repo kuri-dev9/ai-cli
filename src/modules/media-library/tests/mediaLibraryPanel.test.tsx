@@ -60,8 +60,9 @@ test('a connected folder lists its tracks and plays one in place', async () => {
     <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
   );
 
-  // The folder header shows the folder name, not the whole path.
-  await findByText('tracks');
+  // The header carries the whole path: connected folders often end in the same
+  // name, so the tail is what tells them apart.
+  await waitFor(() => assert.ok(folderHeader(container).textContent?.includes('/Users/me/tracks')));
   const entry = await findByText('song.flac');
   assert.equal(container.querySelector('audio'), null, 'nothing plays until asked');
 
@@ -103,6 +104,21 @@ test('a file opened from outside plays at the top, above the folders', async () 
   });
 });
 
+/** 폴더 머리글 버튼. 라벨이 전체 경로라 텍스트 대신 구조로 찾는다. */
+const folderHeader = (container: HTMLElement) => {
+  const header = container.querySelector('section > button');
+  assert.ok(header, 'a connected folder must have a header');
+  return header;
+};
+
+/** 펼쳐 둔 항목 안의 마지막 버튼 — 휴지통이다. */
+const deleteButton = (container: HTMLElement) => {
+  const entry = container.querySelector('li');
+  assert.ok(entry);
+  const buttons = entry.querySelectorAll('button');
+  return buttons[buttons.length - 1];
+};
+
 const listedNames = (container: HTMLElement) =>
   Array.from(container.querySelectorAll('li button > span:first-of-type'))
     .map((element) => element.textContent);
@@ -119,7 +135,7 @@ test('collapsing a folder keeps a playing track alive', async () => {
 
   // Collapsing used to unmount the list, which took the player with it and cut
   // the music off. The list must only be hidden.
-  fireEvent.click(await findByText('tracks'));
+  fireEvent.click(folderHeader(container));
 
   assert.ok(container.querySelector('audio'), 'the player must survive collapsing');
 });
@@ -163,4 +179,69 @@ test('the list can be ordered by name or by date, newest first by default', asyn
 
   fireEvent.click(byDate);
   assert.deepEqual(listedNames(container), ['song.flac', 'another.flac'], 'back to newest first');
+});
+
+test('deleting a track asks first, then removes it and its player', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+  const deleteCalls: string[] = [];
+  const confirmed: string[] = [];
+  vi.stubGlobal('confirm', (message: string) => {
+    confirmed.push(message);
+    return true;
+  });
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/file-tree/media/file')) {
+      deleteCalls.push(String(init?.body));
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
+    if (url.includes('/api/file-tree/media/list')) {
+      // After the delete the folder comes back without that track.
+      const files = deleteCalls.length > 0 ? [TRACKS.files[1]] : TRACKS.files;
+      return new Response(JSON.stringify({ files }), { status: 200 });
+    }
+    return new Response(null, { status: 200 });
+  }));
+
+  const { container, findByText, queryByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  fireEvent.click(await findByText('song.flac'));
+  await waitFor(() => assert.ok(container.querySelector('audio')));
+
+  fireEvent.click(deleteButton(container));
+
+  await waitFor(() => assert.equal(deleteCalls.length, 1));
+  assert.equal(confirmed.length, 1, 'an unrecoverable delete must be confirmed');
+  assert.ok(deleteCalls[0].includes('/Users/me/tracks/song.flac'));
+  await waitFor(() => assert.equal(queryByText('song.flac'), null));
+  assert.equal(container.querySelector('audio'), null, 'the deleted track must not keep playing');
+});
+
+test('a delete the server refuses leaves the track in place and says so', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+  vi.stubGlobal('confirm', () => true);
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/file-tree/media/file')) {
+      return new Response(JSON.stringify({ error: 'Permission denied' }), { status: 403 });
+    }
+    if (url.includes('/api/file-tree/media/list')) {
+      return new Response(JSON.stringify(TRACKS), { status: 200 });
+    }
+    return new Response(null, { status: 200 });
+  }));
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  fireEvent.click(await findByText('song.flac'));
+  await waitFor(() => assert.ok(container.querySelector('audio')));
+
+  fireEvent.click(deleteButton(container));
+
+  await findByText('Permission denied');
+  assert.ok(await findByText('song.flac'), 'a refused delete must leave the track listed');
 });

@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Music, RefreshCw, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, FolderInput, Music, RefreshCw, Trash2, X } from 'lucide-react';
 
 import MediaPlayer from '@/modules/media-library/MediaPlayer';
 import { useMediaFolderContents } from '@/modules/media-library/hooks/useMediaFolderContents';
 import type { MediaFileEntry } from '@/modules/media-library/hooks/useMediaFolderContents';
+import { api } from '@/shared/api';
 import { useMediaFolders } from '@/shared/hooks/useMediaFolders';
 import { formatMediaDate } from '@/modules/media-library/utils/mediaMeta';
-import { mediaFolderLabel } from '@/shared/mediaFolders';
 
 type MediaLibraryPanelProps = {
   /** 폴더 목록을 어느 프로젝트에서 읽을지. */
@@ -69,6 +69,33 @@ export default function MediaLibraryPanel({
   };
 
   const SortArrow = ascending ? ArrowUp : ArrowDown;
+  // 방금 실패한 파일 작업의 메시지. 다음 작업을 시작하면 지운다.
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const runFileAction = async (action: () => Promise<Response>, filePath: string) => {
+    setActionError(null);
+    try {
+      const response = await action();
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        setActionError(body?.error ?? t('mediaLibrary.actionFailed'));
+        return;
+      }
+      // 사라졌거나 옮겨 간 파일의 플레이어를 남겨 두지 않는다.
+      setOpenPaths((open) => open.filter((entry) => entry !== filePath));
+      reload();
+    } catch {
+      setActionError(t('mediaLibrary.actionFailed'));
+    }
+  };
+
+  const confirmDelete = (file: MediaFileEntry) => {
+    // 되돌릴 수 없는 작업이라 한 번 묻는다. 휴지통이 아니라 바로 지운다.
+    if (!window.confirm(t('mediaLibrary.confirmDelete', { name: file.name }))) {
+      return;
+    }
+    void runFileAction(() => api.deleteMediaFile(file.path), file.path);
+  };
 
   const togglePath = (filePath: string) => {
     setOpenPaths((open) => (
@@ -101,12 +128,41 @@ export default function MediaLibraryPanel({
           <div className="px-2 pb-2 pt-1">
             <MediaPlayer
               filePath={file.path}
-              label={file.name}
               kind={kindOf(file.contentType)}
               size={file.size}
               modifiedAt={file.modifiedAt}
               autoPlay
             />
+
+            <div className="flex items-center gap-1 pt-1">
+              {folders
+                .filter((folder) => folder !== file.path.slice(0, file.path.lastIndexOf('/')))
+                .map((folder) => (
+                  <button
+                    key={folder}
+                    type="button"
+                    onClick={() => void runFileAction(
+                      () => api.moveMediaFile(file.path, folder),
+                      file.path,
+                    )}
+                    className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title={t('mediaLibrary.moveTo', { folder })}
+                  >
+                    <FolderInput className="h-3.5 w-3.5" />
+                    <span className="max-w-[9rem] truncate">{folder.split('/').pop()}</span>
+                  </button>
+                ))}
+
+              <button
+                type="button"
+                onClick={() => confirmDelete(file)}
+                className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                title={t('mediaLibrary.delete')}
+                aria-label={t('mediaLibrary.delete')}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </li>
@@ -153,12 +209,21 @@ export default function MediaLibraryPanel({
         </div>
       </div>
 
+      {actionError && (
+        <p className="shrink-0 border-b border-border px-3 py-2 text-xs text-red-600 dark:text-red-400">
+          {actionError}
+        </p>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto">
         {openedFilePath && (
           <div className="border-b border-border p-3">
+            {/* 목록 행이 없는 자리라 이름을 여기서 보여준다. */}
+            <p className="truncate pb-1 text-sm font-medium" title={openedFilePath}>
+              {openedFilePath.split('/').pop()}
+            </p>
             <MediaPlayer
               filePath={openedFilePath}
-              label={openedFilePath.split('/').pop() ?? openedFilePath}
               kind={/\.(mp4|webm|mov|m4v|ogv)$/i.test(openedFilePath) ? 'video' : 'audio'}
               autoPlay
             />
@@ -191,8 +256,13 @@ export default function MediaLibraryPanel({
                 title={folder.folderPath}
               >
                 <Chevron className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {mediaFolderLabel(folder.folderPath)}
+                {/* 끝이 아니라 앞을 자른다. 연결한 폴더들이 흔히 같은 이름으로
+                    끝나므로(`…/tracks`), 구분되는 쪽은 앞이 아니라 뒤다. */}
+                <span
+                  className="min-w-0 flex-1 truncate text-left text-sm font-medium"
+                  style={{ direction: 'rtl' }}
+                >
+                  &lrm;{folder.folderPath}
                 </span>
                 <span className="shrink-0 text-xs text-muted-foreground">{folder.files.length}</span>
               </button>

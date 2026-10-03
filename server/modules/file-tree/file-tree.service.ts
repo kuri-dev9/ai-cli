@@ -650,6 +650,70 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       return openResolvedFile(resolvedPath, options?.rangeHeader);
     },
 
+    async deleteMediaFile(filePath) {
+      const resolvedPath = await resolveInsideWorkspace(filePath);
+      if (!isPlayableMedia(resolvedPath)) {
+        throw createFileTreeError('File is not playable media', 415, 'NOT_PLAYABLE_MEDIA');
+      }
+
+      try {
+        await fileSystem.unlink(resolvedPath);
+      } catch (error) {
+        mapFileSystemError(error, {
+          ENOENT: { message: 'File not found', statusCode: 404 },
+          EACCES: { message: 'Permission denied', statusCode: 403 },
+          EPERM: { message: 'Permission denied', statusCode: 403 },
+        });
+      }
+
+      return { success: true as const, path: resolvedPath };
+    },
+
+    async moveMediaFile(filePath, targetFolderPath) {
+      const resolvedSource = await resolveInsideWorkspace(filePath);
+      if (!isPlayableMedia(resolvedSource)) {
+        throw createFileTreeError('File is not playable media', 415, 'NOT_PLAYABLE_MEDIA');
+      }
+
+      const resolvedFolder = await resolveInsideWorkspace(targetFolderPath);
+      try {
+        const stats = await fileSystem.stat(resolvedFolder);
+        if (!stats.isDirectory()) {
+          throw createFileTreeError('Target is not a directory', 400, 'NOT_A_DIRECTORY');
+        }
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw createFileTreeError('Target folder not found', 404, 'FOLDER_NOT_FOUND');
+      }
+
+      const destination = path.join(resolvedFolder, path.basename(resolvedSource));
+      if (destination === resolvedSource) {
+        throw createFileTreeError('File is already in that folder', 409, 'FILE_ALREADY_THERE');
+      }
+
+      // Refuse rather than overwrite: the file being replaced is somebody's
+      // take that no undo would bring back.
+      try {
+        await fileSystem.access(destination);
+        throw createFileTreeError('A file with that name is already there', 409, 'FILE_ALREADY_EXISTS');
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+      }
+
+      try {
+        await fileSystem.rename(resolvedSource, destination);
+      } catch (error) {
+        mapFileSystemError(error, {
+          ENOENT: { message: 'File not found', statusCode: 404 },
+          EACCES: { message: 'Permission denied', statusCode: 403 },
+          EPERM: { message: 'Permission denied', statusCode: 403 },
+          EXDEV: { message: 'Cannot move across filesystems', statusCode: 400 },
+        });
+      }
+
+      return { success: true as const, path: destination };
+    },
+
     async listMediaFiles(folderPath) {
       const resolvedFolder = await resolveInsideWorkspace(folderPath);
       try {
