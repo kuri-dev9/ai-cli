@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getPreviewKind, MermaidDiagram } from '@/modules/code-editor';
 import { normalizeInlineCodeFences } from '@/modules/chat/utils/chatFormatting';
+import { mediaStreamUrl } from '@/shared/api';
 import { copyTextToClipboard } from '@/shared/utils';
 import { SyntaxHighlighter } from '@/shared/syntaxHighlighter';
 import { usePaletteOps } from '@/modules/command-palette';
@@ -88,8 +89,8 @@ type CodeBlockProps = {
 // `node` is destructured out so react-markdown's hast node never reaches the DOM.
 const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: CodeBlockProps) => {
   const { t } = useTranslation('chat');
-  const { openFileInEditor } = usePaletteOps();
   const [copied, setCopied] = useState(false);
+  const [playerOpen, setPlayerOpen] = useState(false);
   // Fenced blocks carry a trailing newline in the tree; trim it so the
   // highlighter doesn't render an empty final line.
   const raw = (Array.isArray(children) ? children.join('') : String(children ?? '')).replace(/\n$/, '');
@@ -101,20 +102,46 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
     const mediaReference = playableMediaReference(raw);
 
     if (mediaReference) {
+      // Built only while open so a track opened after a token refresh gets the
+      // new token. Null means the session is gone; the app's expiry flow takes
+      // over, so there is nothing useful to render here.
+      const streamUrl = playerOpen ? mediaStreamUrl(mediaReference) : null;
+
       return (
-        <button
-          type="button"
-          onClick={() => openFileInEditor(mediaReference)}
-          className={`inline-flex items-center gap-1 whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted px-1.5 py-0.5 text-left font-mono text-[0.875em] text-blue-600 hover:underline dark:text-blue-400 ${className || ''
-            }`}
-          title={t('codeBlock.playMedia')}
-          aria-label={`${t('codeBlock.playMedia')}: ${mediaReference}`}
-        >
-          <svg aria-hidden="true" className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z" />
-          </svg>
-          {children}
-        </button>
+        // `span` throughout: this sits in a text flow, and `block` gives the
+        // player its own line without nesting a block element inside a phrase.
+        <span className="inline">
+          <button
+            type="button"
+            onClick={() => setPlayerOpen((open) => !open)}
+            aria-expanded={playerOpen}
+            className={`inline-flex items-center gap-1 whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted px-1.5 py-0.5 text-left font-mono text-[0.875em] text-blue-600 hover:underline dark:text-blue-400 ${className || ''
+              }`}
+            title={t('codeBlock.playMedia')}
+            aria-label={`${t('codeBlock.playMedia')}: ${mediaReference}`}
+          >
+            <svg aria-hidden="true" className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              {playerOpen ? <path d="M7 14l5-5 5 5z" /> : <path d="M8 5v14l11-7z" />}
+            </svg>
+            {children}
+          </button>
+
+          {streamUrl && (
+            <span className="mt-1 block">
+              {getPreviewKind(mediaReference) === 'video' ? (
+                <video
+                  src={streamUrl}
+                  controls
+                  autoPlay
+                  preload="metadata"
+                  className="max-h-64 w-full max-w-xl rounded-md bg-black"
+                />
+              ) : (
+                <audio src={streamUrl} controls autoPlay preload="metadata" className="w-full max-w-xl" />
+              )}
+            </span>
+          )}
+        </span>
       );
     }
 
