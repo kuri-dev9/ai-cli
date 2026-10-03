@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import { api } from '@/shared/api';
+import { api, mediaStreamUrl } from '@/shared/api';
 import type { CodeEditorFile,PreviewKind } from '@/shared/types';
 import { getPreviewMimeType } from '@/modules/code-editor/utils/previewableFile';
 
@@ -34,6 +34,12 @@ const looksLikePdf = async (blob: Blob): Promise<boolean> => {
   return new TextDecoder('latin1').decode(header).includes('%PDF-');
 };
 
+// Audio and video are streamed: the element gets a URL and the browser fetches
+// only what it needs to start playing, then seeks with ranged requests. Images
+// and PDFs stay on the pre-fetched blob path, which the PDF magic-byte check
+// and the SVG new-tab rule below depend on.
+const isStreamedKind = (kind: PreviewKind): boolean => kind === 'audio' || kind === 'video';
+
 /** Rendered by CodeEditor inside the code-editor module to preview image and PDF files instead of opening them as text. */
 export default function CodeEditorMediaPreview({
   file,
@@ -52,9 +58,19 @@ export default function CodeEditorMediaPreview({
   // this so a blob from a previously-opened file can never show under the new
   // file (the editor reuses this component instance across files).
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  // Which file a streamed element reported a playback failure for. Keyed the
+  // same way as `loadedKey` so switching files clears the message by itself,
+  // without an effect writing state on every open.
+  const [streamErrorKey, setStreamErrorKey] = useState<string | null>(null);
   const sourceKey = `${projectId ?? ''}:${file.path}:${kind}`;
 
   useEffect(() => {
+    // Streamed kinds never read bytes here: the element is given a URL instead,
+    // and it needs no project id because the media endpoint is workspace-scoped.
+    if (isStreamedKind(kind)) {
+      return;
+    }
+
     if (!projectId) {
       setUrl(null);
       setLoadedKey(null);
@@ -140,7 +156,23 @@ export default function CodeEditorMediaPreview({
 
   // Only expose the blob once it matches the file currently being shown, so a
   // stale URL from the previous file is never rendered during a switch.
-  const currentUrl = url && loadedKey === sourceKey ? url : null;
+  const blobUrl = url && loadedKey === sourceKey ? url : null;
+
+  // Recomputed per file so a track opened after a token refresh gets the new
+  // token. Null means there is no usable token and the request would 401.
+  const streamUrl = useMemo(
+    () => (isStreamedKind(kind) ? mediaStreamUrl(file.path) : null),
+    [kind, file.path],
+  );
+
+  const isStreamed = isStreamedKind(kind);
+  const currentUrl = isStreamed ? streamUrl : blobUrl;
+  // The blob path owns `loading`/`error`; a streamed element reports its own
+  // failure and needs no loading pass, so both are derived rather than stored.
+  const showLoading = !isStreamed && loading;
+  const shownError = isStreamed
+    ? (streamErrorKey === sourceKey ? labels.error : null)
+    : error;
 
   // SVGs render safely inline via <img> (scripts don't execute there), but the
   // open-in-new-tab link is a top-level navigation. A blob URL inherits the
@@ -148,6 +180,12 @@ export default function CodeEditorMediaPreview({
   // as same-origin script. Withhold the new-tab action for SVGs.
   const isSvg = getPreviewMimeType(file.name) === 'image/svg+xml';
   const canOpenInNewTab = Boolean(currentUrl) && !isSvg;
+
+  // A streamed element reports failure through its own error event rather than
+  // a fetch status, so playback errors are surfaced from here instead.
+  const handleStreamError = () => {
+    setStreamErrorKey(sourceKey);
+  };
 
   const renderMedia = () => {
     if (!currentUrl) return null;
@@ -168,7 +206,16 @@ export default function CodeEditorMediaPreview({
         return <iframe src={currentUrl} title={file.name} className="h-full w-full border-0 bg-white" />;
       case 'video':
         return (
-          <video src={currentUrl} controls className="max-h-full max-w-full" autoPlay={false}>
+          <video
+            src={currentUrl}
+            controls
+            className="max-h-full max-w-full"
+            autoPlay={false}
+            // `metadata` is enough to show the duration and arm seeking without
+            // pulling the whole file down before the user presses play.
+            preload="metadata"
+            onError={handleStreamError}
+          >
             {labels.error}
           </video>
         );
@@ -176,7 +223,13 @@ export default function CodeEditorMediaPreview({
         return (
           <div className="flex w-full max-w-xl flex-col items-center gap-4 px-6">
             <p className="max-w-full truncate text-sm text-muted-foreground">{file.name}</p>
-            <audio src={currentUrl} controls className="w-full">
+            <audio
+              src={currentUrl}
+              controls
+              className="w-full"
+              preload="metadata"
+              onError={handleStreamError}
+            >
               {labels.error}
             </audio>
           </div>
@@ -188,15 +241,15 @@ export default function CodeEditorMediaPreview({
 
   const previewBody = (
     <div className="relative flex h-full w-full flex-col items-center justify-center bg-muted/30 p-2">
-      {loading && (
+      {showLoading && (
         <div className="text-sm text-muted-foreground">{labels.loading}</div>
       )}
 
-      {!loading && currentUrl && renderMedia()}
+      {!showLoading && currentUrl && !shownError && renderMedia()}
 
-      {!loading && !currentUrl && (
+      {!showLoading && (!currentUrl || shownError) && (
         <div className="flex flex-col items-center gap-3 p-8 text-center text-muted-foreground">
-          <p className="text-sm">{error || labels.error}</p>
+          <p className="text-sm">{shownError || labels.error}</p>
           <p className="break-all text-xs">{file.path}</p>
         </div>
       )}

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
 import test from 'node:test';
 
 import express, { type RequestHandler } from 'express';
 
 import { createFileTreeRouter } from '@/modules/file-tree/file-tree.routes.js';
 import type { FileTreeServices } from '@/shared/types.js';
+import { AppError } from '@/shared/utils.js';
 
 function createFakeServices(overrides: Partial<FileTreeServices> = {}): FileTreeServices {
   const unexpectedOperation = async (): Promise<never> => {
@@ -18,6 +20,7 @@ function createFakeServices(overrides: Partial<FileTreeServices> = {}): FileTree
     createWorkspaceFolder: unexpectedOperation,
     readTextFile: unexpectedOperation,
     openFile: unexpectedOperation,
+    openMediaFile: unexpectedOperation,
     saveTextFile: unexpectedOperation,
     listProjectFiles: unexpectedOperation,
     createEntry: unexpectedOperation,
@@ -154,4 +157,151 @@ test('create route rejects invalid entry types without calling the service', asy
   });
 
   assert.equal(createCalled, false);
+});
+
+test('content route advertises range support and the full length for an unranged read', async () => {
+  const trackBytes = Buffer.from('0123456789');
+  const receivedRangeHeaders: Array<string | null | undefined> = [];
+  const services = createFakeServices({
+    openFile: async (_projectId, _filePath, options) => {
+      receivedRangeHeaders.push(options?.rangeHeader);
+      return {
+        contentType: 'audio/flac',
+        stream: Readable.from([trackBytes]),
+        size: trackBytes.length,
+        contentRange: null,
+      };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/file-tree/projects/project-1/files/content?path=/tracks/track.flac`,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'audio/flac');
+    assert.equal(response.headers.get('accept-ranges'), 'bytes');
+    assert.equal(response.headers.get('content-length'), '10');
+    assert.equal(response.headers.get('content-range'), null);
+    assert.equal(await response.text(), '0123456789');
+  });
+
+  assert.deepEqual(receivedRangeHeaders, [null]);
+});
+
+test('content route forwards the Range header and answers a partial read with 206', async () => {
+  const receivedRangeHeaders: Array<string | null | undefined> = [];
+  const services = createFakeServices({
+    openFile: async (_projectId, _filePath, options) => {
+      receivedRangeHeaders.push(options?.rangeHeader);
+      return {
+        contentType: 'audio/flac',
+        stream: Readable.from([Buffer.from('3456')]),
+        size: 10,
+        contentRange: { start: 3, end: 6 },
+      };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/file-tree/projects/project-1/files/content?path=/tracks/track.flac`,
+      { headers: { Range: 'bytes=3-6' } },
+    );
+
+    assert.equal(response.status, 206);
+    assert.equal(response.headers.get('accept-ranges'), 'bytes');
+    assert.equal(response.headers.get('content-range'), 'bytes 3-6/10');
+    assert.equal(response.headers.get('content-length'), '4');
+    assert.equal(await response.text(), '3456');
+  });
+
+  assert.deepEqual(receivedRangeHeaders, ['bytes=3-6']);
+});
+
+test('content route answers an unsatisfiable range with 416 and the resource length', async () => {
+  const services = createFakeServices({
+    openFile: async () => {
+      throw new AppError('Requested range not satisfiable', {
+        statusCode: 416,
+        code: 'RANGE_NOT_SATISFIABLE',
+        details: { size: 10 },
+      });
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/file-tree/projects/project-1/files/content?path=/tracks/track.flac`,
+      { headers: { Range: 'bytes=99-' } },
+    );
+
+    assert.equal(response.status, 416);
+    assert.equal(response.headers.get('content-range'), 'bytes */10');
+  });
+});
+
+test('media route streams a player file by absolute path with no project id', async () => {
+  const requestedPaths: string[] = [];
+  const services = createFakeServices({
+    openMediaFile: async (filePath, options) => {
+      requestedPaths.push(filePath);
+      assert.equal(options?.rangeHeader, null);
+      return {
+        contentType: 'audio/flac',
+        stream: Readable.from([Buffer.from('0123456789')]),
+        size: 10,
+        contentRange: null,
+      };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/file-tree/media/content?path=${encodeURIComponent('/Users/me/generated/song.flac')}`,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'audio/flac');
+    assert.equal(response.headers.get('accept-ranges'), 'bytes');
+    assert.equal(response.headers.get('content-length'), '10');
+    assert.equal(await response.text(), '0123456789');
+  });
+
+  assert.deepEqual(requestedPaths, ['/Users/me/generated/song.flac']);
+});
+
+test('media route answers a seek with 206 and forwards the Range header', async () => {
+  const services = createFakeServices({
+    openMediaFile: async (_filePath, options) => {
+      assert.equal(options?.rangeHeader, 'bytes=4-7');
+      return {
+        contentType: 'audio/flac',
+        stream: Readable.from([Buffer.from('4567')]),
+        size: 10,
+        contentRange: { start: 4, end: 7 },
+      };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/file-tree/media/content?path=${encodeURIComponent('/Users/me/generated/song.flac')}`,
+      { headers: { Range: 'bytes=4-7' } },
+    );
+
+    assert.equal(response.status, 206);
+    assert.equal(response.headers.get('content-range'), 'bytes 4-7/10');
+    assert.equal(await response.text(), '4567');
+  });
+});
+
+test('media route requires a path', async () => {
+  const services = createFakeServices();
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/file-tree/media/content`);
+    assert.equal(response.status, 400);
+  });
 });

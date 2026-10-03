@@ -5,6 +5,7 @@ import ignore from 'ignore';
 import type {
   FileTreeDirectoryEntry,
   FileTreeNode,
+  FileTreeOpenedFile,
   FileTreeServiceDependencies,
   FileTreeServices,
   FileTreeUploadedFile,
@@ -38,6 +39,12 @@ const COMMON_WORKSPACE_DIRECTORY_NAMES = [
 // server heap before the browser has a chance to switch to a narrower project.
 const MAXIMUM_FILE_TREE_ENTRIES = 10_000;
 
+// Only formats a browser can hand to an <audio>/<video> element are served
+// outside a project boundary. Everything else — source, config, archives,
+// documents — stays project-scoped, so this endpoint cannot be used to read a
+// file the user did not open a player for.
+const PLAYABLE_MEDIA_MIME_PREFIXES = ['audio/', 'video/'];
+
 type FileTreeEntryFilter = (entryPath: string, isDirectory: boolean) => boolean;
 
 function includeEntryByHardExclusions(entryPath: string, isDirectory: boolean): boolean {
@@ -51,6 +58,46 @@ function includeEntryByFallbackDirectoryNames(entryPath: string, isDirectory: bo
 
 function createFileTreeError(message: string, statusCode: number, code: string): AppError {
   return new AppError(message, { statusCode, code });
+}
+
+// Single-range byte parser for media playback. `<audio>`/`<video>` elements send
+// a lone `bytes=start-end` (or an open-ended `bytes=start-`) when seeking, so
+// multi-range requests are deliberately treated as "no range" and answered with
+// the whole file, which the HTTP spec permits.
+function parseByteRange(
+  rangeHeader: string | null | undefined,
+  size: number,
+): { start: number; end: number } | null | 'unsatisfiable' {
+  if (!rangeHeader) {
+    return null;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) {
+    return null;
+  }
+
+  const [, rawStart, rawEnd] = match;
+  if (!rawStart && !rawEnd) {
+    return null;
+  }
+
+  // An empty file can satisfy no range at all, not even `bytes=0-`.
+  if (size === 0) {
+    return 'unsatisfiable';
+  }
+
+  // `bytes=-500` asks for the trailing 500 bytes.
+  const start = rawStart ? Number.parseInt(rawStart, 10) : Math.max(size - Number.parseInt(rawEnd, 10), 0);
+  const end = rawStart
+    ? Math.min(rawEnd ? Number.parseInt(rawEnd, 10) : size - 1, size - 1)
+    : size - 1;
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+    return 'unsatisfiable';
+  }
+
+  return { start, end };
 }
 
 function readErrorCode(error: unknown): string | null {
@@ -312,6 +359,56 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
     });
   }
 
+  /**
+   * Stats one already-authorized path and returns it as a streamable response,
+   * honouring a byte range when the caller asked for one. Shared by the
+   * project-scoped and media openers so range handling has one implementation.
+   */
+  async function openResolvedFile(
+    resolvedPath: string,
+    rangeHeader: string | null | undefined,
+  ): Promise<FileTreeOpenedFile> {
+    let size: number;
+    try {
+      await fileSystem.access(resolvedPath);
+      size = (await fileSystem.stat(resolvedPath)).size;
+    } catch {
+      throw createFileTreeError('File not found', 404, 'FILE_NOT_FOUND');
+    }
+
+    const contentType = dependencies.resolveMimeType(resolvedPath);
+    const requestedRange = parseByteRange(rangeHeader, size);
+
+    if (requestedRange === 'unsatisfiable') {
+      // The size travels with the error so the route can answer with the
+      // `Content-Range: bytes */<size>` header a 416 response requires.
+      throw new AppError('Requested range not satisfiable', {
+        statusCode: 416,
+        code: 'RANGE_NOT_SATISFIABLE',
+        details: { size },
+      });
+    }
+
+    if (!requestedRange) {
+      return {
+        contentType,
+        stream: fileSystem.createReadStream(resolvedPath),
+        size,
+        contentRange: null,
+      };
+    }
+
+    return {
+      contentType,
+      stream: fileSystem.createReadStream(resolvedPath, {
+        start: requestedRange.start,
+        end: requestedRange.end,
+      }),
+      size,
+      contentRange: requestedRange,
+    };
+  }
+
   async function cleanupTemporaryFiles(files: FileTreeUploadedFile[]): Promise<void> {
     await Promise.all(files.map(async (file) => {
       try {
@@ -421,19 +518,41 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       }
     },
 
-    async openFile(projectId, filePath) {
+    async openFile(projectId, filePath, options) {
       const projectRoot = await resolveProjectRoot(projectId);
-      const resolvedPath = resolvePathInsideProject(projectRoot, filePath);
-      try {
-        await fileSystem.access(resolvedPath);
-      } catch {
-        throw createFileTreeError('File not found', 404, 'FILE_NOT_FOUND');
+      return openResolvedFile(
+        resolvePathInsideProject(projectRoot, filePath),
+        options?.rangeHeader,
+      );
+    },
+
+    async openMediaFile(filePath, options) {
+      if (!filePath.trim()) {
+        throw createFileTreeError('Invalid file path', 400, 'INVALID_FILE_PATH');
       }
 
-      return {
-        contentType: dependencies.resolveMimeType(resolvedPath),
-        stream: fileSystem.createReadStream(resolvedPath),
-      };
+      // Workspace-root containment (symlink-aware) is the only path policy
+      // here: the file a player is pointed at commonly lives outside the open
+      // project, for example output an external tool wrote to its own folder.
+      const resolvedInput = path.resolve(
+        expandWorkspacePath(dependencies.workspace.rootPath, filePath),
+      );
+      const validation = await dependencies.workspace.validatePath(resolvedInput);
+      if (!validation.valid) {
+        throw createFileTreeError(
+          validation.error ?? 'Path is outside the workspace root',
+          403,
+          'INVALID_WORKSPACE_PATH',
+        );
+      }
+
+      const resolvedPath = validation.resolvedPath || resolvedInput;
+      const contentType = dependencies.resolveMimeType(resolvedPath);
+      if (!PLAYABLE_MEDIA_MIME_PREFIXES.some((prefix) => contentType.startsWith(prefix))) {
+        throw createFileTreeError('File is not playable media', 415, 'NOT_PLAYABLE_MEDIA');
+      }
+
+      return openResolvedFile(resolvedPath, options?.rangeHeader);
     },
 
     async saveTextFile(projectId, filePath, content) {

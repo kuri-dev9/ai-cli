@@ -3,6 +3,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import type {
   FileTreeLogger,
+  FileTreeOpenedFile,
   FileTreeServices,
   FileTreeUploadedFile,
 } from '@/shared/types.js';
@@ -82,6 +83,45 @@ function normalizeUploadedFiles(request: UploadedRequest): FileTreeUploadedFile[
     : [];
 }
 
+function readUnsatisfiableRangeSize(error: AppError): number | null {
+  if (error.code !== 'RANGE_NOT_SATISFIABLE') {
+    return null;
+  }
+  const details = error.details;
+  const size = typeof details === 'object' && details !== null && 'size' in details
+    ? (details as { size: unknown }).size
+    : null;
+  return typeof size === 'number' ? size : null;
+}
+
+function streamOpenedFile(
+  response: Response,
+  file: FileTreeOpenedFile,
+  logger: FileTreeLogger,
+): void {
+  response.setHeader('Content-Type', file.contentType);
+  // Advertised unconditionally so media elements know they may seek with a
+  // ranged request on a later load instead of refetching the whole file.
+  response.setHeader('Accept-Ranges', 'bytes');
+
+  if (file.contentRange) {
+    const { start, end } = file.contentRange;
+    response.status(206);
+    response.setHeader('Content-Range', `bytes ${start}-${end}/${file.size}`);
+    response.setHeader('Content-Length', String(end - start + 1));
+  } else {
+    response.setHeader('Content-Length', String(file.size));
+  }
+
+  file.stream.pipe(response);
+  file.stream.on('error', (error) => {
+    logger.error('Error streaming File Tree content', error);
+    if (!response.headersSent) {
+      response.status(500).json({ error: 'Error reading file' });
+    }
+  });
+}
+
 function createRouteHandler(
   operation: (request: Request, response: Response) => void | Promise<void>,
   logger: FileTreeLogger,
@@ -91,6 +131,12 @@ function createRouteHandler(
       await operation(request, response);
     } catch (error) {
       if (error instanceof AppError) {
+        // A 416 must state the real resource length so the client can retry
+        // with a range it can actually satisfy.
+        const unsatisfiableSize = readUnsatisfiableRangeSize(error);
+        if (unsatisfiableSize !== null) {
+          response.setHeader('Content-Range', `bytes */${unsatisfiableSize}`);
+        }
         response.status(error.statusCode).json({ error: error.message });
         return;
       }
@@ -132,15 +178,20 @@ export function createFileTreeRouter(
 
   router.get('/projects/:projectId/files/content', createRouteHandler(async (request, response) => {
     const filePath = readRequiredString(request.query.path, 'path', 'Invalid file path');
-    const file = await services.openFile(readProjectId(request), filePath);
-    response.setHeader('Content-Type', file.contentType);
-    file.stream.pipe(response);
-    file.stream.on('error', (error) => {
-      logger.error('Error streaming File Tree content', error);
-      if (!response.headersSent) {
-        response.status(500).json({ error: 'Error reading file' });
-      }
-    });
+    streamOpenedFile(response, await services.openFile(readProjectId(request), filePath, {
+      rangeHeader: request.headers.range ?? null,
+    }), logger);
+  }, logger));
+
+  // Serves one playable media file the in-app player was pointed at, which
+  // commonly lives outside the open project (for example output an external
+  // tool wrote to its own folder). The service restricts this to the workspace
+  // root and to audio/video MIME types.
+  router.get('/media/content', createRouteHandler(async (request, response) => {
+    const filePath = readRequiredString(request.query.path, 'path', 'Invalid file path');
+    streamOpenedFile(response, await services.openMediaFile(filePath, {
+      rangeHeader: request.headers.range ?? null,
+    }), logger);
   }, logger));
 
   router.put('/projects/:projectId/file', createRouteHandler(async (request, response) => {

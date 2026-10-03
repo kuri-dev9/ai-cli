@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs, { promises as fsPromises } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 import mime from 'mime-types';
 import multer from 'multer';
@@ -25,6 +26,26 @@ function readFileSystemConcurrency(): number {
   return Number.isFinite(configuredConcurrency) && configuredConcurrency > 0
     ? configuredConcurrency
     : 64;
+}
+
+// `mime-types` still reports pre-standard `x-` subtypes for a few media
+// formats, and browsers refuse to decode some of them (Safari plays
+// `audio/flac` but not `audio/x-flac`). Pinning the registered type here keeps
+// the server's Content-Type aligned with what the browser preview expects.
+const MIME_TYPE_OVERRIDES: Record<string, string> = {
+  '.flac': 'audio/flac',
+  '.opus': 'audio/opus',
+};
+
+/**
+ * Content-Type the File Tree content endpoint reports for a workspace file.
+ * Exported so the override table stays covered by tests without standing up
+ * the whole composition root.
+ */
+export function resolveMimeType(filePath: string): string {
+  const extension = path.extname(filePath).toLowerCase();
+  // `mime.lookup` returns `false` (not null) for unknown extensions.
+  return MIME_TYPE_OVERRIDES[extension] || mime.lookup(filePath) || 'application/octet-stream';
 }
 
 /**
@@ -53,7 +74,7 @@ const fileTreeFileSystem: FileTreeFileSystem = {
   },
   unlink: (filePath) => fsPromises.unlink(filePath),
   copyFile: (sourcePath, destinationPath) => fsPromises.copyFile(sourcePath, destinationPath),
-  createReadStream: (filePath) => fs.createReadStream(filePath),
+  createReadStream: (filePath, options) => fs.createReadStream(filePath, options),
 };
 
 /**
@@ -83,7 +104,7 @@ const fileTreeServices = createFileTreeService({
   fileSystem: fileTreeFileSystem,
   projects: fileTreeProjects,
   workspace: fileTreeWorkspace,
-  resolveMimeType: (filePath) => mime.lookup(filePath) || 'application/octet-stream',
+  resolveMimeType,
   fileSystemConcurrency: readFileSystemConcurrency(),
   logger: fileTreeLogger,
 });

@@ -1093,7 +1093,9 @@ export type FileTreeFileSystem = {
   removeDirectory(directoryPath: string): Promise<void>;
   unlink(filePath: string): Promise<void>;
   copyFile(sourcePath: string, destinationPath: string): Promise<void>;
-  createReadStream(filePath: string): Readable;
+  // `start`/`end` are inclusive byte offsets so a ranged media request streams
+  // only the slice the client asked for instead of the whole file.
+  createReadStream(filePath: string, options?: { start?: number; end?: number }): Readable;
 };
 
 /**
@@ -1158,6 +1160,20 @@ export type FileTreeServiceDependencies = {
 };
 
 /**
+ * One opened workspace file, ready to be written to an HTTP response.
+ *
+ * `size` is the full file size on disk regardless of how much is streamed, and
+ * `contentRange` is set only when the caller asked for a byte range — routes
+ * use it to decide between a 200 and a 206 response.
+ */
+export type FileTreeOpenedFile = {
+  contentType: string;
+  stream: Readable;
+  size: number;
+  contentRange: { start: number; end: number } | null;
+};
+
+/**
  * Complete File Tree application-service surface consumed by HTTP routes.
  *
  * Routes parse transport inputs and call these methods; they never resolve
@@ -1171,7 +1187,21 @@ export type FileTreeServices = {
   }>;
   createWorkspaceFolder(folderPath: string): Promise<{ success: true; path: string }>;
   readTextFile(projectId: string, filePath: string): Promise<{ content: string; path: string }>;
-  openFile(projectId: string, filePath: string): Promise<{ contentType: string; stream: Readable }>;
+  openFile(
+    projectId: string,
+    filePath: string,
+    options?: { rangeHeader?: string | null },
+  ): Promise<FileTreeOpenedFile>;
+  /**
+   * Opens one playable media file by absolute path for the in-app player,
+   * without requiring it to live inside the open project. Containment is
+   * enforced against the workspace root and the MIME type must be playable
+   * audio or video, so this cannot read arbitrary files.
+   */
+  openMediaFile(
+    filePath: string,
+    options?: { rangeHeader?: string | null },
+  ): Promise<FileTreeOpenedFile>;
   saveTextFile(projectId: string, filePath: string, content: string): Promise<{
     success: true;
     path: string;

@@ -150,6 +150,26 @@ export const sessionMessagesUrl = (
 const fileContentPath = (projectId: string, filePath: string) =>
   `/api/file-tree/projects/${projectId}/files/content${query({ path: filePath })}`;
 
+/**
+ * Bare URL for a playable media file, for `<audio>`/`<video>` `src`.
+ *
+ * A media element cannot send the auth header, so the token rides in the query
+ * string the same way `EventSource` and the WebSocket URLs already do. Handing
+ * the element a URL (instead of a pre-fetched blob) is what lets the browser
+ * start playing after a few hundred KB and seek with a ranged request, rather
+ * than transferring the whole track first — which matters over a network.
+ *
+ * Returns null when there is no usable token, so callers can surface an error
+ * instead of requesting a URL that is guaranteed to 401.
+ */
+export const mediaStreamUrl = (filePath: string): string | null => {
+  const token = getStoredAuthToken();
+  if (!token) {
+    return null;
+  }
+  return `/api/file-tree/media/content${query({ path: filePath, token })}`;
+};
+
 const pluginAssetPath = (pluginName: string, assetFile: string) =>
   `/api/plugins/${encodeURIComponent(pluginName)}/assets/${encodeURIComponent(assetFile)}`;
 

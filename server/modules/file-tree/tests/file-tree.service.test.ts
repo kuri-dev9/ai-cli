@@ -41,6 +41,14 @@ function createStats(directory: boolean, mode: number): FileTreeStats {
   };
 }
 
+async function streamToBuffer(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk as Buffer));
+  }
+  return Buffer.concat(chunks);
+}
+
 function createFakeFileSystem(
   overrides: Partial<FileTreeFileSystem> = {},
 ): FileTreeFileSystem {
@@ -368,4 +376,255 @@ test('createEntry performs filesystem mutation only through the injected adapter
 
   assert.equal(result.path, targetPath);
   assert.deepEqual(writtenFiles, [{ filePath: targetPath, content: '' }]);
+});
+
+/**
+ * Builds a service whose only readable file is a fake audio track of
+ * `trackBytes.length` bytes, and records every read-stream slice requested so
+ * range handling can be asserted without touching the real filesystem.
+ */
+function createAudioTrackService(trackBytes: Buffer) {
+  const projectRoot = path.resolve('file-tree-audio-project');
+  const trackPath = path.join(projectRoot, 'track.flac');
+  const readSlices: Array<{ start?: number; end?: number }> = [];
+  const fileSystem = createFakeFileSystem({
+    access: async () => undefined,
+    stat: async () => ({
+      ...createStats(false, 0o644),
+      size: trackBytes.length,
+    }),
+    createReadStream: (filePath, options) => {
+      assert.equal(filePath, trackPath);
+      readSlices.push({ start: options?.start, end: options?.end });
+      const start = options?.start ?? 0;
+      const end = options?.end ?? trackBytes.length - 1;
+      return Readable.from([trackBytes.subarray(start, end + 1)]);
+    },
+  });
+  const services = createFileTreeService({
+    ...createDependencies(fileSystem, projectRoot),
+    resolveMimeType: () => 'audio/flac',
+  });
+
+  return { services, trackPath, readSlices };
+}
+
+test('openFile reports the full audio size and streams the whole file without a range header', async () => {
+  const trackBytes = Buffer.from('0123456789');
+  const { services, trackPath, readSlices } = createAudioTrackService(trackBytes);
+
+  const file = await services.openFile('project-1', trackPath);
+
+  assert.equal(file.contentType, 'audio/flac');
+  assert.equal(file.size, trackBytes.length);
+  assert.equal(file.contentRange, null);
+  assert.deepEqual(readSlices, [{ start: undefined, end: undefined }]);
+  const streamed = await streamToBuffer(file.stream);
+  assert.equal(streamed.toString(), '0123456789');
+});
+
+test('openFile streams only the requested byte range so media players can seek', async () => {
+  const trackBytes = Buffer.from('0123456789');
+  const { services, trackPath, readSlices } = createAudioTrackService(trackBytes);
+
+  const file = await services.openFile('project-1', trackPath, { rangeHeader: 'bytes=3-6' });
+
+  assert.deepEqual(file.contentRange, { start: 3, end: 6 });
+  assert.equal(file.size, trackBytes.length);
+  assert.deepEqual(readSlices, [{ start: 3, end: 6 }]);
+  const streamed = await streamToBuffer(file.stream);
+  assert.equal(streamed.toString(), '3456');
+});
+
+test('openFile clamps an open-ended range to the last byte of the file', async () => {
+  const { services, trackPath, readSlices } = createAudioTrackService(Buffer.from('0123456789'));
+
+  const file = await services.openFile('project-1', trackPath, { rangeHeader: 'bytes=7-' });
+
+  assert.deepEqual(file.contentRange, { start: 7, end: 9 });
+  assert.deepEqual(readSlices, [{ start: 7, end: 9 }]);
+});
+
+test('openFile clamps a range end past the file size instead of over-reading', async () => {
+  const { services, trackPath, readSlices } = createAudioTrackService(Buffer.from('0123456789'));
+
+  const file = await services.openFile('project-1', trackPath, { rangeHeader: 'bytes=5-9999' });
+
+  assert.deepEqual(file.contentRange, { start: 5, end: 9 });
+  assert.deepEqual(readSlices, [{ start: 5, end: 9 }]);
+});
+
+test('openFile resolves a suffix range against the end of the file', async () => {
+  const { services, trackPath } = createAudioTrackService(Buffer.from('0123456789'));
+
+  const file = await services.openFile('project-1', trackPath, { rangeHeader: 'bytes=-4' });
+
+  assert.deepEqual(file.contentRange, { start: 6, end: 9 });
+});
+
+test('openFile serves the whole file for a multi-range request it cannot satisfy piecewise', async () => {
+  const { services, trackPath, readSlices } = createAudioTrackService(Buffer.from('0123456789'));
+
+  const file = await services.openFile('project-1', trackPath, { rangeHeader: 'bytes=0-1,5-6' });
+
+  assert.equal(file.contentRange, null);
+  assert.deepEqual(readSlices, [{ start: undefined, end: undefined }]);
+});
+
+test('openFile rejects a range that starts past the end of the file with the real size', async () => {
+  const { services, trackPath } = createAudioTrackService(Buffer.from('0123456789'));
+
+  await assert.rejects(
+    () => services.openFile('project-1', trackPath, { rangeHeader: 'bytes=10-20' }),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 416);
+      assert.equal(error.code, 'RANGE_NOT_SATISFIABLE');
+      assert.deepEqual(error.details, { size: 10 });
+      return true;
+    },
+  );
+});
+
+test('openFile rejects any range against an empty file', async () => {
+  const { services, trackPath } = createAudioTrackService(Buffer.alloc(0));
+
+  await assert.rejects(
+    () => services.openFile('project-1', trackPath, { rangeHeader: 'bytes=0-' }),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 416);
+      assert.deepEqual(error.details, { size: 0 });
+      return true;
+    },
+  );
+});
+
+test('resolveMimeType pins audio formats mime-types still reports with pre-standard subtypes', async () => {
+  const { resolveMimeType } = await import('@/modules/file-tree/file-tree.module.js');
+
+  // The browser preview refuses `audio/x-flac`, which is what `mime.lookup`
+  // returns on its own.
+  assert.equal(resolveMimeType('/tracks/Track.FLAC'), 'audio/flac');
+  assert.equal(resolveMimeType('/tracks/track.opus'), 'audio/opus');
+  // Formats without an override keep the library's answer.
+  assert.equal(resolveMimeType('/tracks/track.mp3'), 'audio/mpeg');
+  assert.equal(resolveMimeType('/tracks/track.wav'), 'audio/wav');
+  assert.equal(resolveMimeType('/tracks/track.unknownext'), 'application/octet-stream');
+});
+
+/**
+ * Builds a service for the player endpoint: the track lives outside any
+ * project, so only workspace-root containment and the media MIME check stand
+ * between the request and the bytes.
+ */
+function createMediaOnlyService(options: {
+  trackBytes?: Buffer;
+  mimeType?: string;
+  validatePath?: FileTreeServiceDependencies['workspace']['validatePath'];
+} = {}) {
+  const trackBytes = options.trackBytes ?? Buffer.from('0123456789');
+  const workspaceRoot = path.resolve('file-tree-workspace-root');
+  const openedPaths: string[] = [];
+  const fileSystem = createFakeFileSystem({
+    access: async () => undefined,
+    stat: async () => ({ ...createStats(false, 0o644), size: trackBytes.length }),
+    createReadStream: (filePath, readOptions) => {
+      openedPaths.push(filePath);
+      const start = readOptions?.start ?? 0;
+      const end = readOptions?.end ?? trackBytes.length - 1;
+      return Readable.from([trackBytes.subarray(start, end + 1)]);
+    },
+  });
+  const baseDependencies = createDependencies(fileSystem, workspaceRoot);
+  const services = createFileTreeService({
+    ...baseDependencies,
+    workspace: {
+      rootPath: workspaceRoot,
+      validatePath: options.validatePath ?? baseDependencies.workspace.validatePath,
+    },
+    resolveMimeType: () => options.mimeType ?? 'audio/flac',
+  });
+
+  return { services, workspaceRoot, openedPaths, trackBytes };
+}
+
+test('openMediaFile streams a track that lives outside every project', async () => {
+  const { services, openedPaths, trackBytes } = createMediaOnlyService();
+  const outsideProject = path.resolve('file-tree-workspace-root', 'generated/tracks/song.flac');
+
+  const file = await services.openMediaFile(outsideProject);
+
+  assert.equal(file.contentType, 'audio/flac');
+  assert.equal(file.size, trackBytes.length);
+  assert.deepEqual(openedPaths, [outsideProject]);
+  assert.equal((await streamToBuffer(file.stream)).toString(), '0123456789');
+});
+
+test('openMediaFile honours a byte range so the player can seek', async () => {
+  const { services } = createMediaOnlyService();
+  const track = path.resolve('file-tree-workspace-root', 'generated/song.flac');
+
+  const file = await services.openMediaFile(track, { rangeHeader: 'bytes=2-5' });
+
+  assert.deepEqual(file.contentRange, { start: 2, end: 5 });
+  assert.equal((await streamToBuffer(file.stream)).toString(), '2345');
+});
+
+test('openMediaFile expands a workspace-relative "~" path', async () => {
+  const { services, workspaceRoot, openedPaths } = createMediaOnlyService();
+
+  await services.openMediaFile('~/generated/song.flac');
+
+  assert.deepEqual(openedPaths, [path.join(workspaceRoot, 'generated/song.flac')]);
+});
+
+test('openMediaFile refuses a file that is not playable media', async () => {
+  // The player must not become a general-purpose reader for source or config.
+  for (const mimeType of ['text/plain', 'application/json', 'application/octet-stream', 'image/png', 'application/pdf']) {
+    const { services, openedPaths } = createMediaOnlyService({ mimeType });
+
+    await assert.rejects(
+      () => services.openMediaFile(path.resolve('file-tree-workspace-root', 'secrets.env')),
+      (error: unknown) => {
+        assert.ok(error instanceof AppError);
+        assert.equal(error.statusCode, 415);
+        assert.equal(error.code, 'NOT_PLAYABLE_MEDIA');
+        return true;
+      },
+      `${mimeType} must not be served by the player endpoint`,
+    );
+    assert.deepEqual(openedPaths, [], 'a rejected file must never be opened');
+  }
+});
+
+test('openMediaFile refuses a path the workspace policy rejects', async () => {
+  const { services, openedPaths } = createMediaOnlyService({
+    validatePath: async () => ({ valid: false, error: 'Path is outside the workspace root' }),
+  });
+
+  await assert.rejects(
+    () => services.openMediaFile('/etc/sounds/alert.flac'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 403);
+      assert.equal(error.code, 'INVALID_WORKSPACE_PATH');
+      return true;
+    },
+  );
+  assert.deepEqual(openedPaths, []);
+});
+
+test('openMediaFile rejects an empty path before touching the filesystem', async () => {
+  const { services, openedPaths } = createMediaOnlyService();
+
+  await assert.rejects(
+    () => services.openMediaFile('   '),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 400);
+      return true;
+    },
+  );
+  assert.deepEqual(openedPaths, []);
 });
