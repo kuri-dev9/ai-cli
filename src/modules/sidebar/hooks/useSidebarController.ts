@@ -13,6 +13,7 @@ import {
 } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import { hasHiddenProviders as computeHasHiddenProviders, isVisibleProvider } from '@/shared/providerVisibility';
 import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
+import { useQuietFolders } from '@/shared/hooks/useQuietFolders';
 import {
   clearLegacyStarredProjectIds,
   readLegacyStarredProjectIds,
@@ -141,6 +142,9 @@ export function useSidebarController({
    */
   const enabledProviders = useEnabledProviders();
   const hasHiddenProviders = computeHasHiddenProviders(enabledProviders);
+  // "대화" 탭은 서버가 페이지를 잘라 주므로, 조용한 폴더도 서버에서 빼야 한 페이지가
+  // 자동 실행 세션으로만 채워지지 않는다. 목록이 바뀌면 콜백이 바뀌어 다시 불러온다.
+  const { paths: quietFolderPaths } = useQuietFolders();
 
   const isSidebarCollapsed = !isMobile && !sidebarVisible;
   const activeSessionIds = activeSessions;
@@ -250,7 +254,11 @@ export function useSidebarController({
     setRecentConversationsError(false);
 
     try {
-      const response = await api.recentConversations({ limit: 40, offset });
+      const response = await api.recentConversations({
+        limit: 40,
+        offset,
+        excludeFolders: quietFolderPaths,
+      });
       if (!response.ok) {
         throw new Error(`Failed to load recent conversations: ${response.status}`);
       }
@@ -289,7 +297,7 @@ export function useSidebarController({
         setIsLoadingMoreRecentConversations(false);
       }
     }
-  }, []);
+  }, [quietFolderPaths]);
 
   const reloadRecentConversations = useCallback(() => {
     void fetchRecentConversationsPage(0, false);

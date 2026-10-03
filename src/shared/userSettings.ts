@@ -33,6 +33,8 @@ export type UserPreferences = {
   fontSettings: unknown;
   /** 사이드바 전용 프로젝트 묶음 — 실제 디렉터리가 아니라 보기 방식이다. */
   projectGroups: unknown;
+  /** 자동 실행 세션이 쌓이는 폴더 — 사이드바 맨 아래 묶음에 조용히 모아 둔다. */
+  quietFolders: unknown;
 };
 
 export type UserPreferenceKey = keyof UserPreferences;
@@ -82,6 +84,8 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   // Unused: project groups exist only since they were added as a server-stored
   // setting, so there is no localStorage copy to carry over.
   projectGroups: '',
+  // Unused: quiet folders were introduced as a server-stored setting.
+  quietFolders: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

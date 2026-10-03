@@ -3,11 +3,14 @@ import type { DragEvent } from 'react';
 import { FolderPlus } from 'lucide-react';
 
 import type { Project, SidebarProjectListProps } from '@/shared/types';
+import { useQuietFolders } from '@/shared/hooks/useQuietFolders';
+import { isPathInQuietFolders, setQuietFoldersExpanded } from '@/shared/quietFolders';
 import { Input } from '@/shared/ui';
 import { getPageTitle } from '@/shared/utils';
 import SidebarProjectGroupHeader from '@/modules/sidebar/SidebarProjectGroupHeader';
 import SidebarProjectItem from '@/modules/sidebar/SidebarProjectItem';
 import SidebarProjectsState from '@/modules/sidebar/SidebarProjectsState';
+import SidebarQuietProjectsHeader from '@/modules/sidebar/SidebarQuietProjectsHeader';
 import { partitionProjectsByGroup, useProjectGroups } from '@/modules/sidebar/projectGroups';
 
 /** 드래그 중인 프로젝트를 식별하는 데이터 타입. */
@@ -15,6 +18,12 @@ const PROJECT_DRAG_TYPE = 'application/x-project-id';
 
 /** 미분류 영역을 드롭 대상으로 다룰 때 쓰는 키. */
 const UNGROUPED = '__ungrouped__';
+
+/**
+ * 조용한 프로젝트 행에 넘기는 빈 집합. 안쪽 세션이 돌거나 답이 와도 점을 찍지
+ * 않게 한다. 렌더마다 새로 만들면 행의 memo 경계가 깨지므로 하나를 공유한다.
+ */
+const NO_SESSION_IDS: ReadonlySet<string> = new Set<string>();
 
 /** Rendered by SidebarContent to list the filtered projects, delegating each row to SidebarProjectItem. */
 export default function SidebarProjectList({
@@ -69,6 +78,7 @@ export default function SidebarProjectList({
     moveGroup,
     assignments,
   } = useProjectGroups();
+  const quietFolders = useQuietFolders();
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -95,7 +105,18 @@ export default function SidebarProjectList({
   }, [isCreatingGroup]);
 
   const showProjects = !isLoading && projects.length > 0 && filteredProjects.length > 0;
-  const { ungrouped, byGroup } = partitionProjectsByGroup(filteredProjects, {
+  // 조용한 폴더가 사용자 그룹보다 우선한다. 그룹에 넣어 둔 프로젝트라도 경로가
+  // 규칙에 걸리면 맨 아래 묶음으로 간다 — 새 세션에 끌려 위로 올라오지 않게 하는
+  // 것이 이 묶음의 목적이다.
+  const quietProjects: Project[] = [];
+  const regularProjects: Project[] = [];
+  for (const project of filteredProjects) {
+    const bucket = isPathInQuietFolders(project.fullPath || project.path, quietFolders.paths)
+      ? quietProjects
+      : regularProjects;
+    bucket.push(project);
+  }
+  const { ungrouped, byGroup } = partitionProjectsByGroup(regularProjects, {
     groups,
     assignments,
   });
@@ -136,7 +157,7 @@ export default function SidebarProjectList({
     setIsCreatingGroup(false);
   };
 
-  const renderProject = (project: Project) => {
+  const renderProject = (project: Project, isQuiet = false) => {
     // Both renames are resolved here rather than inside the row, so
     // every other row is handed the same scalars on each keystroke and
     // its memo boundary holds.
@@ -185,8 +206,8 @@ export default function SidebarProjectList({
         onForkSession={onForkSession}
         onMoveSession={onMoveSession}
         onLoadMoreSessions={onLoadMoreSessions}
-        activeSessions={activeSessions}
-        attentionSessionIds={attentionSessionIds}
+        activeSessions={isQuiet ? NO_SESSION_IDS : activeSessions}
+        attentionSessionIds={isQuiet ? NO_SESSION_IDS : attentionSessionIds}
         onNewSession={onNewSession}
         onStartEditingSession={onStartEditingSession}
         onCancelEditingSession={onCancelEditingSession}
@@ -227,7 +248,7 @@ export default function SidebarProjectList({
                     접힌 그룹은 행을 아예 그리지 않는다. 목록을 짧게 만들자고
                     만든 기능이라, 숨기는 대신 높이만 0으로 줄이는 식은 의미가 없다.
                   */}
-                  {!group.collapsed && groupProjects.map(renderProject)}
+                  {!group.collapsed && groupProjects.map((project) => renderProject(project))}
                 </Fragment>
               );
             })}
@@ -254,7 +275,7 @@ export default function SidebarProjectList({
                 </span>
               </div>
             )}
-            {ungrouped.map(renderProject)}
+            {ungrouped.map((project) => renderProject(project))}
 
             {isCreatingGroup ? (
               <div className="mt-2 flex items-center gap-1.5 px-2">
@@ -285,6 +306,19 @@ export default function SidebarProjectList({
                 <FolderPlus className="h-3.5 w-3.5" />
                 {t('sidebar:groups.create', { defaultValue: 'New group' })}
               </button>
+            )}
+
+            {/* 그룹 만들기 버튼보다도 아래, 목록의 진짜 끝에 둔다. */}
+            {quietProjects.length > 0 && (
+              <>
+                <SidebarQuietProjectsHeader
+                  projectCount={quietProjects.length}
+                  expanded={quietFolders.expanded}
+                  onToggleExpanded={() => setQuietFoldersExpanded(!quietFolders.expanded)}
+                  t={t}
+                />
+                {quietFolders.expanded && quietProjects.map((project) => renderProject(project, true))}
+              </>
             )}
           </>
         )}

@@ -182,6 +182,10 @@
     "field": "Group",
     "fieldHelp": "Groups only change how the sidebar is organized — no folders are moved."
   },
+  "quietFolders": {
+    "title": "Quiet folders",
+    "hint": "Projects under quiet folders. Manage the folders in Settings > Appearance."
+  },
   "moveSession": {
     "title": "Move to another project",
     "description": "The conversation continues in the chosen project's folder. The original transcript is kept on disk.",

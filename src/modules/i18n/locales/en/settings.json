@@ -272,6 +272,15 @@
       "alphabetical": "Alphabetical",
       "recentActivity": "Recent Activity"
     },
+    "quietFolders": {
+      "title": "Quiet folders",
+      "description": "Projects under these folders are collected into one collapsed group at the bottom of the sidebar. New sessions there don't move them up, mark them, or appear in Conversations. Use this for folders where scripts run the CLI automatically.",
+      "placeholder": "/absolute/path/to/folder",
+      "add": "Add",
+      "remove": "Remove",
+      "invalid": "Enter an absolute path (starting with /), other than the root.",
+      "duplicate": "This folder is already in the list."
+    },
     "codeEditor": {
       "title": "Code Editor",
       "theme": {

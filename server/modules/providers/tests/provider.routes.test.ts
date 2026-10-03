@@ -242,3 +242,22 @@ test('model routes expose immutable defaults and full custom model CRUD', async 
     );
   });
 });
+
+test('recent sessions route drops conversations under every repeated exclude folder', async () => {
+  await withProviderServer(async (baseUrl) => {
+    sessionsDb.createSession('kept', 'claude', '/work/app', 'Kept', '2026-10-01T09:00:00.000Z', '2026-10-01T09:00:00.000Z');
+    sessionsDb.createSession('sibling', 'claude', '/work/llm-sim-v2', 'Sibling', '2026-10-01T10:00:00.000Z', '2026-10-01T10:00:00.000Z');
+    sessionsDb.createSession('run', 'claude', '/work/llm-sim/runs/a/premarket', 'Run', '2026-10-01T11:00:00.000Z', '2026-10-01T11:00:00.000Z');
+    sessionsDb.createSession('tmp', 'claude', '/tmp', 'Tmp', '2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z');
+
+    const url = `${baseUrl}/api/providers/sessions/recent?exclude=${encodeURIComponent('/work/llm-sim/')}&exclude=/tmp`;
+    const response = await fetch(url);
+    const payload = await response.json() as {
+      data: { conversations: Array<{ sessionId: string }>; total: number };
+    };
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload.data.conversations.map((row) => row.sessionId), ['sibling', 'kept']);
+    assert.equal(payload.data.total, 2);
+  });
+});

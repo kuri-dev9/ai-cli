@@ -53,7 +53,7 @@ export const authenticatedFetch = (
 // Every endpoint below goes through these so verb, JSON encoding and query
 // serialization stay consistent across the whole frontend.
 
-type QueryValue = string | number | boolean | null | undefined;
+type QueryValue = string | number | boolean | null | undefined | readonly string[];
 
 // Serializes a query object into `?a=1&b=2` (or an empty string). Empty and
 // `false` values are dropped so optional flags can be passed unconditionally.
@@ -61,6 +61,14 @@ const query = (params: Record<string, QueryValue>): string => {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === null || value === undefined || value === '' || value === false) {
+      continue;
+    }
+    // 배열은 같은 키를 반복해서 보낸다(`?k=a&k=b`). 경로처럼 쉼표가 들어갈 수
+    // 있는 값을 한 문자열로 이어 붙이면 서버가 다시 나눌 수 없다.
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        search.append(key, item);
+      }
       continue;
     }
     search.set(key, String(value));
@@ -235,8 +243,13 @@ export const api = {
   sessionDetails: (sessionId: string) =>
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}`),
   runningSessions: () => get('/api/providers/sessions/running'),
-  recentConversations: ({ limit = 40, offset = 0 }: { limit?: number; offset?: number } = {}) =>
-    get(`/api/providers/sessions/recent${query({ limit, offset })}`),
+  // `excludeFolders` 아래 프로젝트의 세션은 빼고 센다 — 조용한 폴더(설정 > 모양).
+  recentConversations: ({
+    limit = 40,
+    offset = 0,
+    excludeFolders = [],
+  }: { limit?: number; offset?: number; excludeFolders?: readonly string[] } = {}) =>
+    get(`/api/providers/sessions/recent${query({ limit, offset, exclude: excludeFolders })}`),
   providerSessionId: (sessionId: string) =>
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}/provider-id`),
   restoreSession: (sessionId: string) => post(`/api/providers/sessions/${sessionId}/restore`),

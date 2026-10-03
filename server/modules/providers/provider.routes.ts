@@ -484,6 +484,29 @@ const parseBoundedIntegerQuery = <T extends number | null>(
   return parsed;
 };
 
+/** `exclude` 로 받을 수 있는 폴더 수. 설정 화면에서 손으로 적는 목록이라 넉넉하다. */
+const MAX_EXCLUDED_FOLDERS = 100;
+
+/**
+ * `?exclude=/a&exclude=/b` 를 폴더 목록으로 읽는다. 하나만 오면 Express 가
+ * 문자열로, 여럿이면 배열로 넘긴다. 빈 값은 버리고, 정규화는 저장소가 한다.
+ */
+const parseExcludedFoldersQuery = (value: unknown): string[] => {
+  const rawValues = Array.isArray(value) ? value : [value];
+  const folders = rawValues
+    .map((entry) => readOptionalQueryString(entry))
+    .filter((entry): entry is string => entry !== undefined);
+
+  if (folders.length > MAX_EXCLUDED_FOLDERS) {
+    throw new AppError(`exclude accepts at most ${MAX_EXCLUDED_FOLDERS} folders.`, {
+      code: 'INVALID_QUERY_PARAMETER',
+      statusCode: 400,
+    });
+  }
+
+  return folders;
+};
+
 const parseSessionModelPayload = (payload: unknown): string => {
   if (!payload || typeof payload !== 'object') {
     throw new AppError('Request body must be an object.', {
@@ -892,7 +915,8 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const limit = parseBoundedIntegerQuery(req.query.limit, 'limit', 40, 1, 100);
     const offset = parseBoundedIntegerQuery(req.query.offset, 'offset', 0, 0);
-    const page = sessionsService.listRecentSessions(limit, offset);
+    const excludedFolders = parseExcludedFoldersQuery(req.query.exclude);
+    const page = sessionsService.listRecentSessions(limit, offset, excludedFolders);
     res.json(createApiSuccessResponse(page));
   }),
 );
