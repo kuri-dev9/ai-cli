@@ -266,5 +266,16 @@
       "updateAvailable": "Güncelleme mevcut",
       "closeSidebar": "Kenar çubuğunu kapat"
     }
+  },
+  "mediaLibrary": {
+    "title": "Medya",
+    "refresh": "Yenile",
+    "close": "Kapat",
+    "empty": "Henüz bağlı medya klasörü yok.",
+    "openSettings": "Ayarlar’da bir klasör bağla",
+    "folderEmpty": "Bu klasörde oynatılabilir dosya yok.",
+    "folderUnavailable": "Bu klasör okunamadı.",
+    "unsupported": "Tarayıcınız bu dosyayı oynatamıyor.",
+    "loading": "Yükleniyor…"
   }
 }

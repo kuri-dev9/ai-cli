@@ -266,5 +266,16 @@
       "updateAvailable": "有可用更新",
       "closeSidebar": "关闭侧边栏"
     }
+  },
+  "mediaLibrary": {
+    "title": "媒体",
+    "refresh": "刷新",
+    "close": "关闭",
+    "empty": "尚未连接媒体文件夹。",
+    "openSettings": "在设置中连接文件夹",
+    "folderEmpty": "此文件夹中没有可播放的文件。",
+    "folderUnavailable": "无法读取此文件夹。",
+    "unsupported": "您的浏览器无法播放此文件。",
+    "loading": "加载中…"
   }
 }

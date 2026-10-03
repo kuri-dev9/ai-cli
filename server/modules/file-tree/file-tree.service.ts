@@ -4,6 +4,7 @@ import ignore from 'ignore';
 
 import type {
   FileTreeDirectoryEntry,
+  FileTreeMediaEntry,
   FileTreeNode,
   FileTreeOpenedFile,
   FileTreeServiceDependencies,
@@ -44,6 +45,12 @@ const MAXIMUM_FILE_TREE_ENTRIES = 10_000;
 // documents — stays project-scoped, so this endpoint cannot be used to read a
 // file the user did not open a player for.
 const PLAYABLE_MEDIA_MIME_PREFIXES = ['audio/', 'video/'];
+
+// Bounds for a configured media folder walk. A library is a folder of tracks,
+// not a source tree, so a few levels and a generous file cap are plenty while
+// still protecting a setting pointed at something enormous.
+const MAXIMUM_MEDIA_LIBRARY_DEPTH = 3;
+const MAXIMUM_MEDIA_LIBRARY_ENTRIES = 1_000;
 
 type FileTreeEntryFilter = (entryPath: string, isDirectory: boolean) => boolean;
 
@@ -359,6 +366,106 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
     });
   }
 
+  function isPlayableMedia(candidatePath: string): boolean {
+    const contentType = dependencies.resolveMimeType(candidatePath);
+    return PLAYABLE_MEDIA_MIME_PREFIXES.some((prefix) => contentType.startsWith(prefix));
+  }
+
+  /**
+   * Resolves a caller-supplied path against the workspace root and refuses
+   * anything the workspace policy rejects. This is the only path check the
+   * media endpoints apply: the files a player is pointed at commonly live
+   * outside the open project, for example output an external tool wrote to its
+   * own folder.
+   */
+  async function resolveInsideWorkspace(inputPath: string): Promise<string> {
+    if (!inputPath.trim()) {
+      throw createFileTreeError('Invalid file path', 400, 'INVALID_FILE_PATH');
+    }
+
+    const resolvedInput = path.resolve(
+      expandWorkspacePath(dependencies.workspace.rootPath, inputPath),
+    );
+    const validation = await dependencies.workspace.validatePath(resolvedInput);
+    if (!validation.valid) {
+      throw createFileTreeError(
+        validation.error ?? 'Path is outside the workspace root',
+        403,
+        'INVALID_WORKSPACE_PATH',
+      );
+    }
+
+    return validation.resolvedPath || resolvedInput;
+  }
+
+  /**
+   * Walks a media folder and collects the files a player can open.
+   *
+   * Bounded on both axes so pointing the setting at a huge tree cannot stall
+   * the server: nested folders are followed only a few levels down, and the
+   * walk stops once the cap is reached.
+   */
+  async function collectMediaFiles(
+    rootPath: string,
+    directoryPath: string,
+    depth: number,
+    found: FileTreeMediaEntry[],
+  ): Promise<void> {
+    if (found.length >= MAXIMUM_MEDIA_LIBRARY_ENTRIES) {
+      return;
+    }
+
+    let entries: FileTreeDirectoryEntry[];
+    try {
+      entries = [];
+      for await (const entry of fileSystem.openDirectory(directoryPath)) {
+        entries.push(entry);
+      }
+    } catch {
+      // An unreadable subfolder should not empty the whole library.
+      return;
+    }
+
+    for (const entry of entries) {
+      if (found.length >= MAXIMUM_MEDIA_LIBRARY_ENTRIES) {
+        return;
+      }
+
+      const entryPath = path.join(directoryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        if (depth < MAXIMUM_MEDIA_LIBRARY_DEPTH && !IGNORED_DIRECTORY_NAMES.has(entry.name)) {
+          await collectMediaFiles(rootPath, entryPath, depth + 1, found);
+        }
+        continue;
+      }
+
+      if (!isPlayableMedia(entryPath)) {
+        continue;
+      }
+
+      let size = 0;
+      let modifiedAt: string | null = null;
+      try {
+        const stats = await fileSystem.lstat(entryPath);
+        size = stats.size;
+        modifiedAt = stats.mtime.toISOString();
+      } catch {
+        // Keep the entry: it is still playable even if its metadata is not
+        // readable, and the player shows what it can.
+      }
+
+      found.push({
+        name: entry.name,
+        path: entryPath,
+        relativePath: path.relative(rootPath, entryPath).split(path.sep).join('/'),
+        size,
+        modifiedAt,
+        contentType: dependencies.resolveMimeType(entryPath),
+      });
+    }
+  }
+
   /**
    * Stats one already-authorized path and returns it as a streamable response,
    * honouring a byte range when the caller asked for one. Shared by the
@@ -369,9 +476,12 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
     rangeHeader: string | null | undefined,
   ): Promise<FileTreeOpenedFile> {
     let size: number;
+    let modifiedAt: Date | null;
     try {
       await fileSystem.access(resolvedPath);
-      size = (await fileSystem.stat(resolvedPath)).size;
+      const stats = await fileSystem.stat(resolvedPath);
+      size = stats.size;
+      modifiedAt = stats.mtime;
     } catch {
       throw createFileTreeError('File not found', 404, 'FILE_NOT_FOUND');
     }
@@ -394,6 +504,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
         contentType,
         stream: fileSystem.createReadStream(resolvedPath),
         size,
+        modifiedAt,
         contentRange: null,
       };
     }
@@ -405,6 +516,7 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
         end: requestedRange.end,
       }),
       size,
+      modifiedAt,
       contentRange: requestedRange,
     };
   }
@@ -527,32 +639,33 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
     },
 
     async openMediaFile(filePath, options) {
-      if (!filePath.trim()) {
-        throw createFileTreeError('Invalid file path', 400, 'INVALID_FILE_PATH');
-      }
-
-      // Workspace-root containment (symlink-aware) is the only path policy
-      // here: the file a player is pointed at commonly lives outside the open
-      // project, for example output an external tool wrote to its own folder.
-      const resolvedInput = path.resolve(
-        expandWorkspacePath(dependencies.workspace.rootPath, filePath),
-      );
-      const validation = await dependencies.workspace.validatePath(resolvedInput);
-      if (!validation.valid) {
-        throw createFileTreeError(
-          validation.error ?? 'Path is outside the workspace root',
-          403,
-          'INVALID_WORKSPACE_PATH',
-        );
-      }
-
-      const resolvedPath = validation.resolvedPath || resolvedInput;
-      const contentType = dependencies.resolveMimeType(resolvedPath);
-      if (!PLAYABLE_MEDIA_MIME_PREFIXES.some((prefix) => contentType.startsWith(prefix))) {
+      const resolvedPath = await resolveInsideWorkspace(filePath);
+      if (!isPlayableMedia(resolvedPath)) {
         throw createFileTreeError('File is not playable media', 415, 'NOT_PLAYABLE_MEDIA');
       }
 
       return openResolvedFile(resolvedPath, options?.rangeHeader);
+    },
+
+    async listMediaFiles(folderPath) {
+      const resolvedFolder = await resolveInsideWorkspace(folderPath);
+      try {
+        const stats = await fileSystem.stat(resolvedFolder);
+        if (!stats.isDirectory()) {
+          throw createFileTreeError('Path is not a directory', 400, 'NOT_A_DIRECTORY');
+        }
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw createFileTreeError('Folder not found', 404, 'FOLDER_NOT_FOUND');
+      }
+
+      const found: FileTreeMediaEntry[] = [];
+      await collectMediaFiles(resolvedFolder, resolvedFolder, 0, found);
+
+      // Newest first: a library is usually opened to reach what was just made.
+      found.sort((left, right) => (right.modifiedAt ?? '').localeCompare(left.modifiedAt ?? ''));
+
+      return { path: resolvedFolder, files: found };
     },
 
     async saveTextFile(projectId, filePath, content) {

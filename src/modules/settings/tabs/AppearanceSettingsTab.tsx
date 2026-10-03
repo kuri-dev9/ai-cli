@@ -15,6 +15,7 @@ import SettingsCard from '@/modules/settings/SettingsCard';
 import SettingsRow from '@/modules/settings/SettingsRow';
 import SettingsSection from '@/modules/settings/SettingsSection';
 import SettingsToggle from '@/modules/settings/SettingsToggle';
+import MediaFoldersSettings from '@/modules/settings/tabs/MediaFoldersSettings';
 import QuietFoldersSettings from '@/modules/settings/tabs/QuietFoldersSettings';
 
 type AppearanceSettingsTabProps = {
@@ -156,6 +157,8 @@ export default function AppearanceSettingsTab({
       </SettingsSection>
 
       <QuietFoldersSettings />
+
+      <MediaFoldersSettings />
 
       <SettingsSection title={t('appearanceSettings.codeEditor.title')}>
         <SettingsCard divided>

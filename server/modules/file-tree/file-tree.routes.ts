@@ -95,6 +95,7 @@ function readUnsatisfiableRangeSize(error: AppError): number | null {
 }
 
 function streamOpenedFile(
+  request: Request,
   response: Response,
   file: FileTreeOpenedFile,
   logger: FileTreeLogger,
@@ -103,6 +104,9 @@ function streamOpenedFile(
   // Advertised unconditionally so media elements know they may seek with a
   // ranged request on a later load instead of refetching the whole file.
   response.setHeader('Accept-Ranges', 'bytes');
+  if (file.modifiedAt) {
+    response.setHeader('Last-Modified', file.modifiedAt.toUTCString());
+  }
 
   if (file.contentRange) {
     const { start, end } = file.contentRange;
@@ -111,6 +115,15 @@ function streamOpenedFile(
     response.setHeader('Content-Length', String(end - start + 1));
   } else {
     response.setHeader('Content-Length', String(file.size));
+  }
+
+  // Express routes a HEAD at the matching GET handler. Answer it from the
+  // headers alone — a player asking only for size and date should not make the
+  // server read the file off disk.
+  if (request.method === 'HEAD') {
+    file.stream.destroy();
+    response.end();
+    return;
   }
 
   file.stream.pipe(response);
@@ -178,7 +191,7 @@ export function createFileTreeRouter(
 
   router.get('/projects/:projectId/files/content', createRouteHandler(async (request, response) => {
     const filePath = readRequiredString(request.query.path, 'path', 'Invalid file path');
-    streamOpenedFile(response, await services.openFile(readProjectId(request), filePath, {
+    streamOpenedFile(request, response, await services.openFile(readProjectId(request), filePath, {
       rangeHeader: request.headers.range ?? null,
     }), logger);
   }, logger));
@@ -189,9 +202,17 @@ export function createFileTreeRouter(
   // root and to audio/video MIME types.
   router.get('/media/content', createRouteHandler(async (request, response) => {
     const filePath = readRequiredString(request.query.path, 'path', 'Invalid file path');
-    streamOpenedFile(response, await services.openMediaFile(filePath, {
+    streamOpenedFile(request, response, await services.openMediaFile(filePath, {
       rangeHeader: request.headers.range ?? null,
     }), logger);
+  }, logger));
+
+  // Lists the playable files in one configured media folder. The service keeps
+  // this to the workspace root and to audio/video, so it cannot enumerate an
+  // arbitrary directory.
+  router.get('/media/list', createRouteHandler(async (request, response) => {
+    const folderPath = readRequiredString(request.query.path, 'path', 'Invalid folder path');
+    response.json(await services.listMediaFiles(folderPath));
   }, logger));
 
   router.put('/projects/:projectId/file', createRouteHandler(async (request, response) => {

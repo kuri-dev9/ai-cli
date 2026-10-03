@@ -163,6 +163,15 @@
         "label": "Dimensione carattere",
         "description": "Dimensione del carattere dell'editor in pixel"
       }
+    },
+    "mediaFolders": {
+      "title": "Cartelle multimediali",
+      "description": "Cartelle che il pannello multimediale esamina per audio e video riproducibili. È una vista, non un progetto: non compaiono nella barra laterale né nella scheda File.",
+      "placeholder": "/percorso/assoluto/alla/cartella",
+      "add": "Aggiungi",
+      "remove": "Rimuovi",
+      "invalid": "Inserisci un percorso di cartella assoluto.",
+      "duplicate": "Quella cartella è già nell’elenco."
     }
   },
   "mcpForm": {

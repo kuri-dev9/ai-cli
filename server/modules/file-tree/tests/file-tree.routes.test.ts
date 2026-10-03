@@ -21,6 +21,7 @@ function createFakeServices(overrides: Partial<FileTreeServices> = {}): FileTree
     readTextFile: unexpectedOperation,
     openFile: unexpectedOperation,
     openMediaFile: unexpectedOperation,
+    listMediaFiles: unexpectedOperation,
     saveTextFile: unexpectedOperation,
     listProjectFiles: unexpectedOperation,
     createEntry: unexpectedOperation,
@@ -169,6 +170,7 @@ test('content route advertises range support and the full length for an unranged
         contentType: 'audio/flac',
         stream: Readable.from([trackBytes]),
         size: trackBytes.length,
+        modifiedAt: null,
         contentRange: null,
       };
     },
@@ -199,6 +201,7 @@ test('content route forwards the Range header and answers a partial read with 20
         contentType: 'audio/flac',
         stream: Readable.from([Buffer.from('3456')]),
         size: 10,
+        modifiedAt: null,
         contentRange: { start: 3, end: 6 },
       };
     },
@@ -252,6 +255,7 @@ test('media route streams a player file by absolute path with no project id', as
         contentType: 'audio/flac',
         stream: Readable.from([Buffer.from('0123456789')]),
         size: 10,
+        modifiedAt: null,
         contentRange: null,
       };
     },
@@ -280,6 +284,7 @@ test('media route answers a seek with 206 and forwards the Range header', async 
         contentType: 'audio/flac',
         stream: Readable.from([Buffer.from('4567')]),
         size: 10,
+        modifiedAt: null,
         contentRange: { start: 4, end: 7 },
       };
     },
@@ -304,4 +309,77 @@ test('media route requires a path', async () => {
     const response = await fetch(`${baseUrl}/api/file-tree/media/content`);
     assert.equal(response.status, 400);
   });
+});
+
+test('media list route returns the folder contents for the configured path', async () => {
+  const requested: string[] = [];
+  const services = createFakeServices({
+    listMediaFiles: async (folderPath) => {
+      requested.push(folderPath);
+      return {
+        path: folderPath,
+        files: [{
+          name: 'song.flac',
+          path: `${folderPath}/song.flac`,
+          relativePath: 'song.flac',
+          size: 4300000,
+          modifiedAt: '2026-10-03T10:00:00.000Z',
+          contentType: 'audio/flac',
+        }],
+      };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/file-tree/media/list?path=${encodeURIComponent('/Users/me/tracks')}`,
+    );
+
+    assert.equal(response.status, 200);
+    const body = await response.json() as { files: Array<{ name: string; size: number }> };
+    assert.equal(body.files.length, 1);
+    assert.equal(body.files[0].name, 'song.flac');
+    assert.equal(body.files[0].size, 4300000);
+  });
+
+  assert.deepEqual(requested, ['/Users/me/tracks']);
+});
+
+test('media list route requires a path', async () => {
+  await withFileTreeServer(createFakeServices(), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/file-tree/media/list`);
+    assert.equal(response.status, 400);
+  });
+});
+
+test('a HEAD on the media route answers from the headers without reading the file', async () => {
+  // No data listener: attaching one would put the stream in flowing mode and
+  // read it here, which is exactly what this test is checking the route avoids.
+  const stream = Readable.from([Buffer.from('0123456789')]);
+
+  const services = createFakeServices({
+    openMediaFile: async () => ({
+      contentType: 'audio/flac',
+      stream,
+      size: 10,
+      modifiedAt: new Date('2026-10-03T10:00:00.000Z'),
+      contentRange: null,
+    }),
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(
+      `${baseUrl}/api/file-tree/media/content?path=${encodeURIComponent('/Users/me/song.flac')}`,
+      { method: 'HEAD' },
+    );
+
+    assert.equal(response.status, 200);
+    // The player reads size and date from these two headers alone.
+    assert.equal(response.headers.get('content-length'), '10');
+    assert.equal(response.headers.get('last-modified'), 'Sat, 03 Oct 2026 10:00:00 GMT');
+    assert.equal(await response.text(), '');
+  });
+
+  assert.equal(stream.destroyed, true, 'a metadata request must not read the file off disk');
+  assert.equal(stream.readableEnded, false, 'the bytes must never have been consumed');
 });

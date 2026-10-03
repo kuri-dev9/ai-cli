@@ -303,6 +303,15 @@
         "label": "Font Size",
         "description": "Editor font size in pixels"
       }
+    },
+    "mediaFolders": {
+      "title": "Media folders",
+      "description": "Folders the media panel scans for playable audio and video. This is a view, not a project — the folders do not appear in the sidebar or the Files tab.",
+      "placeholder": "/absolute/path/to/folder",
+      "add": "Add",
+      "remove": "Remove",
+      "invalid": "Enter an absolute folder path.",
+      "duplicate": "That folder is already on the list."
     }
   },
   "mcpForm": {

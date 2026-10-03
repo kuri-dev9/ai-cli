@@ -178,6 +178,9 @@ export const mediaStreamUrl = (filePath: string): string | null => {
   return `/api/file-tree/media/content${query({ path: filePath, token })}`;
 };
 
+const mediaContentPath = (filePath: string) =>
+  `/api/file-tree/media/content${query({ path: filePath })}`;
+
 const pluginAssetPath = (pluginName: string, assetFile: string) =>
   `/api/plugins/${encodeURIComponent(pluginName)}/assets/${encodeURIComponent(assetFile)}`;
 
@@ -300,6 +303,13 @@ export const api = {
   // media call sites fetch a blob through here instead of using a bare `src`.
   readFileBlob: (projectId: string, filePath: string, options: ApiRequestOptions = {}) =>
     get(fileContentPath(projectId, filePath), options),
+  // Size and last-modified for a playable file, read from the response headers.
+  // HEAD so the server answers from its stat alone and never reads the bytes.
+  mediaMetadata: (filePath: string, options: ApiRequestOptions = {}) =>
+    authenticatedFetch(mediaContentPath(filePath), { ...options, method: 'HEAD' }),
+  // The playable files inside one configured media folder, newest first.
+  listMediaFolder: (folderPath: string, options: ApiRequestOptions = {}) =>
+    get(`/api/file-tree/media/list${query({ path: folderPath })}`, options),
   saveFile: (projectId: string, filePath: string, content: string) =>
     put(`/api/file-tree/projects/${projectId}/file`, { filePath, content }),
   getFiles: (projectId: string, options: ApiRequestOptions = {}) =>

@@ -236,5 +236,16 @@
       "updateAvailable": "Update verfügbar",
       "closeSidebar": "Seitenleiste schließen"
     }
+  },
+  "mediaLibrary": {
+    "title": "Medien",
+    "refresh": "Aktualisieren",
+    "close": "Schließen",
+    "empty": "Es sind noch keine Medienordner verbunden.",
+    "openSettings": "Ordner in den Einstellungen verbinden",
+    "folderEmpty": "Keine abspielbaren Dateien in diesem Ordner.",
+    "folderUnavailable": "Dieser Ordner konnte nicht gelesen werden.",
+    "unsupported": "Dein Browser kann diese Datei nicht abspielen.",
+    "loading": "Wird geladen …"
   }
 }

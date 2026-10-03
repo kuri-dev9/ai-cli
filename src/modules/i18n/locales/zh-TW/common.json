@@ -266,5 +266,16 @@
       "updateAvailable": "有可用更新",
       "closeSidebar": "關閉側邊欄"
     }
+  },
+  "mediaLibrary": {
+    "title": "媒體",
+    "refresh": "重新整理",
+    "close": "關閉",
+    "empty": "尚未連接媒體資料夾。",
+    "openSettings": "在設定中連接資料夾",
+    "folderEmpty": "此資料夾中沒有可播放的檔案。",
+    "folderUnavailable": "無法讀取此資料夾。",
+    "unsupported": "您的瀏覽器無法播放此檔案。",
+    "loading": "載入中…"
   }
 }

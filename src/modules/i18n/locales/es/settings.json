@@ -189,6 +189,15 @@
         "label": "Tamaño de fuente",
         "description": "Tamaño de fuente del editor en píxeles"
       }
+    },
+    "mediaFolders": {
+      "title": "Carpetas multimedia",
+      "description": "Carpetas que el panel multimedia explora en busca de audio y vídeo reproducibles. Es una vista, no un proyecto: no aparecen en la barra lateral ni en la pestaña Archivos.",
+      "placeholder": "/ruta/absoluta/a/la/carpeta",
+      "add": "Añadir",
+      "remove": "Quitar",
+      "invalid": "Introduce una ruta de carpeta absoluta.",
+      "duplicate": "Esa carpeta ya está en la lista."
     }
   },
   "mcpForm": {

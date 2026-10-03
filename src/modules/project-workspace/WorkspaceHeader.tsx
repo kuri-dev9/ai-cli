@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, SquarePen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Music, SquarePen } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -20,6 +20,9 @@ type WorkspaceHeaderProps = {
   onMenuClick: () => void;
   /** 지금 열려 있는 프로젝트에서 새 대화를 시작한다. */
   onNewSession: () => void;
+  /** 오른쪽 미디어 패널을 열고 닫는다. */
+  onToggleMediaLibrary: () => void;
+  mediaLibraryOpen: boolean;
 };
 
 /** Rendered by WorkspaceMain to show the workspace title alongside the scrollable tab bar. */
@@ -33,6 +36,8 @@ export default function WorkspaceHeader({
   isMobile,
   onMenuClick,
   onNewSession,
+  onToggleMediaLibrary,
+  mediaLibraryOpen,
 }: WorkspaceHeaderProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -118,6 +123,19 @@ export default function WorkspaceHeader({
             aria-label={t('mainContent.startNewSession')}
           >
             <SquarePen className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`h-7 w-7 flex-shrink-0 rounded-lg p-0 hover:bg-accent/80 hover:text-foreground ${mediaLibraryOpen ? 'text-foreground' : 'text-muted-foreground'
+              }`}
+            onClick={onToggleMediaLibrary}
+            aria-pressed={mediaLibraryOpen}
+            title={t('mediaLibrary.title')}
+            aria-label={t('mediaLibrary.title')}
+          >
+            <Music className="h-4 w-4" />
           </Button>
         </div>
 

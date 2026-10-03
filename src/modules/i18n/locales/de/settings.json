@@ -163,6 +163,15 @@
         "label": "Schriftgröße",
         "description": "Editor-Schriftgröße in Pixeln"
       }
+    },
+    "mediaFolders": {
+      "title": "Medienordner",
+      "description": "Ordner, die das Medienpanel nach abspielbarem Audio und Video durchsucht. Das ist eine Ansicht, kein Projekt — die Ordner erscheinen weder in der Seitenleiste noch im Dateien-Tab.",
+      "placeholder": "/absoluter/pfad/zum/ordner",
+      "add": "Hinzufügen",
+      "remove": "Entfernen",
+      "invalid": "Gib einen absoluten Ordnerpfad ein.",
+      "duplicate": "Dieser Ordner steht bereits auf der Liste."
     }
   },
   "mcpForm": {

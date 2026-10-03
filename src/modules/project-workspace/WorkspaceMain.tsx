@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react';
+import React, { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 
 import { ChatInterface } from '@/modules/chat';
 import { FileTree } from '@/modules/file-tree';
@@ -11,7 +11,9 @@ import { TaskMasterPanel, useTaskMasterProjectSync, useTasksSettings } from '@/m
 import type { AppTab, Project, ProjectSession, SessionEstablishedContext, SessionNavigationOptions, SettingsMainTab } from '@/shared/types';
 import { useUiPreferences } from '@/shared/context/UiPreferencesContext';
 import { useFileOpenResolver } from '@/modules/project-workspace/hooks/useFileOpenResolver';
-import { EditorSidebar, useEditorSidebar } from '@/modules/code-editor';
+import { EditorSidebar, getPreviewKind, useEditorSidebar } from '@/modules/code-editor';
+import { MediaLibraryPanel } from '@/modules/media-library';
+import type { CodeEditorDiffInfo } from '@/shared/types';
 import WorkspaceHeader from '@/modules/project-workspace/WorkspaceHeader';
 import WorkspaceStateView from '@/modules/project-workspace/WorkspaceStateView';
 import WorkspaceErrorBoundary from '@/modules/project-workspace/WorkspaceErrorBoundary';
@@ -92,9 +94,35 @@ function WorkspaceMain({
     isMobile,
   });
 
+  // 오른쪽 미디어 패널. 한 번 열리면 에디터로 전환해도 내려가지 않는다 —
+  // 숨기기만 하므로 듣던 곡이 끊기지 않는다.
+  const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
+  const [openedMediaPath, setOpenedMediaPath] = useState<string | null>(null);
+
+  const handleToggleMediaLibrary = useCallback(() => {
+    setMediaLibraryOpen((open) => !open);
+  }, []);
+
+  const handleCloseMediaLibrary = useCallback(() => {
+    setMediaLibraryOpen(false);
+    setOpenedMediaPath(null);
+  }, []);
+
+  // 재생할 수 있는 파일은 에디터가 아니라 미디어 패널로 보낸다. 코드처럼 열어
+  // 봐야 할 것이 없고, 패널에 두어야 대화를 보면서 계속 들을 수 있다.
+  const handleWorkspaceFileOpen = useCallback((filePath: string, diffInfo?: CodeEditorDiffInfo | null) => {
+    const kind = getPreviewKind(filePath.split('/').pop() ?? filePath);
+    if (kind === 'audio' || kind === 'video') {
+      setOpenedMediaPath(filePath);
+      setMediaLibraryOpen(true);
+      return;
+    }
+    handleFileOpen(filePath, diffInfo ?? null);
+  }, [handleFileOpen]);
+
   // Resolves bare/partial file references (e.g. links inside chat messages) to
   // real project files before opening them in the in-app editor.
-  const resolvedFileOpen = useFileOpenResolver(selectedProject, handleFileOpen);
+  const resolvedFileOpen = useFileOpenResolver(selectedProject, handleWorkspaceFileOpen);
 
   useEffect(() => {
     if (!shouldShowTasksTab && activeTab === 'tasks') {
@@ -117,8 +145,8 @@ function WorkspaceMain({
 
   const openFile = useCallback((filePath: string) => {
     setActiveTab('files');
-    handleFileOpen(filePath);
-  }, [handleFileOpen, setActiveTab]);
+    handleWorkspaceFileOpen(filePath);
+  }, [handleWorkspaceFileOpen, setActiveTab]);
 
   // Opens the editor side panel in place, keeping the current tab (e.g. chat).
   const openFileInEditor = useCallback((filePath: string) => {
@@ -149,6 +177,8 @@ function WorkspaceMain({
         isMobile={isMobile}
         onMenuClick={onMenuClick}
         onNewSession={handleNewSessionInProject}
+        onToggleMediaLibrary={handleToggleMediaLibrary}
+        mediaLibraryOpen={mediaLibraryOpen}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -161,7 +191,7 @@ function WorkspaceMain({
                 selectedSession={selectedSession}
                 ws={ws}
                 sendMessage={sendMessage}
-                onFileOpen={handleFileOpen}
+                onFileOpen={handleWorkspaceFileOpen}
                 onNavigateToSession={onNavigateToSession}
                 onSessionEstablished={onSessionEstablished}
                 onShowSettings={onShowSettings}
@@ -177,7 +207,7 @@ function WorkspaceMain({
 
           {activeTab === 'files' && (
             <div className="h-full overflow-hidden">
-              <FileTree selectedProject={selectedProject} onFileOpen={handleFileOpen} />
+              <FileTree selectedProject={selectedProject} onFileOpen={handleWorkspaceFileOpen} />
             </div>
           )}
 
@@ -197,7 +227,7 @@ function WorkspaceMain({
               <GitPanel
                 selectedProject={selectedProject}
                 isMobile={isMobile}
-                onFileOpen={handleFileOpen}
+                onFileOpen={handleWorkspaceFileOpen}
                 onProjectSelect={onProjectSelect}
                 onProjectsRefresh={onProjectsRefresh}
               />
@@ -222,6 +252,21 @@ function WorkspaceMain({
             </div>
           )}
         </div>
+
+        {/* 한 번 열면 계속 마운트된 채로 둔다. 에디터를 열면 가려질 뿐이라
+            듣던 곡이 끊기지 않고, 돌아오면 그 지점부터 이어진다. */}
+        {mediaLibraryOpen && (
+          <div
+            className={`min-h-0 shrink-0 border-l border-border ${editingFile ? 'hidden' : 'flex'
+              } ${isMobile ? 'w-full' : 'w-[380px]'}`}
+          >
+            <MediaLibraryPanel
+              openedFilePath={openedMediaPath}
+              onClose={handleCloseMediaLibrary}
+              onShowSettings={onShowSettings}
+            />
+          </div>
+        )}
 
         <EditorSidebar
           editingFile={editingFile}

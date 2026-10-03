@@ -1170,7 +1170,24 @@ export type FileTreeOpenedFile = {
   contentType: string;
   stream: Readable;
   size: number;
+  /** Last write time on disk, reported as `Last-Modified`. */
+  modifiedAt: Date | null;
   contentRange: { start: number; end: number } | null;
+};
+
+/**
+ * One playable file inside a configured media folder.
+ *
+ * `relativePath` is the display label: a library may nest a level or two, and
+ * the bare filename alone would not say which subfolder a track came from.
+ */
+export type FileTreeMediaEntry = {
+  name: string;
+  path: string;
+  relativePath: string;
+  size: number;
+  modifiedAt: string | null;
+  contentType: string;
 };
 
 /**
@@ -1202,6 +1219,12 @@ export type FileTreeServices = {
     filePath: string,
     options?: { rangeHeader?: string | null },
   ): Promise<FileTreeOpenedFile>;
+  /**
+   * Lists the playable files inside one configured media folder, newest first.
+   * Containment is enforced against the workspace root and non-media files are
+   * never reported, so this cannot be used to enumerate arbitrary directories.
+   */
+  listMediaFiles(folderPath: string): Promise<{ path: string; files: FileTreeMediaEntry[] }>;
   saveTextFile(projectId: string, filePath: string, content: string): Promise<{
     success: true;
     path: string;

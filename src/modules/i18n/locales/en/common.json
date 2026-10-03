@@ -382,5 +382,16 @@
     "offline": "Disconnected from the server",
     "retrying": "reconnecting",
     "restored": "Reconnected"
+  },
+  "mediaLibrary": {
+    "title": "Media",
+    "refresh": "Refresh",
+    "close": "Close",
+    "empty": "No media folders are connected yet.",
+    "openSettings": "Connect a folder in Settings",
+    "folderEmpty": "No playable files in this folder.",
+    "folderUnavailable": "This folder could not be read.",
+    "unsupported": "Your browser cannot play this file.",
+    "loading": "Loading…"
   }
 }

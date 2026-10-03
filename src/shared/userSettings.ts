@@ -35,6 +35,8 @@ export type UserPreferences = {
   projectGroups: unknown;
   /** 자동 실행 세션이 쌓이는 폴더 — 사이드바 맨 아래 묶음에 조용히 모아 둔다. */
   quietFolders: unknown;
+  /** 플레이어 패널이 훑을 폴더 목록 — 실제 프로젝트가 아니라 보기 방식이다. */
+  mediaFolders: unknown;
 };
 
 export type UserPreferenceKey = keyof UserPreferences;
@@ -86,6 +88,7 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   projectGroups: '',
   // Unused: quiet folders were introduced as a server-stored setting.
   quietFolders: '',
+  mediaFolders: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

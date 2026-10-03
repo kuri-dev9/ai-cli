@@ -104,6 +104,7 @@
           "src/shared/chatDrafts.ts",
           "src/shared/sessionAttention.ts",
           "src/shared/quietFolders.ts",
+          "src/shared/mediaFolders.ts",
           "src/shared/syntaxHighlighter.ts"
         ],
         "mode": "file"

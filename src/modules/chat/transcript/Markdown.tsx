@@ -8,8 +8,8 @@ import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/pris
 import { useTranslation } from 'react-i18next';
 
 import { getPreviewKind, MermaidDiagram } from '@/modules/code-editor';
+import { MediaPlayer } from '@/modules/media-library';
 import { normalizeInlineCodeFences } from '@/modules/chat/utils/chatFormatting';
-import { mediaStreamUrl } from '@/shared/api';
 import { copyTextToClipboard } from '@/shared/utils';
 import { SyntaxHighlighter } from '@/shared/syntaxHighlighter';
 import { usePaletteOps } from '@/modules/command-palette';
@@ -102,11 +102,6 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
     const mediaReference = playableMediaReference(raw);
 
     if (mediaReference) {
-      // Built only while open so a track opened after a token refresh gets the
-      // new token. Null means the session is gone; the app's expiry flow takes
-      // over, so there is nothing useful to render here.
-      const streamUrl = playerOpen ? mediaStreamUrl(mediaReference) : null;
-
       return (
         // `span` throughout: this sits in a text flow, and `block` gives the
         // player its own line without nesting a block element inside a phrase.
@@ -126,19 +121,14 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
             {children}
           </button>
 
-          {streamUrl && (
+          {playerOpen && (
             <span className="mt-1 block">
-              {getPreviewKind(mediaReference) === 'video' ? (
-                <video
-                  src={streamUrl}
-                  controls
-                  autoPlay
-                  preload="metadata"
-                  className="max-h-64 w-full max-w-xl rounded-md bg-black"
-                />
-              ) : (
-                <audio src={streamUrl} controls autoPlay preload="metadata" className="w-full max-w-xl" />
-              )}
+              <MediaPlayer
+                filePath={mediaReference}
+                label={mediaReference.split('/').pop() ?? mediaReference}
+                kind={getPreviewKind(mediaReference) === 'video' ? 'video' : 'audio'}
+                autoPlay
+              />
             </span>
           )}
         </span>

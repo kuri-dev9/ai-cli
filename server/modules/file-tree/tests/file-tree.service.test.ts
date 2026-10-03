@@ -628,3 +628,130 @@ test('openMediaFile rejects an empty path before touching the filesystem', async
   );
   assert.deepEqual(openedPaths, []);
 });
+
+/**
+ * Builds a service over a fake media folder tree so library listing can be
+ * asserted without touching the real filesystem.
+ */
+function createMediaLibraryService(tree: Record<string, Array<[string, boolean]>>, mimeByExtension: Record<string, string> = {}) {
+  const workspaceRoot = path.resolve('media-library-root');
+  const statted: string[] = [];
+  const fileSystem = createFakeFileSystem({
+    access: async () => undefined,
+    stat: async (candidatePath) => ({
+      ...createStats(Boolean(tree[candidatePath]), 0o755),
+      size: 0,
+    }),
+    lstat: async (candidatePath) => {
+      statted.push(candidatePath);
+      return { ...createStats(false, 0o644), size: 1234 };
+    },
+    openDirectory: createDirectoryReader((directoryPath) => {
+      const entries = tree[directoryPath];
+      if (!entries) {
+        throw new Error(`Unreadable directory: ${directoryPath}`);
+      }
+      return entries.map(([name, isDirectory]) => createDirectoryEntry(name, isDirectory));
+    }),
+  });
+  const base = createDependencies(fileSystem, workspaceRoot);
+  const services = createFileTreeService({
+    ...base,
+    resolveMimeType: (filePath) => {
+      const extension = filePath.split('.').pop()?.toLowerCase() ?? '';
+      return mimeByExtension[extension] ?? 'application/octet-stream';
+    },
+  });
+
+  return { services, workspaceRoot, statted };
+}
+
+const AUDIO_MIME = { flac: 'audio/flac', mp3: 'audio/mpeg', mp4: 'video/mp4' };
+
+test('listMediaFiles reports only playable files and skips everything else', async () => {
+  const root = path.resolve('media-library-root', 'tracks');
+  const { services } = createMediaLibraryService({
+    [root]: [
+      ['song.flac', false],
+      ['clip.mp4', false],
+      ['notes.txt', false],
+      ['library.db', false],
+      ['cover.png', false],
+    ],
+  }, AUDIO_MIME);
+
+  const result = await services.listMediaFiles(root);
+
+  assert.deepEqual(
+    result.files.map((file) => file.name).sort(),
+    ['clip.mp4', 'song.flac'],
+    'a media folder listing must not expose non-media files',
+  );
+  assert.equal(result.path, root);
+  assert.equal(result.files[0].size, 1234);
+});
+
+test('listMediaFiles walks nested folders and labels each file by its relative path', async () => {
+  const root = path.resolve('media-library-root', 'tracks');
+  const nested = path.join(root, 'ambient');
+  const { services } = createMediaLibraryService({
+    [root]: [['ambient', true], ['top.flac', false]],
+    [nested]: [['deep.flac', false]],
+  }, AUDIO_MIME);
+
+  const result = await services.listMediaFiles(root);
+
+  assert.deepEqual(
+    result.files.map((file) => file.relativePath).sort(),
+    ['ambient/deep.flac', 'top.flac'],
+  );
+});
+
+test('listMediaFiles keeps going when a subfolder cannot be read', async () => {
+  const root = path.resolve('media-library-root', 'tracks');
+  const { services } = createMediaLibraryService({
+    // `locked` is absent from the tree, so reading it throws.
+    [root]: [['locked', true], ['song.flac', false]],
+  }, AUDIO_MIME);
+
+  const result = await services.listMediaFiles(root);
+
+  assert.deepEqual(result.files.map((file) => file.name), ['song.flac']);
+});
+
+test('listMediaFiles refuses a path the workspace policy rejects', async () => {
+  const workspaceRoot = path.resolve('media-library-root');
+  const fileSystem = createFakeFileSystem({});
+  const base = createDependencies(fileSystem, workspaceRoot);
+  const services = createFileTreeService({
+    ...base,
+    workspace: {
+      rootPath: workspaceRoot,
+      validatePath: async () => ({ valid: false, error: 'Path is outside the workspace root' }),
+    },
+  });
+
+  await assert.rejects(
+    () => services.listMediaFiles('/etc'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 403);
+      return true;
+    },
+  );
+});
+
+test('listMediaFiles rejects a file that is not a directory', async () => {
+  const root = path.resolve('media-library-root', 'tracks');
+  const { services } = createMediaLibraryService({ [root]: [] }, AUDIO_MIME);
+  const filePath = path.resolve('media-library-root', 'song.flac');
+
+  await assert.rejects(
+    () => services.listMediaFiles(filePath),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 400);
+      return true;
+    },
+  );
+});

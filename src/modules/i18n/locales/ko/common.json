@@ -381,5 +381,16 @@
     "offline": "서버와 연결이 끊겼습니다",
     "retrying": "다시 연결하는 중",
     "restored": "다시 연결되었습니다"
+  },
+  "mediaLibrary": {
+    "title": "미디어",
+    "refresh": "새로 고침",
+    "close": "닫기",
+    "empty": "연결된 미디어 폴더가 없습니다.",
+    "openSettings": "설정에서 폴더 연결하기",
+    "folderEmpty": "이 폴더에 재생할 파일이 없습니다.",
+    "folderUnavailable": "이 폴더를 읽을 수 없습니다.",
+    "unsupported": "이 브라우저에서는 재생할 수 없는 파일입니다.",
+    "loading": "불러오는 중…"
   }
 }

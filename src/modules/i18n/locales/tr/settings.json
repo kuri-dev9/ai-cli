@@ -164,6 +164,15 @@
         "label": "Yazı Tipi Boyutu",
         "description": "Editör yazı tipi boyutu (piksel)"
       }
+    },
+    "mediaFolders": {
+      "title": "Medya klasörleri",
+      "description": "Medya panelinin oynatılabilir ses ve videoları taradığı klasörler. Bu bir görünümdür, proje değil — klasörler kenar çubuğunda veya Dosyalar sekmesinde görünmez.",
+      "placeholder": "/klasöre/mutlak/yol",
+      "add": "Ekle",
+      "remove": "Kaldır",
+      "invalid": "Mutlak bir klasör yolu girin.",
+      "duplicate": "Bu klasör zaten listede."
     }
   },
   "mcpForm": {

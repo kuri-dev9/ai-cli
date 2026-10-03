@@ -266,5 +266,16 @@
       "updateAvailable": "Actualización disponible",
       "closeSidebar": "Cerrar barra lateral"
     }
+  },
+  "mediaLibrary": {
+    "title": "Multimedia",
+    "refresh": "Actualizar",
+    "close": "Cerrar",
+    "empty": "Aún no hay carpetas multimedia conectadas.",
+    "openSettings": "Conectar una carpeta en Ajustes",
+    "folderEmpty": "No hay archivos reproducibles en esta carpeta.",
+    "folderUnavailable": "No se pudo leer esta carpeta.",
+    "unsupported": "Tu navegador no puede reproducir este archivo.",
+    "loading": "Cargando…"
   }
 }

@@ -266,5 +266,16 @@
       "updateAvailable": "アップデートあり",
       "closeSidebar": "サイドバーを閉じる"
     }
+  },
+  "mediaLibrary": {
+    "title": "メディア",
+    "refresh": "再読み込み",
+    "close": "閉じる",
+    "empty": "接続されたメディアフォルダがありません。",
+    "openSettings": "設定でフォルダを接続",
+    "folderEmpty": "このフォルダに再生できるファイルがありません。",
+    "folderUnavailable": "このフォルダを読み取れませんでした。",
+    "unsupported": "このブラウザでは再生できないファイルです。",
+    "loading": "読み込み中…"
   }
 }

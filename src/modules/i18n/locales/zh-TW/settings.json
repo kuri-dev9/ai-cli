@@ -164,6 +164,15 @@
         "label": "字型大小",
         "description": "編輯器字型大小（px）"
       }
+    },
+    "mediaFolders": {
+      "title": "媒體資料夾",
+      "description": "媒體面板掃描可播放音訊和影片的資料夾。這是一種檢視而非專案——資料夾不會出現在側邊欄或檔案分頁中。",
+      "placeholder": "/資料夾/絕對/路徑",
+      "add": "新增",
+      "remove": "移除",
+      "invalid": "請輸入絕對資料夾路徑。",
+      "duplicate": "該資料夾已在清單中。"
     }
   },
   "mcpForm": {
