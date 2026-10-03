@@ -284,6 +284,8 @@
       "remove": "Rimuovi",
       "invalid": "Inserisci un percorso di cartella assoluto.",
       "duplicate": "Quella cartella è già nell’elenco."
-    }
+    },
+    "sortByDate": "Data",
+    "sortByName": "Nome"
   }
 }

@@ -284,6 +284,8 @@
       "remove": "移除",
       "invalid": "請輸入絕對資料夾路徑。",
       "duplicate": "該資料夾已在清單中。"
-    }
+    },
+    "sortByDate": "日期",
+    "sortByName": "名稱"
   }
 }

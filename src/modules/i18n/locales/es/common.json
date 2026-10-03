@@ -284,6 +284,8 @@
       "remove": "Quitar",
       "invalid": "Introduce una ruta de carpeta absoluta.",
       "duplicate": "Esa carpeta ya está en la lista."
-    }
+    },
+    "sortByDate": "Fecha",
+    "sortByName": "Nombre"
   }
 }

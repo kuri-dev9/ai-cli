@@ -284,6 +284,8 @@
       "remove": "削除",
       "invalid": "絶対パスを入力してください。",
       "duplicate": "すでに一覧にあるフォルダです。"
-    }
+    },
+    "sortByDate": "日付",
+    "sortByName": "名前"
   }
 }

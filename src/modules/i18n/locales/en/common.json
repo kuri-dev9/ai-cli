@@ -400,6 +400,8 @@
       "remove": "Remove",
       "invalid": "Enter an absolute folder path.",
       "duplicate": "That folder is already on the list."
-    }
+    },
+    "sortByDate": "Date",
+    "sortByName": "Name"
   }
 }

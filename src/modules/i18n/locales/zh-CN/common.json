@@ -284,6 +284,8 @@
       "remove": "移除",
       "invalid": "请输入绝对文件夹路径。",
       "duplicate": "该文件夹已在列表中。"
-    }
+    },
+    "sortByDate": "日期",
+    "sortByName": "名称"
   }
 }

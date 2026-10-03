@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { formatFileSize } from '@/modules/file-tree';
 import { formatMediaDate, formatMediaDuration } from '@/modules/media-library/utils/mediaMeta';
+import { useAudioVisualizer } from '@/modules/media-library/hooks/useAudioVisualizer';
 import { useMediaFileMetadata } from '@/modules/media-library/hooks/useMediaFileMetadata';
 import { mediaStreamUrl } from '@/shared/api';
 
@@ -34,6 +35,10 @@ export default function MediaPlayer({
   const { t, i18n } = useTranslation();
   const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
   const metadata = useMediaFileMetadata(filePath, { size, modifiedAt });
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // 영상은 화면이 이미 움직이고 있으므로 막대를 덧붙이지 않는다.
+  useAudioVisualizer(audioRef, canvasRef, kind === 'audio');
 
   // 열 때마다 만든다 — 토큰이 갱신된 뒤 열어도 새 토큰을 쓴다.
   const streamUrl = mediaStreamUrl(filePath);
@@ -74,9 +79,16 @@ export default function MediaPlayer({
           {t('mediaLibrary.unsupported')}
         </video>
       ) : (
-        <audio {...elementProps} className="w-full max-w-xl">
-          {t('mediaLibrary.unsupported')}
-        </audio>
+        <>
+          <canvas
+            ref={canvasRef}
+            aria-hidden="true"
+            className="block h-8 w-full max-w-xl text-blue-500/70 dark:text-blue-400/70"
+          />
+          <audio ref={audioRef} {...elementProps} className="w-full max-w-xl">
+            {t('mediaLibrary.unsupported')}
+          </audio>
+        </>
       )}
     </span>
   );

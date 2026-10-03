@@ -254,6 +254,8 @@
       "remove": "Entfernen",
       "invalid": "Gib einen absoluten Ordnerpfad ein.",
       "duplicate": "Dieser Ordner steht bereits auf der Liste."
-    }
+    },
+    "sortByDate": "Datum",
+    "sortByName": "Name"
   }
 }

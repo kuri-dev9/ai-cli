@@ -15,16 +15,20 @@ const makeToken = () => {
 
 const PROJECT = 'project-1';
 
+const entry = (name: string, modifiedAt: string) => ({
+  name,
+  path: `/Users/me/tracks/${name}`,
+  relativePath: name,
+  size: 4300000,
+  modifiedAt,
+  contentType: 'audio/flac',
+});
+
+// Deliberately not in name order, so a date sort and a name sort differ.
 const TRACKS = {
   files: [
-    {
-      name: 'song.flac',
-      path: '/Users/me/tracks/song.flac',
-      relativePath: 'song.flac',
-      size: 4300000,
-      modifiedAt: '2026-10-03T10:00:00.000Z',
-      contentType: 'audio/flac',
-    },
+    entry('song.flac', '2026-10-03T10:00:00.000Z'),
+    entry('another.flac', '2026-10-01T10:00:00.000Z'),
   ],
 };
 
@@ -97,4 +101,66 @@ test('a file opened from outside plays at the top, above the folders', async () 
     const src = new URL(audio.getAttribute('src') ?? '', 'http://localhost');
     assert.equal(src.searchParams.get('path'), '/Users/me/.soriforge/tracks/new.flac');
   });
+});
+
+const listedNames = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll('li button > span:first-of-type'))
+    .map((element) => element.textContent);
+
+test('collapsing a folder keeps a playing track alive', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  fireEvent.click(await findByText('song.flac'));
+  await waitFor(() => assert.ok(container.querySelector('audio')));
+
+  // Collapsing used to unmount the list, which took the player with it and cut
+  // the music off. The list must only be hidden.
+  fireEvent.click(await findByText('tracks'));
+
+  assert.ok(container.querySelector('audio'), 'the player must survive collapsing');
+});
+
+test('each entry shows when it was made', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  await findByText('song.flac');
+  const row = container.querySelector('li button');
+  assert.ok(row);
+  // The date sits beside the name, so the row says more than the filename does.
+  assert.ok(row.textContent && row.textContent.length > 'song.flac'.length);
+  assert.ok(/2026/.test(row.textContent ?? ''), 'the row must carry the date');
+});
+
+test('the list can be ordered by name or by date, newest first by default', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  await findByText('song.flac');
+  // The two sort controls are the only toggles in the panel, so they are found
+  // by role rather than by label — the rendered language varies by environment.
+  const [byDate, byName] = Array.from(container.querySelectorAll('button[aria-pressed]'));
+  assert.ok(byDate && byName);
+
+  assert.deepEqual(listedNames(container), ['song.flac', 'another.flac'], 'newest first');
+
+  fireEvent.click(byName);
+  assert.deepEqual(listedNames(container), ['another.flac', 'song.flac'], 'name ascending');
+
+  // Pressing the active control again flips the direction.
+  fireEvent.click(byName);
+  assert.deepEqual(listedNames(container), ['song.flac', 'another.flac'], 'name descending');
+
+  fireEvent.click(byDate);
+  assert.deepEqual(listedNames(container), ['song.flac', 'another.flac'], 'back to newest first');
 });
