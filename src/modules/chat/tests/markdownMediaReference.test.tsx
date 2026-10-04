@@ -4,6 +4,7 @@ import { render, fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, test } from 'vitest';
 
 import { Markdown } from '@/modules/chat/transcript/Markdown';
+import { PaletteOpsProvider, usePaletteOpsRegister } from '@/modules/command-palette';
 import { storeAuthToken } from '@/shared/authToken';
 
 // JWT-shaped string; only the payload is ever decoded (see authToken.test.ts).
@@ -23,7 +24,22 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-const renderMarkdown = (markdown: string) => render(<Markdown>{markdown}</Markdown>);
+/**
+ * `opened` collects the paths the palette's file-open operation is handed, which
+ * is how a code block's play control reaches the media panel.
+ */
+const renderMarkdown = (markdown: string, opened: string[] = []) => {
+  const Harness = () => {
+    usePaletteOpsRegister({ openFileInEditor: (path: string) => opened.push(path) });
+    return <Markdown>{markdown}</Markdown>;
+  };
+
+  return render(
+    <PaletteOpsProvider>
+      <Harness />
+    </PaletteOpsProvider>,
+  );
+};
 
 test('clicking an audio path opens a player underneath it', () => {
   const track = '/Users/me/.soriforge/tracks/7079962e-84c6-4666-8290-c7c3baf82e66-0.flac';

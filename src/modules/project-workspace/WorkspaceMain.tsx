@@ -261,7 +261,9 @@ function WorkspaceMain({
 
         {/* 한 번 열면 계속 마운트된 채로 둔다. 에디터를 열면 가려질 뿐이라
             듣던 곡이 끊기지 않고, 돌아오면 그 지점부터 이어진다. */}
-        {mediaLibraryOpen && hasMediaFolders && (
+        {/* 폴더를 연결하지 않았어도, 바깥에서 파일을 열어 달라고 하면 띄운다.
+            음표 버튼만 폴더가 있을 때 나온다. */}
+        {mediaLibraryOpen && (
           <div
             className={`min-h-0 shrink-0 border-l border-border ${editingFile ? 'hidden' : 'flex'
               } ${isMobile ? 'w-full' : 'w-[380px]'}`}

@@ -68,14 +68,52 @@ const EMPTY_PLUGINS: never[] = [];
 // as a play button instead of inert text. The span must be a bare path: a
 // separator, no whitespace. That keeps prose and shell snippets such as
 // `afplay ~/song.flac` (which also ends in a media extension) out of it.
-const playableMediaReference = (value: string): string | null => {
+const playableMediaReference = (
+  value: string,
+  { allowWhitespace = false }: { allowWhitespace?: boolean } = {},
+): string | null => {
   const cleaned = value.trim();
-  if (!cleaned || /\s/.test(cleaned) || !/[\\/]/.test(cleaned)) {
+  if (!cleaned || !/[\\/]/.test(cleaned)) {
+    return null;
+  }
+  // 따옴표로 묶여 온 값만 공백을 허용한다. 묶이지 않은 공백은 경로의 일부가
+  // 아니라 `afplay ~/song.flac` 처럼 명령과 인자를 가르는 자리다.
+  if (!allowWhitespace && /\s/.test(cleaned)) {
     return null;
   }
 
   const kind = getPreviewKind(cleaned);
   return kind === 'audio' || kind === 'video' ? cleaned : null;
+};
+
+/**
+ * 코드 블록 안에서 재생할 수 있는 경로를 찾는다.
+ *
+ * 블록은 "실행할 명령"이라 글자는 그대로 두되, `open ~/song.flac` 처럼 경로가
+ * 하나만 들어 있으면 그 곡을 바로 열 수 있게 한다. 둘 이상이면 무엇을 트는
+ * 것인지 고를 수 없으므로 아무것도 하지 않는다.
+ */
+const playableMediaReferencesIn = (text: string): string[] => {
+  const found = new Set<string>();
+
+  const consider = (candidate: string, quoted: boolean) => {
+    // 명령줄 끝에 흔히 붙는 구두점과 따옴표를 떼고 본다.
+    const trimmed = candidate.replace(/^["'`]+/, '').replace(/["'`,;:)\]]+$/, '');
+    const reference = playableMediaReference(trimmed, { allowWhitespace: quoted });
+    if (reference) {
+      found.add(reference);
+    }
+  };
+
+  // 공백이 든 경로는 따옴표로 묶여 오므로 그쪽을 먼저 본다.
+  for (const match of text.matchAll(/"([^"\n]+)"|'([^'\n]+)'/g)) {
+    consider(match[1] ?? match[2] ?? '', true);
+  }
+  for (const token of text.split(/\s+/)) {
+    consider(token, false);
+  }
+
+  return [...found];
 };
 
 type CodeBlockProps = {
@@ -89,6 +127,7 @@ type CodeBlockProps = {
 // `node` is destructured out so react-markdown's hast node never reaches the DOM.
 const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: CodeBlockProps) => {
   const { t } = useTranslation('chat');
+  const { openFileInEditor } = usePaletteOps();
   const [copied, setCopied] = useState(false);
   const [playerOpen, setPlayerOpen] = useState(false);
   // Fenced blocks carry a trailing newline in the tree; trim it so the
@@ -145,6 +184,10 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
     );
   }
 
+  const references = playableMediaReferencesIn(raw);
+  // 하나일 때만 연다 — 여럿이면 무엇을 트는 것인지 고를 수 없다.
+  const blockMediaReference = references.length === 1 ? references[0] : null;
+
   const match = /language-(\w+)/.exec(className || '');
   const language = match ? match[1] : 'text';
   const languageLabel = language.charAt(0).toUpperCase() + language.slice(1);
@@ -158,6 +201,20 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
       {/* Label row shares the block's background — no divider, ChatGPT-style */}
       <div className="flex items-center justify-between px-4 pt-2">
         <span className="select-none text-xs text-muted-foreground">{languageLabel}</span>
+        <div className="flex items-center gap-1">
+        {blockMediaReference && (
+          <button
+            type="button"
+            onClick={() => openFileInEditor(blockMediaReference)}
+            className="rounded-md p-1 text-gray-500 transition-opacity hover:bg-gray-200 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+            title={t('codeBlock.playMedia')}
+            aria-label={`${t('codeBlock.playMedia')}: ${blockMediaReference}`}
+          >
+            <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={() =>
@@ -198,6 +255,7 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
             </svg>
           )}
         </button>
+        </div>
       </div>
 
       <SyntaxHighlighter
