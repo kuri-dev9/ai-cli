@@ -386,6 +386,7 @@
     "title": "미디어",
     "refresh": "새로 고침",
     "close": "닫기",
+    "stopPlayback": "재생 중지",
     "empty": "이 프로젝트에 연결된 미디어 폴더가 없습니다.",
     "folderEmpty": "이 폴더에 재생할 파일이 없습니다.",
     "folderUnavailable": "이 폴더를 읽을 수 없습니다.",
@@ -403,8 +404,22 @@
     "sortByDate": "날짜",
     "sortByName": "이름",
     "delete": "삭제",
-    "moveTo": "{{folder}} 로 이동",
     "confirmDelete": "\"{{name}}\" 을(를) 삭제할까요? 되돌릴 수 없습니다.",
-    "actionFailed": "작업하지 못했습니다."
+    "actionFailed": "작업하지 못했습니다.",
+    "edit": "수정",
+    "editTitle": "파일 수정",
+    "fileName": "파일 이름",
+    "folder": "폴더",
+    "convertSection": "다른 형식으로 변환",
+    "convert": "변환",
+    "converting": "변환 중…",
+    "convertUnavailable": "ffmpeg를 찾을 수 없어 변환할 수 없습니다.",
+    "convertHint": "원본은 그대로 두고, 고른 자리에 새 파일을 만듭니다.",
+    "converted": "{{path}} 에 만들었습니다.",
+    "dropHere": "여기에 놓기",
+    "convertTitle": "변환해서 저장",
+    "saveLocation": "저장 위치",
+    "format": "형식",
+    "back": "뒤로"
   }
 }

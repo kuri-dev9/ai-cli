@@ -271,6 +271,7 @@
     "title": "Media",
     "refresh": "Aggiorna",
     "close": "Chiudi",
+    "stopPlayback": "Interrompi riproduzione",
     "empty": "Nessuna cartella multimediale collegata a questo progetto.",
     "folderEmpty": "Nessun file riproducibile in questa cartella.",
     "folderUnavailable": "Non è stato possibile leggere questa cartella.",
@@ -288,8 +289,22 @@
     "sortByDate": "Data",
     "sortByName": "Nome",
     "delete": "Elimina",
-    "moveTo": "Sposta in {{folder}}",
     "confirmDelete": "Eliminare «{{name}}»? Non è reversibile.",
-    "actionFailed": "Non ha funzionato."
+    "actionFailed": "Non ha funzionato.",
+    "edit": "Modifica",
+    "editTitle": "Modifica file",
+    "fileName": "Nome del file",
+    "folder": "Cartella",
+    "convertSection": "Converti in un altro formato",
+    "convert": "Converti",
+    "converting": "Conversione…",
+    "convertUnavailable": "Nessun ffmpeg trovato: qui non si può convertire.",
+    "convertHint": "Crea il nuovo file nel punto scelto e lascia intatto l’originale.",
+    "converted": "{{path}} è stato creato.",
+    "dropHere": "Rilascia qui",
+    "convertTitle": "Converti e salva",
+    "saveLocation": "Salva in",
+    "format": "Formato",
+    "back": "Indietro"
   }
 }

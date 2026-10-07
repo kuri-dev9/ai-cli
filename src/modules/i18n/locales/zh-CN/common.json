@@ -271,6 +271,7 @@
     "title": "媒体",
     "refresh": "刷新",
     "close": "关闭",
+    "stopPlayback": "停止播放",
     "empty": "此项目未连接媒体文件夹。",
     "folderEmpty": "此文件夹中没有可播放的文件。",
     "folderUnavailable": "无法读取此文件夹。",
@@ -288,8 +289,22 @@
     "sortByDate": "日期",
     "sortByName": "名称",
     "delete": "删除",
-    "moveTo": "移动到 {{folder}}",
     "confirmDelete": "删除“{{name}}”？此操作无法撤销。",
-    "actionFailed": "操作未成功。"
+    "actionFailed": "操作未成功。",
+    "edit": "编辑",
+    "editTitle": "编辑文件",
+    "fileName": "文件名",
+    "folder": "文件夹",
+    "convertSection": "转换为其他格式",
+    "convert": "转换",
+    "converting": "转换中…",
+    "convertUnavailable": "未找到 ffmpeg，无法转换。",
+    "convertHint": "保留原文件，在所选位置生成新文件。",
+    "converted": "已创建 {{path}}。",
+    "dropHere": "拖放到此处",
+    "convertTitle": "转换并保存",
+    "saveLocation": "保存位置",
+    "format": "格式",
+    "back": "返回"
   }
 }

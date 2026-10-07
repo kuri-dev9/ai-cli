@@ -271,6 +271,7 @@
     "title": "Multimedia",
     "refresh": "Actualizar",
     "close": "Cerrar",
+    "stopPlayback": "Detener reproducción",
     "empty": "No hay carpetas multimedia conectadas a este proyecto.",
     "folderEmpty": "No hay archivos reproducibles en esta carpeta.",
     "folderUnavailable": "No se pudo leer esta carpeta.",
@@ -288,8 +289,22 @@
     "sortByDate": "Fecha",
     "sortByName": "Nombre",
     "delete": "Eliminar",
-    "moveTo": "Mover a {{folder}}",
     "confirmDelete": "¿Eliminar «{{name}}»? No se puede deshacer.",
-    "actionFailed": "No se pudo completar."
+    "actionFailed": "No se pudo completar.",
+    "edit": "Editar",
+    "editTitle": "Editar archivo",
+    "fileName": "Nombre del archivo",
+    "folder": "Carpeta",
+    "convertSection": "Convertir a otro formato",
+    "convert": "Convertir",
+    "converting": "Convirtiendo…",
+    "convertUnavailable": "No se encontró ffmpeg, así que aquí no se puede convertir.",
+    "convertHint": "Crea el archivo nuevo donde elijas y deja intacto el original.",
+    "converted": "Se creó {{path}}.",
+    "dropHere": "Soltar aquí",
+    "convertTitle": "Convertir y guardar",
+    "saveLocation": "Guardar en",
+    "format": "Formato",
+    "back": "Atrás"
   }
 }

@@ -1099,6 +1099,20 @@ export type FileTreeFileSystem = {
 };
 
 /**
+ * Media transcoding boundary consumed by File Tree workflows.
+ *
+ * The converter is an external program, so it stays behind this contract: the
+ * service never spawns a process itself, and a deployment without one simply
+ * reports the capability as unavailable instead of failing a request.
+ */
+export type FileTreeMediaTranscoder = {
+  /** Whether a converter can be run at all. */
+  isAvailable(): Promise<boolean>;
+  /** Writes `sourcePath` to `destinationPath` in the destination's format. */
+  transcode(sourcePath: string, destinationPath: string): Promise<void>;
+};
+
+/**
  * Project lookup boundary consumed by File Tree workflows.
  *
  * File Tree services resolve DB-assigned project ids through this contract and
@@ -1157,6 +1171,8 @@ export type FileTreeServiceDependencies = {
   resolveMimeType(filePath: string): string;
   fileSystemConcurrency: number;
   logger: FileTreeLogger;
+  /** Omitted where no converter is installed; conversion then reports itself unavailable. */
+  transcoder?: FileTreeMediaTranscoder;
 };
 
 /**
@@ -1228,10 +1244,29 @@ export type FileTreeServices = {
   /** Deletes one playable file. Same containment and media-only rules as playback. */
   deleteMediaFile(filePath: string): Promise<{ success: true; path: string }>;
   /**
-   * Moves one playable file into another folder, keeping its name. Refuses to
+   * Moves one playable file into another folder, renames it, or both. A null
+   * folder keeps it where it is; a null name keeps the one it has. Refuses to
    * overwrite: the file being replaced is a take no undo would bring back.
    */
-  moveMediaFile(filePath: string, targetFolderPath: string): Promise<{ success: true; path: string }>;
+  moveMediaFile(
+    filePath: string,
+    targetFolderPath: string | null,
+    newName?: string | null,
+  ): Promise<{ success: true; path: string }>;
+  /**
+   * Writes a copy of one playable file in another format, leaving the original
+   * alone. The destination folder and name are the caller's to choose — the
+   * folder a file was generated into is often not one anybody browses to — and
+   * default to beside the original under the same stem. Refuses to overwrite,
+   * same as moving.
+   */
+  transcodeMediaFile(
+    filePath: string,
+    format: string,
+    options?: { targetFolder?: string | null; name?: string | null },
+  ): Promise<{ success: true; path: string }>;
+  /** What the media endpoints can do here, so the UI offers only what works. */
+  mediaCapabilities(): Promise<{ transcode: boolean; formats: string[] }>;
   saveTextFile(projectId: string, filePath: string, content: string): Promise<{
     success: true;
     path: string;

@@ -221,11 +221,38 @@ export function createFileTreeRouter(
     response.json(await services.deleteMediaFile(filePath));
   }, logger));
 
+  // Moving and renaming are the same filesystem operation, so one endpoint
+  // serves both: the panel sends a folder, a name, or both at once.
   router.post('/media/move', createRouteHandler(async (request, response) => {
     const body = readBody(request);
     const filePath = readRequiredString(body.path, 'path', 'Invalid file path');
-    const targetFolder = readRequiredString(body.targetFolder, 'targetFolder', 'Invalid target folder');
-    response.json(await services.moveMediaFile(filePath, targetFolder));
+    const targetFolder = readOptionalString(body.targetFolder)?.trim() || null;
+    const newName = readOptionalString(body.name)?.trim() || null;
+    if (!targetFolder && !newName) {
+      throw new AppError('Invalid target folder', {
+        code: 'INVALID_FILE_TREE_REQUEST',
+        statusCode: 400,
+      });
+    }
+    response.json(await services.moveMediaFile(filePath, targetFolder, newName));
+  }, logger));
+
+  // Writes the same track in another format, where the caller asked for it. The
+  // request is held for the length of the conversion, seconds for one file.
+  router.post('/media/transcode', createRouteHandler(async (request, response) => {
+    const body = readBody(request);
+    const filePath = readRequiredString(body.path, 'path', 'Invalid file path');
+    const format = readRequiredString(body.format, 'format', 'Invalid target format');
+    response.json(await services.transcodeMediaFile(filePath, format, {
+      targetFolder: readOptionalString(body.targetFolder)?.trim() || null,
+      name: readOptionalString(body.name)?.trim() || null,
+    }));
+  }, logger));
+
+  // Lets the panel hide conversion entirely where no converter is installed,
+  // rather than offering a button that can only fail.
+  router.get('/media/capabilities', createRouteHandler(async (_request, response) => {
+    response.json(await services.mediaCapabilities());
   }, logger));
 
   router.put('/projects/:projectId/file', createRouteHandler(async (request, response) => {

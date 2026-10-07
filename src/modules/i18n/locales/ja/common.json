@@ -271,6 +271,7 @@
     "title": "メディア",
     "refresh": "再読み込み",
     "close": "閉じる",
+    "stopPlayback": "再生を停止",
     "empty": "このプロジェクトに接続されたメディアフォルダがありません。",
     "folderEmpty": "このフォルダに再生できるファイルがありません。",
     "folderUnavailable": "このフォルダを読み取れませんでした。",
@@ -288,8 +289,22 @@
     "sortByDate": "日付",
     "sortByName": "名前",
     "delete": "削除",
-    "moveTo": "{{folder}} へ移動",
     "confirmDelete": "「{{name}}」を削除しますか？元に戻せません。",
-    "actionFailed": "実行できませんでした。"
+    "actionFailed": "実行できませんでした。",
+    "edit": "編集",
+    "editTitle": "ファイルの編集",
+    "fileName": "ファイル名",
+    "folder": "フォルダー",
+    "convertSection": "別の形式に変換",
+    "convert": "変換",
+    "converting": "変換中…",
+    "convertUnavailable": "ffmpeg が見つからないため変換できません。",
+    "convertHint": "元のファイルはそのままに、選んだ場所へ新しいファイルを作ります。",
+    "converted": "{{path}} を作成しました。",
+    "dropHere": "ここにドロップ",
+    "convertTitle": "変換して保存",
+    "saveLocation": "保存先",
+    "format": "形式",
+    "back": "戻る"
   }
 }

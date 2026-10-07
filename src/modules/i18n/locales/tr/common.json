@@ -271,6 +271,7 @@
     "title": "Medya",
     "refresh": "Yenile",
     "close": "Kapat",
+    "stopPlayback": "Oynatmayı durdur",
     "empty": "Bu projeye bağlı medya klasörü yok.",
     "folderEmpty": "Bu klasörde oynatılabilir dosya yok.",
     "folderUnavailable": "Bu klasör okunamadı.",
@@ -288,8 +289,22 @@
     "sortByDate": "Tarih",
     "sortByName": "Ad",
     "delete": "Sil",
-    "moveTo": "{{folder}} klasörüne taşı",
     "confirmDelete": "\"{{name}}\" silinsin mi? Bu geri alınamaz.",
-    "actionFailed": "Bu işlem yapılamadı."
+    "actionFailed": "Bu işlem yapılamadı.",
+    "edit": "Düzenle",
+    "editTitle": "Dosyayı düzenle",
+    "fileName": "Dosya adı",
+    "folder": "Klasör",
+    "convertSection": "Başka bir biçime dönüştür",
+    "convert": "Dönüştür",
+    "converting": "Dönüştürülüyor…",
+    "convertUnavailable": "ffmpeg bulunamadığı için burada dosyalar dönüştürülemez.",
+    "convertHint": "Özgün dosyaya dokunmaz, seçtiğiniz yere yeni bir dosya yazar.",
+    "converted": "{{path}} oluşturuldu.",
+    "dropHere": "Buraya bırakın",
+    "convertTitle": "Dönüştür ve kaydet",
+    "saveLocation": "Şuraya kaydet",
+    "format": "Biçim",
+    "back": "Geri"
   }
 }

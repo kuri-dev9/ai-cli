@@ -387,6 +387,7 @@
     "title": "Media",
     "refresh": "Refresh",
     "close": "Close",
+    "stopPlayback": "Stop playback",
     "empty": "No media folders are connected to this project.",
     "folderEmpty": "No playable files in this folder.",
     "folderUnavailable": "This folder could not be read.",
@@ -404,8 +405,22 @@
     "sortByDate": "Date",
     "sortByName": "Name",
     "delete": "Delete",
-    "moveTo": "Move to {{folder}}",
     "confirmDelete": "Delete \"{{name}}\"? This cannot be undone.",
-    "actionFailed": "That did not work."
+    "actionFailed": "That did not work.",
+    "edit": "Edit",
+    "editTitle": "Edit file",
+    "fileName": "File name",
+    "folder": "Folder",
+    "convertSection": "Convert to another format",
+    "convert": "Convert",
+    "converting": "Converting…",
+    "convertUnavailable": "No ffmpeg was found, so files cannot be converted here.",
+    "convertHint": "Writes a new file where you chose and leaves the original alone.",
+    "converted": "Created {{path}}.",
+    "dropHere": "Drop here",
+    "convertTitle": "Convert and save",
+    "saveLocation": "Save to",
+    "format": "Format",
+    "back": "Back"
   }
 }

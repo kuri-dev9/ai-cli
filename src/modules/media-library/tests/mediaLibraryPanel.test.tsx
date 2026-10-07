@@ -53,7 +53,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-test('a connected folder lists its tracks and plays one in place', async () => {
+test('a connected folder lists its tracks and plays the chosen one at the bottom', async () => {
   writeMediaFolders(PROJECT, ['/Users/me/tracks']);
 
   const { container, findByText } = render(
@@ -70,7 +70,7 @@ test('a connected folder lists its tracks and plays one in place', async () => {
 
   await waitFor(() => {
     const audio = container.querySelector('audio');
-    assert.ok(audio, 'clicking an entry opens a player in the list');
+    assert.ok(audio, 'clicking an entry loads the player');
     const src = new URL(audio.getAttribute('src') ?? '', 'http://localhost');
     assert.equal(src.pathname, '/api/file-tree/media/content');
     assert.equal(src.searchParams.get('path'), '/Users/me/tracks/song.flac');
@@ -87,7 +87,7 @@ test('a project with no folders connected lists nothing', async () => {
   assert.equal(container.querySelector('section'), null, 'no folder sections are listed');
 });
 
-test('a file opened from outside plays at the top, above the folders', async () => {
+test('a file opened from outside plays in the same bottom player', async () => {
   const { container } = render(
     <MediaLibraryPanel
       projectId={PROJECT}
@@ -99,6 +99,7 @@ test('a file opened from outside plays at the top, above the folders', async () 
   await waitFor(() => {
     const audio = container.querySelector('audio');
     assert.ok(audio, 'the file the workspace opened plays without being in a folder');
+    assert.equal(container.querySelectorAll('audio').length, 1, 'only one player exists');
     const src = new URL(audio.getAttribute('src') ?? '', 'http://localhost');
     assert.equal(src.searchParams.get('path'), '/Users/me/.soriforge/tracks/new.flac');
   });
@@ -111,12 +112,34 @@ const folderHeader = (container: HTMLElement) => {
   return header;
 };
 
-/** 펼쳐 둔 항목 안의 마지막 버튼 — 휴지통이다. */
-const deleteButton = (container: HTMLElement) => {
+/** 행 오른쪽의 연필 — 수정 창을 연다. 라벨은 환경마다 달라 자리로 찾는다. */
+const editButton = (container: HTMLElement) => {
   const entry = container.querySelector('li');
   assert.ok(entry);
   const buttons = entry.querySelectorAll('button');
   return buttons[buttons.length - 1];
+};
+
+/** 수정 창 맨 아래 줄의 버튼들 — 삭제 · 취소 · 저장 순이다. */
+const editModalActions = (container: HTMLElement) => {
+  const dialog = container.querySelector('[role="dialog"]');
+  assert.ok(dialog, 'the edit modal must be open');
+  const footer = dialog.lastElementChild;
+  assert.ok(footer);
+  return Array.from(footer.querySelectorAll('button'));
+};
+
+/** 수정 창을 연다. 바뀐 파일 작업은 모두 이 창 안에 있다. */
+const openEditModal = async (container: HTMLElement) => {
+  fireEvent.click(editButton(container));
+  await waitFor(() => assert.ok(container.querySelector('[role="dialog"]')));
+};
+
+/** 하단 플레이어 위의 제목 줄. 목록 행이 아니라 플레이어 블록 안에 있다. */
+const nowPlayingTitle = (container: HTMLElement) => {
+  const audio = container.querySelector('audio');
+  assert.ok(audio, 'a player must be loaded');
+  return audio.closest('div.shrink-0')?.querySelector('p');
 };
 
 const listedNames = (container: HTMLElement) =>
@@ -138,6 +161,32 @@ test('collapsing a folder keeps a playing track alive', async () => {
   fireEvent.click(folderHeader(container));
 
   assert.ok(container.querySelector('audio'), 'the player must survive collapsing');
+});
+
+test('choosing another track replaces the one playing instead of stacking', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  fireEvent.click(await findByText('song.flac'));
+  await waitFor(() => assert.ok(container.querySelector('audio')));
+
+  fireEvent.click(await findByText('another.flac'));
+
+  // 행마다 플레이어를 펼치던 시절에는 두 곡이 같이 울렸고, 곡이 끝나면 어느
+  // 플레이어가 무엇이었는지 알 수 없었다. 이제 플레이어는 하나뿐이다.
+  await waitFor(() => {
+    const players = container.querySelectorAll('audio');
+    assert.equal(players.length, 1, 'only one track can play at a time');
+    const src = new URL(players[0].getAttribute('src') ?? '', 'http://localhost');
+    assert.equal(src.searchParams.get('path'), '/Users/me/tracks/another.flac');
+  });
+
+  // 플레이어 위에 제목이 있으니 무엇이 울리는지 눈으로 확인할 수 있다.
+  const title = nowPlayingTitle(container);
+  assert.equal(title?.textContent, 'another.flac');
 });
 
 test('each entry shows when it was made', async () => {
@@ -181,7 +230,7 @@ test('the list can be ordered by name or by date, newest first by default', asyn
   assert.deepEqual(listedNames(container), ['song.flac', 'another.flac'], 'back to newest first');
 });
 
-test('deleting a track asks first, then removes it and its player', async () => {
+test('deleting a track from the edit window asks first, then removes it and its player', async () => {
   writeMediaFolders(PROJECT, ['/Users/me/tracks']);
   const deleteCalls: string[] = [];
   const confirmed: string[] = [];
@@ -210,7 +259,8 @@ test('deleting a track asks first, then removes it and its player', async () => 
   fireEvent.click(await findByText('song.flac'));
   await waitFor(() => assert.ok(container.querySelector('audio')));
 
-  fireEvent.click(deleteButton(container));
+  await openEditModal(container);
+  fireEvent.click(editModalActions(container)[0]);
 
   await waitFor(() => assert.equal(deleteCalls.length, 1));
   assert.equal(confirmed.length, 1, 'an unrecoverable delete must be confirmed');
@@ -240,8 +290,207 @@ test('a delete the server refuses leaves the track in place and says so', async 
   fireEvent.click(await findByText('song.flac'));
   await waitFor(() => assert.ok(container.querySelector('audio')));
 
-  fireEvent.click(deleteButton(container));
+  await openEditModal(container);
+  fireEvent.click(editModalActions(container)[0]);
 
+  // The window that asked for the delete is the one that says why it failed,
+  // and it stays open so the next attempt starts from there.
   await findByText('Permission denied');
-  assert.ok(await findByText('song.flac'), 'a refused delete must leave the track listed');
+  assert.ok(container.querySelector('[role="dialog"]'));
+  assert.ok(listedNames(container).includes('song.flac'), 'a refused delete must leave the track listed');
+});
+
+test('the edit window renames a track in place and closes', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks', '/Users/me/keep']);
+  const moveCalls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/file-tree/media/move')) {
+      moveCalls.push(String(init?.body));
+      return new Response(JSON.stringify({ success: true, path: '/Users/me/tracks/take 2.flac' }), { status: 200 });
+    }
+    if (url.includes('/api/file-tree/media/list')) {
+      // Only the first folder holds anything, so each name is listed once.
+      return new Response(
+        JSON.stringify(url.includes('keep') ? { files: [] } : TRACKS),
+        { status: 200 },
+      );
+    }
+    return new Response(null, { status: 200 });
+  }));
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  await findByText('song.flac');
+  await openEditModal(container);
+
+  const nameField = container.querySelector('#media-file-name') as HTMLInputElement;
+  assert.ok(nameField);
+  assert.equal(nameField.value, 'song.flac', 'the field starts at the name the file has');
+  fireEvent.change(nameField, { target: { value: 'take 2.flac' } });
+
+  // 삭제 · 취소 · 저장 중 저장.
+  fireEvent.click(editModalActions(container)[2]);
+
+  await waitFor(() => assert.equal(moveCalls.length, 1));
+  const sent = JSON.parse(moveCalls[0]) as { path: string; name?: string; targetFolder?: string };
+  assert.equal(sent.path, '/Users/me/tracks/song.flac');
+  assert.equal(sent.name, 'take 2.flac');
+  // Nothing was dragged anywhere, so the folder must be left out entirely.
+  assert.equal(sent.targetFolder, null);
+  await waitFor(() => assert.equal(container.querySelector('[role="dialog"]'), null));
+});
+
+test('dropping a track on another folder moves it there', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks', '/Users/me/keep']);
+  const moveCalls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/file-tree/media/move')) {
+      moveCalls.push(String(init?.body));
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
+    if (url.includes('/api/file-tree/media/list')) {
+      // Only the first folder holds anything; the second is where things go.
+      return new Response(
+        JSON.stringify(url.includes('keep') ? { files: [] } : TRACKS),
+        { status: 200 },
+      );
+    }
+    return new Response(null, { status: 200 });
+  }));
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  await findByText('song.flac');
+  const [tracksSection, keepSection] = Array.from(container.querySelectorAll('section'));
+  assert.ok(tracksSection && keepSection);
+  const row = tracksSection.querySelector('li');
+  assert.ok(row);
+
+  const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => undefined, getData: () => '' };
+  fireEvent.dragStart(row, { dataTransfer });
+  fireEvent.dragOver(keepSection, { dataTransfer });
+  fireEvent.drop(keepSection, { dataTransfer });
+
+  await waitFor(() => assert.equal(moveCalls.length, 1));
+  const sent = JSON.parse(moveCalls[0]) as { path: string; targetFolder?: string };
+  assert.equal(sent.path, '/Users/me/tracks/song.flac');
+  assert.equal(sent.targetFolder, '/Users/me/keep');
+});
+
+test('a track cannot be dropped back on the folder it came from', async () => {
+  writeMediaFolders(PROJECT, ['/Users/me/tracks']);
+  const moveCalls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/file-tree/media/move')) {
+      moveCalls.push(String(init?.body));
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
+    if (url.includes('/api/file-tree/media/list')) {
+      return new Response(JSON.stringify(TRACKS), { status: 200 });
+    }
+    return new Response(null, { status: 200 });
+  }));
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  await findByText('song.flac');
+  const section = container.querySelector('section');
+  assert.ok(section);
+  const row = section.querySelector('li');
+  assert.ok(row);
+
+  const dataTransfer = { effectAllowed: '', dropEffect: '', setData: () => undefined, getData: () => '' };
+  fireEvent.dragStart(row, { dataTransfer });
+  fireEvent.drop(section, { dataTransfer });
+
+  // A move onto itself is a request the server would answer with a 409, so the
+  // panel does not make it at all.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(moveCalls, []);
+});
+
+test('converting asks where to save, and keeps the result out of a hidden folder', async () => {
+  // A file generated into `~/.soriforge/tracks` cannot be reached in Finder, so
+  // the window has to offer somewhere else before it writes anything.
+  writeMediaFolders(PROJECT, ['/Users/me/.soriforge/tracks', '/Users/me/Music']);
+  const hidden = {
+    name: 'song.flac',
+    path: '/Users/me/.soriforge/tracks/song.flac',
+    relativePath: 'song.flac',
+    size: 4300000,
+    modifiedAt: '2026-10-03T10:00:00.000Z',
+    contentType: 'audio/flac',
+  };
+  const transcodeCalls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/file-tree/media/capabilities')) {
+      return new Response(JSON.stringify({ transcode: true, formats: ['mp3', 'mp4'] }), { status: 200 });
+    }
+    if (url.includes('/api/file-tree/media/transcode')) {
+      transcodeCalls.push(String(init?.body));
+      return new Response(JSON.stringify({ success: true, path: '/Users/me/Music/song.mp4' }), { status: 200 });
+    }
+    if (url.includes('/api/file-tree/media/list')) {
+      return new Response(
+        JSON.stringify(url.includes('Music') ? { files: [] } : { files: [hidden] }),
+        { status: 200 },
+      );
+    }
+    return new Response(null, { status: 200 });
+  }));
+
+  const { container, findByText } = render(
+    <MediaLibraryPanel projectId={PROJECT} openedFilePath={null} onClose={() => undefined} />,
+  );
+
+  await findByText('song.flac');
+  await openEditModal(container);
+
+  // 변환 화면은 본문 맨 아래 버튼으로 연다. 라벨은 환경마다 달라 자리로 찾는다.
+  const dialog = container.querySelector('[role="dialog"]');
+  assert.ok(dialog);
+  const body = dialog.children[1];
+  assert.ok(body);
+  const bodyButtons = body.querySelectorAll('button');
+  fireEvent.click(bodyButtons[bodyButtons.length - 1]);
+
+  const folderField = await waitFor(() => {
+    const field = dialog.querySelector('input[placeholder="/path/to/project/workspace"]') as HTMLInputElement;
+    assert.ok(field);
+    return field;
+  });
+  // The hidden folder the track came from must not be what it offers.
+  assert.equal(folderField.value, '/Users/me/Music');
+
+  const nameField = container.querySelector('#media-convert-name') as HTMLInputElement;
+  assert.ok(nameField);
+  assert.equal(nameField.value, 'song.mp4', 'the name follows the chosen format');
+
+  // 뒤로 · 취소 · 변환 중 변환.
+  const actions = editModalActions(container);
+  fireEvent.click(actions[actions.length - 1]);
+
+  await waitFor(() => assert.equal(transcodeCalls.length, 1));
+  const sent = JSON.parse(transcodeCalls[0]) as {
+    path: string; format: string; targetFolder: string; name: string;
+  };
+  assert.deepEqual(sent, {
+    path: '/Users/me/.soriforge/tracks/song.flac',
+    format: 'mp4',
+    targetFolder: '/Users/me/Music',
+    name: 'song.mp4',
+  });
+
+  // The original is untouched, so the window stays open and says where it went.
+  await findByText('/Users/me/Music/song.mp4', { exact: false });
 });

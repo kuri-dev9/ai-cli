@@ -241,6 +241,7 @@
     "title": "Medien",
     "refresh": "Aktualisieren",
     "close": "Schließen",
+    "stopPlayback": "Wiedergabe beenden",
     "empty": "Mit diesem Projekt sind keine Medienordner verbunden.",
     "folderEmpty": "Keine abspielbaren Dateien in diesem Ordner.",
     "folderUnavailable": "Dieser Ordner konnte nicht gelesen werden.",
@@ -258,8 +259,22 @@
     "sortByDate": "Datum",
     "sortByName": "Name",
     "delete": "Löschen",
-    "moveTo": "Nach {{folder}} verschieben",
     "confirmDelete": "„{{name}}“ löschen? Das lässt sich nicht rückgängig machen.",
-    "actionFailed": "Das hat nicht geklappt."
+    "actionFailed": "Das hat nicht geklappt.",
+    "edit": "Bearbeiten",
+    "editTitle": "Datei bearbeiten",
+    "fileName": "Dateiname",
+    "folder": "Ordner",
+    "convertSection": "In ein anderes Format umwandeln",
+    "convert": "Umwandeln",
+    "converting": "Wird umgewandelt…",
+    "convertUnavailable": "Kein ffmpeg gefunden, daher ist hier keine Umwandlung möglich.",
+    "convertHint": "Legt die neue Datei am gewählten Ort an; das Original bleibt unberührt.",
+    "converted": "{{path}} wurde erstellt.",
+    "dropHere": "Hier ablegen",
+    "convertTitle": "Umwandeln und speichern",
+    "saveLocation": "Speichern unter",
+    "format": "Format",
+    "back": "Zurück"
   }
 }

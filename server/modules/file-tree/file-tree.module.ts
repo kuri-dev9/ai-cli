@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs, { promises as fsPromises } from 'node:fs';
 import os from 'node:os';
@@ -12,6 +13,7 @@ import { createFileTreeService } from '@/modules/file-tree/file-tree.service.js'
 import type {
   FileTreeFileSystem,
   FileTreeLogger,
+  FileTreeMediaTranscoder,
   FileTreeProjectGateway,
   FileTreeWorkspaceGateway,
 } from '@/shared/types.js';
@@ -100,6 +102,82 @@ const fileTreeLogger: FileTreeLogger = {
   error: (message, error) => console.error(message, error),
 };
 
+// ffmpeg is the converter because it is the one every platform already has a
+// package for, and `FFMPEG_PATH` covers installs that keep it off the PATH.
+const FFMPEG_BINARY = process.env.FFMPEG_PATH || 'ffmpeg';
+// Converting one track takes seconds. The ceiling is only there so a process
+// that wedges cannot hold an HTTP request open forever.
+const TRANSCODE_TIMEOUT_MILLISECONDS = 10 * 60 * 1000;
+const FFMPEG_PROBE_TIMEOUT_MILLISECONDS = 10_000;
+
+/**
+ * Runs ffmpeg and resolves only on a clean exit.
+ *
+ * The rejection carries ffmpeg's own last line, which names the actual problem
+ * (an unsupported codec, a missing encoder) far better than an exit code does.
+ */
+function runFfmpeg(args: string[], timeoutMilliseconds: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // `-nostdin` matters: ffmpeg otherwise waits on a prompt nobody can answer.
+    const child = spawn(FFMPEG_BINARY, ['-nostdin', ...args], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let diagnostics = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMilliseconds);
+
+    // Only the tail is kept: a long encode writes more than any error needs.
+    child.stderr?.on('data', (chunk: Buffer) => {
+      diagnostics = (diagnostics + chunk.toString()).slice(-2000);
+    });
+
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error('Converting the file took too long'));
+        return;
+      }
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const lastLine = diagnostics.trim().split('\n').pop()?.trim();
+      reject(new Error(lastLine || `ffmpeg exited with code ${code}`));
+    });
+  });
+}
+
+// Probed once per process: whether ffmpeg is installed does not change while
+// the server runs, and the panel asks on every open.
+let ffmpegAvailability: Promise<boolean> | null = null;
+
+/**
+ * Conversion boundary used only by File Tree production composition.
+ * Absent ffmpeg is an answer, not an error — the panel then stops offering it.
+ */
+const fileTreeMediaTranscoder: FileTreeMediaTranscoder = {
+  isAvailable() {
+    ffmpegAvailability ??= runFfmpeg(['-version'], FFMPEG_PROBE_TIMEOUT_MILLISECONDS)
+      .then(() => true, () => false);
+    return ffmpegAvailability;
+  },
+  // The destination extension is what picks the container and codecs, so the
+  // format the caller asked for is carried entirely by the path.
+  transcode: (sourcePath, destinationPath) => runFfmpeg(
+    ['-loglevel', 'error', '-i', sourcePath, destinationPath],
+    TRANSCODE_TIMEOUT_MILLISECONDS,
+  ),
+};
+
 const fileTreeServices = createFileTreeService({
   fileSystem: fileTreeFileSystem,
   projects: fileTreeProjects,
@@ -107,6 +185,7 @@ const fileTreeServices = createFileTreeService({
   resolveMimeType,
   fileSystemConcurrency: readFileSystemConcurrency(),
   logger: fileTreeLogger,
+  transcoder: fileTreeMediaTranscoder,
 });
 
 const fileUploadMiddleware = multer({

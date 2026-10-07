@@ -271,6 +271,7 @@
     "title": "Médias",
     "refresh": "Actualiser",
     "close": "Fermer",
+    "stopPlayback": "Arrêter la lecture",
     "empty": "Aucun dossier multimédia n’est connecté à ce projet.",
     "folderEmpty": "Aucun fichier lisible dans ce dossier.",
     "folderUnavailable": "Ce dossier n’a pas pu être lu.",
@@ -288,8 +289,22 @@
     "sortByDate": "Date",
     "sortByName": "Nom",
     "delete": "Supprimer",
-    "moveTo": "Déplacer vers {{folder}}",
     "confirmDelete": "Supprimer « {{name}} » ? C’est irréversible.",
-    "actionFailed": "Cela n’a pas fonctionné."
+    "actionFailed": "Cela n’a pas fonctionné.",
+    "edit": "Modifier",
+    "editTitle": "Modifier le fichier",
+    "fileName": "Nom du fichier",
+    "folder": "Dossier",
+    "convertSection": "Convertir vers un autre format",
+    "convert": "Convertir",
+    "converting": "Conversion…",
+    "convertUnavailable": "Aucun ffmpeg trouvé : la conversion est impossible ici.",
+    "convertHint": "Crée le nouveau fichier à l’endroit choisi et laisse l’original intact.",
+    "converted": "{{path}} a été créé.",
+    "dropHere": "Déposer ici",
+    "convertTitle": "Convertir et enregistrer",
+    "saveLocation": "Enregistrer dans",
+    "format": "Format",
+    "back": "Retour"
   }
 }

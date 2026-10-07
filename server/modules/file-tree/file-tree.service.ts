@@ -52,6 +52,11 @@ const PLAYABLE_MEDIA_MIME_PREFIXES = ['audio/', 'video/'];
 const MAXIMUM_MEDIA_LIBRARY_DEPTH = 3;
 const MAXIMUM_MEDIA_LIBRARY_ENTRIES = 1_000;
 
+// Formats a conversion may produce. Every one of them is something a browser
+// can hand to an <audio>/<video> element, so a converted file stays playable in
+// the same panel that asked for it.
+const MEDIA_TRANSCODE_FORMATS = ['mp3', 'm4a', 'wav', 'flac', 'ogg', 'opus', 'mp4', 'webm'];
+
 type FileTreeEntryFilter = (entryPath: string, isDirectory: boolean) => boolean;
 
 function includeEntryByHardExclusions(entryPath: string, isDirectory: boolean): boolean {
@@ -65,6 +70,21 @@ function includeEntryByFallbackDirectoryNames(entryPath: string, isDirectory: bo
 
 function createFileTreeError(message: string, statusCode: number, code: string): AppError {
   return new AppError(message, { statusCode, code });
+}
+
+/**
+ * Accepts a caller-supplied media file name, or refuses it.
+ *
+ * Only a bare name gets through: a separator or a `..` in here would let a
+ * rename walk out of the folder the file was listed from and write somewhere
+ * the caller never named.
+ */
+function readMediaFileName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..' || /[\\/]/.test(trimmed)) {
+    throw createFileTreeError('Invalid file name', 400, 'INVALID_FILE_NAME');
+  }
+  return trimmed;
 }
 
 // Single-range byte parser for media playback. `<audio>`/`<video>` elements send
@@ -669,26 +689,40 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       return { success: true as const, path: resolvedPath };
     },
 
-    async moveMediaFile(filePath, targetFolderPath) {
+    async moveMediaFile(filePath, targetFolderPath, newName) {
       const resolvedSource = await resolveInsideWorkspace(filePath);
       if (!isPlayableMedia(resolvedSource)) {
         throw createFileTreeError('File is not playable media', 415, 'NOT_PLAYABLE_MEDIA');
       }
 
-      const resolvedFolder = await resolveInsideWorkspace(targetFolderPath);
-      try {
-        const stats = await fileSystem.stat(resolvedFolder);
-        if (!stats.isDirectory()) {
-          throw createFileTreeError('Target is not a directory', 400, 'NOT_A_DIRECTORY');
+      // No folder means a rename in place, so the file keeps the folder it was
+      // listed from and only its name changes.
+      let resolvedFolder = path.dirname(resolvedSource);
+      if (targetFolderPath !== null) {
+        resolvedFolder = await resolveInsideWorkspace(targetFolderPath);
+        try {
+          const stats = await fileSystem.stat(resolvedFolder);
+          if (!stats.isDirectory()) {
+            throw createFileTreeError('Target is not a directory', 400, 'NOT_A_DIRECTORY');
+          }
+        } catch (error) {
+          if (error instanceof AppError) throw error;
+          throw createFileTreeError('Target folder not found', 404, 'FOLDER_NOT_FOUND');
         }
-      } catch (error) {
-        if (error instanceof AppError) throw error;
-        throw createFileTreeError('Target folder not found', 404, 'FOLDER_NOT_FOUND');
       }
 
-      const destination = path.join(resolvedFolder, path.basename(resolvedSource));
+      const destinationName = newName
+        ? readMediaFileName(newName)
+        : path.basename(resolvedSource);
+      const destination = path.join(resolvedFolder, destinationName);
       if (destination === resolvedSource) {
         throw createFileTreeError('File is already in that folder', 409, 'FILE_ALREADY_THERE');
+      }
+      // A rename decides the extension, and the extension decides what the file
+      // is. Renaming a track to `.sh` would park an executable name on bytes the
+      // media endpoints can no longer read, so the new name has to stay media.
+      if (!isPlayableMedia(destination)) {
+        throw createFileTreeError('File is not playable media', 415, 'NOT_PLAYABLE_MEDIA');
       }
 
       // Refuse rather than overwrite: the file being replaced is somebody's
@@ -712,6 +746,83 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
       }
 
       return { success: true as const, path: destination };
+    },
+
+    async transcodeMediaFile(filePath, format, options) {
+      const transcoder = dependencies.transcoder;
+      if (!transcoder || !await transcoder.isAvailable()) {
+        throw createFileTreeError('No media converter is available', 503, 'TRANSCODER_UNAVAILABLE');
+      }
+
+      const targetFormat = format.trim().toLowerCase().replace(/^\./, '');
+      if (!MEDIA_TRANSCODE_FORMATS.includes(targetFormat)) {
+        throw createFileTreeError('Unsupported target format', 400, 'UNSUPPORTED_MEDIA_FORMAT');
+      }
+
+      const resolvedSource = await resolveInsideWorkspace(filePath);
+      if (!isPlayableMedia(resolvedSource)) {
+        throw createFileTreeError('File is not playable media', 415, 'NOT_PLAYABLE_MEDIA');
+      }
+
+      // Beside the original under the same stem unless the caller said where:
+      // a tool's output folder is frequently somewhere nobody browses to, and a
+      // conversion is usually made precisely to put the track somewhere else.
+      let destinationFolder = path.dirname(resolvedSource);
+      if (options?.targetFolder) {
+        destinationFolder = await resolveInsideWorkspace(options.targetFolder);
+        try {
+          const stats = await fileSystem.stat(destinationFolder);
+          if (!stats.isDirectory()) {
+            throw createFileTreeError('Target is not a directory', 400, 'NOT_A_DIRECTORY');
+          }
+        } catch (error) {
+          if (error instanceof AppError) throw error;
+          throw createFileTreeError('Target folder not found', 404, 'FOLDER_NOT_FOUND');
+        }
+      }
+
+      // The chosen format decides the extension, whatever the name says: ffmpeg
+      // reads the extension as "write this container", so letting a typed name
+      // disagree with the format would quietly produce something else.
+      const requestedName = options?.name
+        ? readMediaFileName(options.name)
+        : path.basename(resolvedSource);
+      const destination = path.join(
+        destinationFolder,
+        `${path.basename(requestedName, path.extname(requestedName))}.${targetFormat}`,
+      );
+      if (destination === resolvedSource) {
+        throw createFileTreeError('File is already in that format', 409, 'FILE_ALREADY_THERE');
+      }
+
+      try {
+        await fileSystem.access(destination);
+        throw createFileTreeError('A file with that name is already there', 409, 'FILE_ALREADY_EXISTS');
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+      }
+
+      try {
+        await transcoder.transcode(resolvedSource, destination);
+      } catch (error) {
+        // A conversion that stopped halfway leaves bytes that play as nothing.
+        // Clearing them keeps the folder free of files nobody can open.
+        await Promise.resolve(fileSystem.unlink(destination)).catch(() => undefined);
+        throw createFileTreeError(
+          readErrorMessage(error) || 'Converting the file failed',
+          500,
+          'TRANSCODE_FAILED',
+        );
+      }
+
+      return { success: true as const, path: destination };
+    },
+
+    async mediaCapabilities() {
+      const transcode = dependencies.transcoder
+        ? await dependencies.transcoder.isAvailable()
+        : false;
+      return { transcode, formats: transcode ? [...MEDIA_TRANSCODE_FORMATS] : [] };
     },
 
     async listMediaFiles(folderPath) {

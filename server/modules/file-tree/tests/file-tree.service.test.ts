@@ -893,3 +893,253 @@ test('moveMediaFile refuses a non-media file and a target outside the workspace'
     },
   );
 });
+
+test('moveMediaFile renames in place when it is given a name and no folder', async () => {
+  const { services, renamed } = createMediaMutationService();
+  const track = path.resolve('media-library-root', 'tracks/song.flac');
+
+  const result = await services.moveMediaFile(track, null, 'better take.flac');
+
+  assert.deepEqual(renamed, [[track, path.join(path.dirname(track), 'better take.flac')]]);
+  assert.equal(result.path, path.join(path.dirname(track), 'better take.flac'));
+});
+
+test('moveMediaFile refuses a name that would leave the folder', async () => {
+  // A separator here would write the file somewhere the caller never named.
+  const { services, renamed } = createMediaMutationService();
+  const track = path.resolve('media-library-root', 'tracks/song.flac');
+
+  for (const name of ['../song.flac', 'nested/song.flac', '  ', '..']) {
+    await assert.rejects(
+      () => services.moveMediaFile(track, null, name),
+      (error: unknown) => {
+        assert.ok(error instanceof AppError);
+        assert.equal(error.statusCode, 400);
+        return true;
+      },
+    );
+  }
+  assert.deepEqual(renamed, [], 'a refused name must never rename anything');
+});
+
+test('moveMediaFile refuses a rename that turns the file into something unplayable', async () => {
+  const workspaceRoot = path.resolve('media-library-root');
+  const renamed: Array<[string, string]> = [];
+  const fileSystem = createFakeFileSystem({
+    access: async () => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    rename: async (from, to) => {
+      renamed.push([from, to]);
+    },
+  });
+  const services = createFileTreeService({
+    ...createDependencies(fileSystem, workspaceRoot),
+    // The extension decides the type, which is what a rename is free to change.
+    resolveMimeType: (filePath) => filePath.endsWith('.flac') ? 'audio/flac' : 'application/x-sh',
+  });
+
+  await assert.rejects(
+    () => services.moveMediaFile(path.join(workspaceRoot, 'song.flac'), null, 'song.sh'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 415);
+      return true;
+    },
+  );
+  assert.deepEqual(renamed, [], 'the media endpoints must not be renamed out of');
+});
+
+/** Builds a service whose converter records what it was asked to produce. */
+function createTranscodeService(options: {
+  available?: boolean;
+  existingPaths?: string[];
+  failWith?: Error;
+} = {}) {
+  const workspaceRoot = path.resolve('media-library-root');
+  const produced: Array<[string, string]> = [];
+  const unlinked: string[] = [];
+  const existing = new Set(options.existingPaths ?? []);
+  const fileSystem = createFakeFileSystem({
+    access: async (candidatePath) => {
+      if (!existing.has(candidatePath)) {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }
+    },
+    // Every folder a conversion is pointed at exists in these tests; the one
+    // case that must not is covered by its own filesystem below.
+    stat: async () => createStats(true, 0o755),
+    unlink: async (candidatePath) => {
+      unlinked.push(candidatePath);
+    },
+  });
+  const services = createFileTreeService({
+    ...createDependencies(fileSystem, workspaceRoot),
+    resolveMimeType: () => 'audio/flac',
+    transcoder: options.available === false ? undefined : {
+      isAvailable: async () => true,
+      transcode: async (sourcePath, destinationPath) => {
+        if (options.failWith) {
+          throw options.failWith;
+        }
+        produced.push([sourcePath, destinationPath]);
+      },
+    },
+  });
+
+  return { services, workspaceRoot, produced, unlinked };
+}
+
+test('transcodeMediaFile writes the new format beside the original', async () => {
+  const { services, workspaceRoot, produced } = createTranscodeService();
+  const track = path.join(workspaceRoot, 'tracks/song.flac');
+
+  const result = await services.transcodeMediaFile(track, 'mp4');
+
+  assert.deepEqual(produced, [[track, path.join(workspaceRoot, 'tracks/song.mp4')]]);
+  assert.equal(result.path, path.join(workspaceRoot, 'tracks/song.mp4'));
+});
+
+test('transcodeMediaFile refuses a format that is not on the list', async () => {
+  // The extension is what ffmpeg reads as "write this container", so an
+  // unchecked one is a free hand at the output path.
+  const { services, workspaceRoot, produced } = createTranscodeService();
+
+  await assert.rejects(
+    () => services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'sh'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 400);
+      return true;
+    },
+  );
+  assert.deepEqual(produced, []);
+});
+
+test('transcodeMediaFile refuses to overwrite a conversion that is already there', async () => {
+  const workspaceRoot = path.resolve('media-library-root');
+  const { services, produced } = createTranscodeService({
+    existingPaths: [path.join(workspaceRoot, 'song.mp3')],
+  });
+
+  await assert.rejects(
+    () => services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'mp3'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 409);
+      return true;
+    },
+  );
+  assert.deepEqual(produced, []);
+});
+
+test('a conversion that fails leaves no half-written file behind', async () => {
+  const { services, workspaceRoot, unlinked } = createTranscodeService({
+    failWith: new Error('Encoder not found'),
+  });
+
+  await assert.rejects(
+    () => services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'opus'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 500);
+      // ffmpeg's own words say what went wrong far better than a code does.
+      assert.equal(error.message, 'Encoder not found');
+      return true;
+    },
+  );
+  assert.deepEqual(unlinked, [path.join(workspaceRoot, 'song.opus')]);
+});
+
+test('without a converter the capability is reported rather than guessed at', async () => {
+  const { services, workspaceRoot } = createTranscodeService({ available: false });
+
+  assert.deepEqual(await services.mediaCapabilities(), { transcode: false, formats: [] });
+  await assert.rejects(
+    () => services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'mp3'),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 503);
+      return true;
+    },
+  );
+
+  const { services: withConverter } = createTranscodeService();
+  const capabilities = await withConverter.mediaCapabilities();
+  assert.equal(capabilities.transcode, true);
+  assert.ok(capabilities.formats.includes('mp4'), 'mp4 is the format the panel offers first');
+});
+
+test('transcodeMediaFile writes where it was told, under the name it was given', async () => {
+  // The folder a file was generated into is often hidden (`~/.tool/output`),
+  // which is the whole reason a conversion gets a destination of its own.
+  const { services, workspaceRoot, produced } = createTranscodeService();
+  const track = path.join(workspaceRoot, '.hidden/song.flac');
+
+  const result = await services.transcodeMediaFile(track, 'mp4', {
+    targetFolder: path.join(workspaceRoot, 'Music'),
+    name: 'for the car.mp4',
+  });
+
+  assert.deepEqual(produced, [[track, path.join(workspaceRoot, 'Music/for the car.mp4')]]);
+  assert.equal(result.path, path.join(workspaceRoot, 'Music/for the car.mp4'));
+});
+
+test('the chosen format decides the extension whatever the name says', async () => {
+  // ffmpeg reads the extension as "write this container", so a name that
+  // disagrees with the format would quietly produce something else.
+  const { services, workspaceRoot, produced } = createTranscodeService();
+
+  await services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'mp3', {
+    name: 'song.flac',
+  });
+  await services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'mp3', {
+    name: 'no extension at all',
+  });
+
+  assert.deepEqual(produced.map(([, destination]) => destination), [
+    path.join(workspaceRoot, 'song.mp3'),
+    path.join(workspaceRoot, 'no extension at all.mp3'),
+  ]);
+});
+
+test('transcodeMediaFile refuses a destination name that would leave the folder', async () => {
+  const { services, workspaceRoot, produced } = createTranscodeService();
+
+  await assert.rejects(
+    () => services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'mp3', {
+      name: '../elsewhere.mp3',
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 400);
+      return true;
+    },
+  );
+  assert.deepEqual(produced, []);
+});
+
+test('transcodeMediaFile reports a destination folder that is not there', async () => {
+  const workspaceRoot = path.resolve('media-library-root');
+  const fileSystem = createFakeFileSystem({
+    stat: async () => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+  });
+  const services = createFileTreeService({
+    ...createDependencies(fileSystem, workspaceRoot),
+    resolveMimeType: () => 'audio/flac',
+    transcoder: { isAvailable: async () => true, transcode: async () => undefined },
+  });
+
+  await assert.rejects(
+    () => services.transcodeMediaFile(path.join(workspaceRoot, 'song.flac'), 'mp3', {
+      targetFolder: path.join(workspaceRoot, 'gone'),
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.statusCode, 404);
+      return true;
+    },
+  );
+});

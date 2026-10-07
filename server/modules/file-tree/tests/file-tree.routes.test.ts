@@ -24,6 +24,8 @@ function createFakeServices(overrides: Partial<FileTreeServices> = {}): FileTree
     listMediaFiles: unexpectedOperation,
     deleteMediaFile: unexpectedOperation,
     moveMediaFile: unexpectedOperation,
+    transcodeMediaFile: unexpectedOperation,
+    mediaCapabilities: unexpectedOperation,
     saveTextFile: unexpectedOperation,
     listProjectFiles: unexpectedOperation,
     createEntry: unexpectedOperation,
@@ -409,10 +411,10 @@ test('media delete route forwards the path to the service', async () => {
 });
 
 test('media move route forwards both the file and the target folder', async () => {
-  const moves: Array<[string, string]> = [];
+  const moves: Array<[string, string | null, string | null | undefined]> = [];
   const services = createFakeServices({
-    moveMediaFile: async (filePath, targetFolder) => {
-      moves.push([filePath, targetFolder]);
+    moveMediaFile: async (filePath, targetFolder, newName) => {
+      moves.push([filePath, targetFolder, newName]);
       return { success: true as const, path: `${targetFolder}/song.flac` };
     },
   });
@@ -427,7 +429,85 @@ test('media move route forwards both the file and the target folder', async () =
     assert.equal(response.status, 200);
   });
 
-  assert.deepEqual(moves, [['/Users/me/tracks/song.flac', '/Users/me/keep']]);
+  assert.deepEqual(moves, [['/Users/me/tracks/song.flac', '/Users/me/keep', null]]);
+});
+
+test('media move route accepts a rename with no folder at all', async () => {
+  // Renaming in place goes through the same endpoint, so a request without a
+  // target folder has to reach the service rather than being refused here.
+  const moves: Array<[string, string | null, string | null | undefined]> = [];
+  const services = createFakeServices({
+    moveMediaFile: async (filePath, targetFolder, newName) => {
+      moves.push([filePath, targetFolder, newName]);
+      return { success: true as const, path: '/Users/me/tracks/better.flac' };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/file-tree/media/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/Users/me/tracks/song.flac', name: 'better.flac' }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  assert.deepEqual(moves, [['/Users/me/tracks/song.flac', null, 'better.flac']]);
+});
+
+test('media transcode route forwards the format and where the result goes', async () => {
+  const requests: unknown[] = [];
+  const services = createFakeServices({
+    transcodeMediaFile: async (filePath, format, options) => {
+      requests.push([filePath, format, options]);
+      return { success: true as const, path: '/Users/me/Music/song.mp4' };
+    },
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/file-tree/media/transcode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: '/Users/me/tracks/song.flac',
+        format: 'mp4',
+        targetFolder: '/Users/me/Music',
+        name: 'song.mp4',
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      success: true,
+      path: '/Users/me/Music/song.mp4',
+    });
+
+    // Left out entirely, the destination falls back to beside the original.
+    await fetch(`${baseUrl}/api/file-tree/media/transcode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/Users/me/tracks/song.flac', format: 'mp3' }),
+    });
+  });
+
+  assert.deepEqual(requests, [
+    ['/Users/me/tracks/song.flac', 'mp4', { targetFolder: '/Users/me/Music', name: 'song.mp4' }],
+    ['/Users/me/tracks/song.flac', 'mp3', { targetFolder: null, name: null }],
+  ]);
+});
+
+test('media capabilities route reports what conversion can do here', async () => {
+  const services = createFakeServices({
+    mediaCapabilities: async () => ({ transcode: false, formats: [] }),
+  });
+
+  await withFileTreeServer(services, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/file-tree/media/capabilities`);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { transcode: false, formats: [] });
+  });
 });
 
 test('media mutation routes refuse an incomplete request without calling the service', async () => {
@@ -447,5 +527,12 @@ test('media mutation routes refuse an incomplete request without calling the ser
       body: JSON.stringify({ path: '/Users/me/tracks/song.flac' }),
     });
     assert.equal(noTarget.status, 400);
+
+    const noFormat = await fetch(`${baseUrl}/api/file-tree/media/transcode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: '/Users/me/tracks/song.flac' }),
+    });
+    assert.equal(noFormat.status, 400);
   });
 });

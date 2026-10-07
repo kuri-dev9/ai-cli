@@ -311,8 +311,23 @@ export const api = {
   listMediaFolder: (folderPath: string, options: ApiRequestOptions = {}) =>
     get(`/api/file-tree/media/list${query({ path: folderPath })}`, options),
   deleteMediaFile: (filePath: string) => del('/api/file-tree/media/file', { path: filePath }),
-  moveMediaFile: (filePath: string, targetFolder: string) =>
-    post('/api/file-tree/media/move', { path: filePath, targetFolder }),
+  // Moving and renaming are one call: either field may be left out, and leaving
+  // out both is the one combination the server refuses.
+  moveMediaFile: (
+    filePath: string,
+    { targetFolder, name }: { targetFolder?: string | null; name?: string | null } = {},
+  ) => post('/api/file-tree/media/move', { path: filePath, targetFolder, name }),
+  // Writes the same track in another format, where the caller asked for it —
+  // the folder a file was generated into is often not one anybody browses to.
+  // The response waits for the conversion to finish, seconds for one file.
+  transcodeMediaFile: (
+    filePath: string,
+    format: string,
+    { targetFolder, name }: { targetFolder?: string | null; name?: string | null } = {},
+  ) => post('/api/file-tree/media/transcode', { path: filePath, format, targetFolder, name }),
+  // Whether a converter is installed, so the panel offers only what works.
+  mediaCapabilities: (options: ApiRequestOptions = {}) =>
+    get('/api/file-tree/media/capabilities', options),
   saveFile: (projectId: string, filePath: string, content: string) =>
     put(`/api/file-tree/projects/${projectId}/file`, { filePath, content }),
   getFiles: (projectId: string, options: ApiRequestOptions = {}) =>
