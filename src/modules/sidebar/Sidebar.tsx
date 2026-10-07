@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useDeviceSettings } from '@/shared/hooks/useDeviceSettings';
@@ -80,13 +80,6 @@ function Sidebar({
   // 이름/홈 경로를 고치는 모달의 대상. 사이드바 컨트롤러가 아니라 여기서 들고
   // 있는 것은 이 모달이 목록 상태를 건드리지 않고 저장 후 새로고침만 하기 때문이다.
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<Project | null>(null);
-
-  // 사이드바 헤더의 `+` 메뉴가 쓰는 "현재 프로젝트에서 새 대화". 고른 프로젝트가
-  // 없으면 시작할 곳이 없으므로 null 을 넘겨 항목을 잠근다.
-  const startNewChatInSelectedProject = useMemo(
-    () => (selectedProject ? () => onNewSession(selectedProject) : null),
-    [onNewSession, selectedProject],
-  );
 
   const {
     isSidebarCollapsed,
@@ -356,8 +349,6 @@ function Sidebar({
             }}
             isRefreshing={isRefreshing}
             onCreateProject={() => setShowNewProject(true)}
-            onNewChat={startNewChatInSelectedProject}
-            activeProjectName={selectedProject?.displayName ?? null}
             onCollapseSidebar={handleCollapseSidebar}
             updateAvailable={updateAvailable}
             restartRequired={restartRequired}

@@ -1,9 +1,7 @@
-import { Activity, Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
-import { useMemo } from 'react';
+import { Activity, Archive, Folder, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
-import { ActionMenu, Button, Input, Tooltip } from '@/shared/ui';
-import type { ActionMenuItem } from '@/shared/ui';
+import { Button, Input, Tooltip } from '@/shared/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '@/shared/constants';
 import { IS_PLATFORM,cn } from '@/shared/utils';
 import type { SidebarSearchMode } from '@/shared/types';
@@ -28,10 +26,6 @@ type SidebarHeaderProps = {
   onRefresh: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
-  /** 선택된 프로젝트에서 새 대화를 시작한다. 선택된 프로젝트가 없으면 null. */
-  onNewChat: (() => void) | null;
-  /** 새 대화 항목에 어느 프로젝트인지 같이 보여 준다. */
-  activeProjectName: string | null;
   onCollapseSidebar: () => void;
   t: TFunction;
 };
@@ -72,8 +66,6 @@ export default function SidebarHeader({
   onRefresh,
   isRefreshing,
   onCreateProject,
-  onNewChat,
-  activeProjectName,
   onCollapseSidebar,
   t,
 }: SidebarHeaderProps) {
@@ -86,30 +78,6 @@ export default function SidebarHeader({
         ? t('search.runningPlaceholder', 'Search running sessions...')
         : t('projects.searchPlaceholder');
   const runningBadgeText = runningSessionsCount > 99 ? '99+' : String(runningSessionsCount);
-
-  // `+` 는 예전에 새 프로젝트만 만들었다. 새 대화를 시작할 방법이 프로젝트를
-  // 펼쳤을 때의 버튼과 ⌘K 밖에 없어, 같은 자리에 둘 다 올려 둔다.
-  const createMenuItems = useMemo<ActionMenuItem[]>(
-    () => [
-      {
-        key: 'new-chat',
-        label: t('sessions.newSession'),
-        description: activeProjectName
-          ? t('tooltips.newChatInProject', { projectName: activeProjectName })
-          : t('tooltips.newChatNeedsProject'),
-        icon: MessageSquare,
-        disabled: !onNewChat,
-        onSelect: () => onNewChat?.(),
-      },
-      {
-        key: 'new-project',
-        label: t('projects.newProject'),
-        icon: FolderPlus,
-        onSelect: onCreateProject,
-      },
-    ],
-    [activeProjectName, onCreateProject, onNewChat, t],
-  );
 
   return (
     <div className="flex-shrink-0">
@@ -146,17 +114,16 @@ export default function SidebarHeader({
                 }`}
               />
             </Button>
-            <ActionMenu
-              label={t('tooltips.createNew')}
-              ariaLabel={t('tooltips.createNew')}
-              items={createMenuItems}
-              icon={Plus}
-              iconOnly
-              portal
+            <Button
               variant="ghost"
               size="sm"
-              triggerClassName="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-accent/80 hover:text-foreground"
-            />
+              className="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+              onClick={onCreateProject}
+              title={t('tooltips.createProject')}
+              aria-label={t('tooltips.createProject')}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -303,17 +270,14 @@ export default function SidebarHeader({
             >
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
-            <ActionMenu
-              label={t('tooltips.createNew')}
-              ariaLabel={t('tooltips.createNew')}
-              items={createMenuItems}
-              icon={Plus}
-              iconOnly
-              portal
-              variant="default"
-              size="sm"
-              triggerClassName="h-8 w-8 rounded-lg bg-primary/90 p-0 text-primary-foreground transition-all active:scale-95"
-            />
+            <button
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-all active:scale-95"
+              onClick={onCreateProject}
+              title={t('tooltips.createProject')}
+              aria-label={t('tooltips.createProject')}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
           </div>
         </div>
 

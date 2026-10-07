@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Music, SquarePen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Music } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -18,8 +18,6 @@ type WorkspaceHeaderProps = {
   shouldShowBrowserTab: boolean;
   isMobile: boolean;
   onMenuClick: () => void;
-  /** 지금 열려 있는 프로젝트에서 새 대화를 시작한다. */
-  onNewSession: () => void;
   /** 오른쪽 미디어 패널을 열고 닫는다. 연결한 폴더가 없으면 null — 버튼을 두지 않는다. */
   onToggleMediaLibrary: (() => void) | null;
   mediaLibraryOpen: boolean;
@@ -35,7 +33,6 @@ export default function WorkspaceHeader({
   shouldShowBrowserTab,
   isMobile,
   onMenuClick,
-  onNewSession,
   onToggleMediaLibrary,
   mediaLibraryOpen,
 }: WorkspaceHeaderProps) {
@@ -111,19 +108,6 @@ export default function WorkspaceHeader({
             selectedSession={selectedSession}
             shouldShowTasksTab={shouldShowTasksTab}
           />
-
-          {/* 대화를 보고 있는 동안에도 새 대화를 시작할 수 있어야 한다 — 예전에는
-              사이드바에서 프로젝트를 펼치거나 ⌘K 를 열어야만 가능했다. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 flex-shrink-0 rounded-lg p-0 text-muted-foreground hover:bg-accent/80 hover:text-foreground"
-            onClick={onNewSession}
-            title={t('mainContent.startNewSession')}
-            aria-label={t('mainContent.startNewSession')}
-          >
-            <SquarePen className="h-4 w-4" />
-          </Button>
 
           {onToggleMediaLibrary && (
             <Button
