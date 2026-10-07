@@ -42,7 +42,7 @@ const renderMarkdown = (markdown: string, opened: string[] = []) => {
 };
 
 test('clicking an audio path opens a player underneath it', () => {
-  const track = '/Users/me/.soriforge/tracks/7079962e-84c6-4666-8290-c7c3baf82e66-0.flac';
+  const track = '/Users/me/Music/tracks/7079962e-84c6-4666-8290-c7c3baf82e66-0.flac';
   const { container } = renderMarkdown(`파일: \`${track}\` (4.3MB, FLAC)`);
 
   const button = container.querySelector('button');
@@ -100,7 +100,7 @@ test('ordinary inline code is left as inert code', () => {
 
 test('a shell snippet that merely ends in a media extension is not a path', () => {
   // `afplay ~/x.flac` ends in .flac but is a command, not something to open.
-  const { container } = renderMarkdown('`afplay ~/.soriforge/tracks/song.flac`');
+  const { container } = renderMarkdown('`afplay ~/Music/tracks/song.flac`');
 
   assert.equal(container.querySelector('button'), null);
   assert.ok(container.querySelector('code'));

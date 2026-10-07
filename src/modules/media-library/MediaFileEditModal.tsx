@@ -142,7 +142,7 @@ export default function MediaFileEditModal({
   };
 
   const openConvertStep = () => {
-    // 만들어 낸 파일이 `.soriforge` 같은 숨은 폴더에 떨어지면 Finder 로는
+    // 만들어 낸 파일이 `.cache` 같은 숨은 폴더에 떨어지면 Finder 로는
     // 찾아갈 수가 없다. 원본 자리가 그런 곳이면 연결된 폴더 중 드러나 있는
     // 쪽을 먼저 권한다 — 어차피 들고 나가려고 바꾸는 파일이다.
     const startingFolder = isHiddenPath(currentFolder)

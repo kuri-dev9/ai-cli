@@ -36,7 +36,7 @@ afterEach(() => {
 test('a code block holding one playable path offers to play it', () => {
   const opened: string[] = [];
   const { container } = renderMarkdown(
-    '```bash\nopen ~/.soriforge/tracks/20261004-0956_같은-하늘-아래_94bpm_195s_ko.flac\n```',
+    '```bash\nopen ~/Music/tracks/take-01.flac\n```',
     opened,
   );
 
@@ -47,7 +47,7 @@ test('a code block holding one playable path offers to play it', () => {
   assert.equal(buttons.length, 2, 'a block with one track must offer to play it');
 
   fireEvent.click(buttons[0]);
-  assert.deepEqual(opened, ['~/.soriforge/tracks/20261004-0956_같은-하늘-아래_94bpm_195s_ko.flac']);
+  assert.deepEqual(opened, ['~/Music/tracks/take-01.flac']);
 });
 
 test('a quoted path inside a command is found too', () => {

@@ -91,7 +91,7 @@ test('a file opened from outside plays in the same bottom player', async () => {
   const { container } = render(
     <MediaLibraryPanel
       projectId={PROJECT}
-      openedFilePath="/Users/me/.soriforge/tracks/new.flac"
+      openedFilePath="/Users/me/Music/tracks/new.flac"
       onClose={() => undefined}
     />,
   );
@@ -101,7 +101,7 @@ test('a file opened from outside plays in the same bottom player', async () => {
     assert.ok(audio, 'the file the workspace opened plays without being in a folder');
     assert.equal(container.querySelectorAll('audio').length, 1, 'only one player exists');
     const src = new URL(audio.getAttribute('src') ?? '', 'http://localhost');
-    assert.equal(src.searchParams.get('path'), '/Users/me/.soriforge/tracks/new.flac');
+    assert.equal(src.searchParams.get('path'), '/Users/me/Music/tracks/new.flac');
   });
 });
 
@@ -419,12 +419,12 @@ test('a track cannot be dropped back on the folder it came from', async () => {
 });
 
 test('converting asks where to save, and keeps the result out of a hidden folder', async () => {
-  // A file generated into `~/.soriforge/tracks` cannot be reached in Finder, so
+  // A file generated into `~/.cache/tracks` cannot be reached in Finder, so
   // the window has to offer somewhere else before it writes anything.
-  writeMediaFolders(PROJECT, ['/Users/me/.soriforge/tracks', '/Users/me/Music']);
+  writeMediaFolders(PROJECT, ['/Users/me/.cache/tracks', '/Users/me/Music']);
   const hidden = {
     name: 'song.flac',
-    path: '/Users/me/.soriforge/tracks/song.flac',
+    path: '/Users/me/.cache/tracks/song.flac',
     relativePath: 'song.flac',
     size: 4300000,
     modifiedAt: '2026-10-03T10:00:00.000Z',
@@ -485,7 +485,7 @@ test('converting asks where to save, and keeps the result out of a hidden folder
     path: string; format: string; targetFolder: string; name: string;
   };
   assert.deepEqual(sent, {
-    path: '/Users/me/.soriforge/tracks/song.flac',
+    path: '/Users/me/.cache/tracks/song.flac',
     format: 'mp4',
     targetFolder: '/Users/me/Music',
     name: 'song.mp4',
