@@ -39,6 +39,14 @@ export const CLOUDCLI_WORDMARK_FONT_FAMILY =
  */
 export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '';
 
+/**
+ * GitHub repository whose latest release drives the "update available" notice.
+ * This is our fork, not upstream `siteboon/claudecodeui`: the in-app update only
+ * pulls from this checkout's origin, so an upstream release could never be installed
+ * by it. Publish a release here with a tag newer than `package.json` to notify users.
+ */
+export const UPDATE_RELEASE_REPO = { owner: 'kuri-dev9', repo: 'ai-cli' } as const;
+
 // ---------------------------
 
 //----------------- SETTINGS NAVIGATION ------------

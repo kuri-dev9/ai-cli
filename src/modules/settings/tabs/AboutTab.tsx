@@ -1,7 +1,7 @@
 import { Cloud, ExternalLink, MessageSquare, Star, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '@/shared/constants';
+import { CLOUDCLI_WORDMARK_FONT_FAMILY, UPDATE_RELEASE_REPO } from '@/shared/constants';
 import { IS_PLATFORM } from '@/shared/utils';
 import { useVersionCheck } from '@/shared/hooks/useVersionCheck';
 import PremiumFeatureCard from '@/modules/settings/PremiumFeatureCard';
@@ -30,8 +30,9 @@ function DiscordIcon({ className }: { className?: string }) {
 /** Rendered by Settings for the "about" tab, showing version, links and premium upsell cards. */
 export default function AboutTab() {
   const { t } = useTranslation('settings');
-  const { updateAvailable, latestVersion, currentVersion, releaseInfo } = useVersionCheck('siteboon', 'claudecodeui');
-  const releasesUrl = releaseInfo?.htmlUrl || `${GITHUB_REPO_URL}/releases`;
+  const { updateAvailable, latestVersion, currentVersion, releaseInfo } = useVersionCheck(UPDATE_RELEASE_REPO.owner, UPDATE_RELEASE_REPO.repo);
+  const releasesUrl = releaseInfo?.htmlUrl
+    || `https://github.com/${UPDATE_RELEASE_REPO.owner}/${UPDATE_RELEASE_REPO.repo}/releases`;
 
   return (
     <div className="space-y-6">
