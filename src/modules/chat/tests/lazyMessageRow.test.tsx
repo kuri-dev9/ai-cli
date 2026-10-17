@@ -48,7 +48,13 @@ function fireIntersection(
   });
 }
 
-function Harness({ initiallyNearViewport }: { initiallyNearViewport: boolean }) {
+function Harness({
+  initiallyNearViewport,
+  keepMounted,
+}: {
+  initiallyNearViewport: boolean;
+  keepMounted?: boolean;
+}) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lazyRows = useLazyRowObserver(scrollContainerRef);
   return (
@@ -57,6 +63,7 @@ function Harness({ initiallyNearViewport }: { initiallyNearViewport: boolean }) 
         lazyRows={lazyRows}
         timestamp="2026-01-01T00:00:00.000Z"
         initiallyNearViewport={initiallyNearViewport}
+        keepMounted={keepMounted}
       >
         <span data-testid="row-content">expensive content</span>
       </LazyMessageRow>
@@ -117,5 +124,33 @@ describe('LazyMessageRow', () => {
 
     expect(queryByTestId('row-content')).not.toBeNull();
     expect(StubIntersectionObserver.instances).toHaveLength(0);
+  });
+
+  it('keeps the live turn mounted off-screen so its height keeps growing', () => {
+    vi.stubGlobal('IntersectionObserver', StubIntersectionObserver);
+
+    const { queryByTestId, rerender } = render(<Harness initiallyNearViewport keepMounted />);
+    const observer = StubIntersectionObserver.instances[0];
+    const wrapper = observer.observed[0] as HTMLElement;
+    Object.defineProperty(wrapper, 'offsetHeight', { value: 123, configurable: true, writable: true });
+
+    // 스트리밍 중에 사용자가 위로 올려 이 줄이 화면에서 멀어졌다.
+    fireIntersection(observer, wrapper, false);
+    expect(queryByTestId('row-content')).not.toBeNull();
+    expect(wrapper.style.height).toBe('');
+    expect(wrapper.hasAttribute('data-live-turn')).toBe(true);
+
+    // 다음 턴이 시작돼 표시가 풀려도, 화면 밖에 있는 동안 자란 높이는 아직
+    // 재지 않았으므로 낡은 123px 상자로 줄이지 않는다.
+    rerender(<Harness initiallyNearViewport keepMounted={false} />);
+    expect(queryByTestId('row-content')).not.toBeNull();
+    expect(wrapper.hasAttribute('data-live-turn')).toBe(false);
+
+    // 다시 다가왔다가 멀어질 때 새로 재고서야 빈 상자가 된다.
+    Object.defineProperty(wrapper, 'offsetHeight', { value: 456, configurable: true });
+    fireIntersection(observer, wrapper, true);
+    fireIntersection(observer, wrapper, false);
+    expect(queryByTestId('row-content')).toBeNull();
+    expect(wrapper.style.height).toBe('456px');
   });
 });

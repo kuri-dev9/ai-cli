@@ -163,7 +163,7 @@ function ChatInterface({
     scrollContainerRef,
     scrollToBottom,
     scrollToBottomAndReset,
-    handleScroll,
+    handleTopReach,
     requestLatestMessages,
   } = useChatSessionState({
     isActive,
@@ -456,8 +456,10 @@ function ChatInterface({
           // hidden while more pages exist — so a short transcript is often not
           // scrollable at all and never emits `scroll`. Wheel and touch are
           // then the only way to reach the top pager or the "load all" overlay.
-          onWheel={handleScroll}
-          onTouchMove={handleScroll}
+          // Only the top-reach half runs here: the follow-bottom decision must
+          // wait for the `scroll` event, after the browser has applied the input.
+          onWheel={handleTopReach}
+          onTouchMove={handleTopReach}
           isLoadingSessionMessages={isLoadingSessionMessages}
           isProcessing={isProcessing}
           hasActivityIndicator={hasActivityIndicator}

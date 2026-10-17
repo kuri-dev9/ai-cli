@@ -630,6 +630,13 @@
     contain-intrinsic-size: auto 96px;
   }
 
+  /* 진행 중인 턴은 화면 밖에서도 그린다. 건너뛰면 마지막에 잰 높이로 굳어서,
+     스트리밍으로 자란 만큼이 스크롤 범위에 들어오지 않는다 — 위로 올렸다
+     내려오면 가짜 바닥에 닿아 따라가기가 다시 켜지고 최하단으로 끌려갔다. */
+  [data-live-turn] .chat-message {
+    content-visibility: visible;
+  }
+
   /* Mobile touch optimization and safe areas */
   @media (max-width: 768px) {
     * {

@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { getPreviewKind, MermaidDiagram } from '@/modules/code-editor';
 import { MediaPlayer } from '@/modules/media-library';
 import { normalizeInlineCodeFences } from '@/modules/chat/utils/chatFormatting';
+import { orderedListIndent } from '@/modules/chat/utils/orderedListIndent';
 import { copyTextToClipboard } from '@/shared/utils';
 import { SyntaxHighlighter } from '@/shared/syntaxHighlighter';
 import { usePaletteOps } from '@/modules/command-palette';
@@ -326,8 +327,14 @@ const markdownComponents = {
   ul: ({ children }: { children?: React.ReactNode }) => (
     <ul className="mb-2 list-outside list-disc space-y-1 pl-5 marker:text-current last:mb-0">{children}</ul>
   ),
-  ol: ({ children }: { children?: React.ReactNode }) => (
-    <ol className="mb-2 list-outside list-decimal space-y-1 pl-5 marker:text-current last:mb-0">{children}</ol>
+  ol: ({ children, start }: { children?: React.ReactNode; start?: number }) => (
+    <ol
+      start={start}
+      className="mb-2 list-outside list-decimal space-y-1 marker:text-current last:mb-0"
+      style={{ paddingLeft: orderedListIndent(start, children) }}
+    >
+      {children}
+    </ol>
   ),
   li: ({ children }: { children?: React.ReactNode }) => <li className="[&>div:last-child]:mb-0 [&>div]:mb-1">{children}</li>,
   table: ({ children }: { children?: React.ReactNode }) => (

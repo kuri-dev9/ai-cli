@@ -274,12 +274,23 @@ function ChatMessagesPane({
           {(() => {
             let prevMessage: ChatMessage | null = null;
             const rowCount = groupedVisibleMessages.length;
+            // 지금 진행 중인 턴(마지막 사용자 메시지부터 끝까지)은 화면 밖에서도
+            // 진짜 높이를 유지한다. 자세한 이유는 LazyMessageRow 의 keepMounted.
+            let liveTurnStart = rowCount;
+            for (let i = rowCount - 1; i >= 0; i--) {
+              const row = groupedVisibleMessages[i];
+              if (!isToolGroupItem(row) && row.type === 'user') {
+                liveTurnStart = i;
+                break;
+              }
+            }
 
             return groupedVisibleMessages.map((item, index) => {
               // Rows near the tail mount their content on first commit so the
               // initial scroll-to-bottom measures real heights; older rows
               // start as placeholders and mount when scrolled toward.
               const initiallyNearViewport = index >= rowCount - INITIAL_MOUNTED_TAIL_ROWS;
+              const isLiveTurn = index >= liveTurnStart;
 
               if (isToolGroupItem(item)) {
                 const groupPrevMessage = prevMessage;
@@ -291,6 +302,7 @@ function ChatMessagesPane({
                     lazyRows={lazyRows}
                     timestamp={item.timestamp}
                     initiallyNearViewport={initiallyNearViewport}
+                    keepMounted={isLiveTurn}
                   >
                     <ToolGroupContainer
                       group={item}
@@ -318,6 +330,7 @@ function ChatMessagesPane({
                   lazyRows={lazyRows}
                   timestamp={item.timestamp}
                   initiallyNearViewport={initiallyNearViewport}
+                  keepMounted={isLiveTurn}
                 >
                   <MessageComponent
                     message={item}

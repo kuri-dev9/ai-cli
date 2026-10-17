@@ -44,49 +44,77 @@ const REATTACH_TO_BOTTOM_PX = 8;
  * 방향이 있는 스크롤 입력(휠 deltaY, 터치 이동량)을 의도로 읽는다.
  *
  * 위로 올리는 것은 그 자체로 결론이다 — 어디에 있든 따라가기를 놓는다.
- * 아래로 내리는 것은 결론이 아니라 조준(`aim`)일 뿐이다: 바닥에 닿았는지는
- * 이 입력이 스크롤에 반영된 뒤에야 알 수 있고, 닿지 않았다면 그냥 읽어
- * 내려가는 중이므로 화면을 건드리면 안 된다.
+ * `scroll` 이벤트까지 기다리면 그 사이 ResizeObserver 가 바닥으로 도로
+ * 끌어내려서, 트랙패드처럼 몇 px 씩 올리는 입력은 영영 빠져나가지 못한다.
  *
- * 예전에는 여기서 "바닥 120px 안쪽이면 follow" 로 끝냈다. 스트리밍 중에는
- * 바닥이 계속 멀어져서 좁은 선으로는 닿을 수 없었기 때문인데, 그 바람에
- * 조금만 내려도 화면이 끝으로 끌려갔다. 지금은 `readAimedDistanceFromBottom`
- * 이 그 문제를 기준 높이로 풀고, 판정은 `scroll` 이벤트가 맡는다.
+ * 아래로 내리는 것은 여기서 판정하지 않는다. 바닥에 닿았는지는 그 입력이
+ * 스크롤에 반영된 뒤에야 알 수 있으므로 `resolveScrolledUpAfterScroll` 이 맡는다.
  */
-export function resolveFollowIntent(deltaY: number): 'release' | 'aim' | null {
-  if (deltaY < 0) {
-    return 'release';
-  }
-  if (deltaY > 0) {
-    return 'aim';
-  }
-  return null;
+export function resolveFollowIntent(deltaY: number): 'release' | null {
+  return deltaY < 0 ? 'release' : null;
 }
 
+/** 직전에 확인한 스크롤 위치와 높이. 이번 `scroll` 이 어느 쪽으로 움직였는지 재는 기준. */
+export type ScrollSample = { top: number; height: number };
+
 /**
- * 아래 방향 입력이 "사용자가 겨냥했던 바닥"에 닿았는지 재는 거리.
+ * `scroll` 이벤트 하나를 보고 따라가기를 놓을지(true) 붙을지(false) 정한다.
  *
- * 스트리밍 중에는 입력이 들어오고 브라우저가 스크롤을 적용하는 사이에도 답이
- * 자라서 바닥이 더 내려간다. 지금의 scrollHeight 로 거리를 재면 그 증가분이
- * 계속 끼어들어, 끝까지 굴려도 영원히 바닥에 닿지 못했다 — 그래서 예전에는
- * 120px 이라는 넉넉한 선으로 때웠고, 그 바람에 조금만 내려도 붙어 버렸다.
+ * 거리만으로 판정하면 스트리밍이 끼어든다. 코드 블록이나 도구 카드처럼 큰
+ * 덩어리가 한 번에 붙으면 가만히 있어도 바닥과의 거리가 50px 를 넘어서
+ * "사용자가 올렸다" 로 읽혔고, 반대로 바닥이 계속 멀어지니 끝까지 내려가도
+ * 8px 안에 들기 어려웠다. 그래서 직전 위치(`previous`)와 비교해 실제로
+ * 움직인 방향을 함께 본다.
  *
- * 그래서 입력이 들어온 순간의 scrollHeight(`aimedHeight`)를 기준으로 본다.
- * 그 뒤 자란 만큼은 사용자가 보려던 것이 아니므로 거리에 넣지 않는다.
- * 기준이 없으면(스크롤바 드래그, 키보드 등 방향을 모르는 입력) 지금의 바닥을
- * 그대로 쓴다.
+ * - 따라가는 중: 위로 움직였고(내용이 줄어 밀려난 것이 아니고) 바닥에서
+ *   50px 이상 멀어졌을 때만 놓는다. 내용이 자라서 생긴 거리는 무시한다.
+ * - 놓인 상태: 아래로 움직여서 지금 바닥 8px 안에 닿았을 때만 붙는다.
+ *   움직이지 않았거나 위로 움직였으면 그대로 놓아 둔다. 진행 중인 턴은
+ *   화면 밖에서도 실제 높이를 유지하므로(LazyMessageRow 의 keepMounted)
+ *   여기서 보는 바닥은 진짜 바닥이다.
+ *
+ * 직전 위치가 없으면(첫 이벤트) 거리만으로 판정한다.
  */
-export function readAimedDistanceFromBottom(
-  aimedHeight: number | null,
-  scrollTop: number,
-  clientHeight: number,
-  scrollHeight: number,
-): number {
-  const liveDistance = scrollHeight - scrollTop - clientHeight;
-  if (aimedHeight === null) {
-    return liveDistance;
+export function resolveScrolledUpAfterScroll({
+  wasScrolledUp,
+  previous,
+  top,
+  height,
+  clientHeight,
+}: {
+  wasScrolledUp: boolean;
+  previous: ScrollSample | null;
+  top: number;
+  height: number;
+  clientHeight: number;
+}): boolean {
+  const liveDistance = height - top - clientHeight;
+  const movedUp = previous !== null && top < previous.top;
+
+  if (!wasScrolledUp) {
+    if (liveDistance < DETACH_FROM_BOTTOM_PX) {
+      return false;
+    }
+    if (previous === null) {
+      return true;
+    }
+    // 내용이 줄면 브라우저가 scrollTop 을 끌어올린다. 사용자가 올린 게 아니다.
+    return movedUp && height >= previous.height;
   }
-  return Math.min(liveDistance, aimedHeight - scrollTop - clientHeight);
+
+  if (previous === null) {
+    return liveDistance > REATTACH_TO_BOTTOM_PX;
+  }
+  // 아래로 실제로 움직였을 때만 붙는다. 휠을 위로 굴린 직후에는 그 직전에
+  // 우리가 바닥으로 내린 것의 `scroll` 이 아직 남아 있다 — 위치는 바닥 그대로라
+  // 거리만 보면 "바닥이네" 하고 도로 붙었고, 위로 굴리는 족족 끌려 내려갔다.
+  if (top <= previous.top) {
+    return true;
+  }
+  // "직전 바닥까지 닿았는지" 로 붙이던 규칙은 뺐다. 위쪽 줄이 실제 높이로
+  // 다시 그려지면 브라우저가 보던 자리를 지키려고 scrollTop 을 늘리는데, 그게
+  // 아래로 내린 것처럼 보여 위로 올리는 도중에 최하단으로 끌려갔다.
+  return liveDistance > REATTACH_TO_BOTTOM_PX;
 }
 
 /**
@@ -306,11 +334,13 @@ export function useChatSessionState({
    */
   const isUserScrolledUpRef = useRef(false);
   /**
-   * 아래 방향 입력이 들어온 순간의 scrollHeight. 그 입력이 바닥에 닿았는지
-   * 판정하는 기준이며(`readAimedDistanceFromBottom`), 위로 올리거나 다시
-   * 붙는 순간 비워진다.
+   * 직전 `scroll` 이벤트(또는 우리가 바닥으로 내린 순간)의 위치와 높이.
+   * 다음 `scroll` 이 사용자가 움직인 것인지, 내용이 자라서 생긴 것인지
+   * 가르는 기준이다(`resolveScrolledUpAfterScroll`). 렌더마다 갱신되는
+   * `scrollPositionRef` 와 따로 두는 이유: 렌더가 스크롤 적용과 `scroll`
+   * 이벤트 사이에 끼면 움직임이 기준에 먼저 묻혀 버린다.
    */
-  const aimedBottomHeightRef = useRef<number | null>(null);
+  const scrollSampleRef = useRef<ScrollSample | null>(null);
   const isLoadingMoreRef = useRef(false);
   const allMessagesLoadedRef = useRef(false);
   const topLoadLockRef = useRef(false);
@@ -526,6 +556,9 @@ export function useChatSessionState({
     const container = scrollContainerRef.current;
     if (!container) return;
     container.scrollTop = container.scrollHeight;
+    // 우리가 내린 것은 사용자의 움직임이 아니다. 기준을 여기로 옮겨 두어야
+    // 이어지는 `scroll` 을 "아래로 움직였다" 로 읽지 않는다.
+    scrollSampleRef.current = { top: container.scrollTop, height: container.scrollHeight };
   }, []);
 
   const scrollToBottomAndReset = useCallback(() => {
@@ -610,43 +643,18 @@ export function useChatSessionState({
     [hasMoreMessages, isActive, isLoadingMoreMessages, selectedProject, selectedSession, sessionStore],
   );
 
-  const handleScroll = useCallback(async () => {
+  /**
+   * 맨 위에 닿았을 때의 일: "모두 불러오기" 안내와 이전 페이지 불러오기.
+   *
+   * 따라가기 판정과 떼어 둔 이유: 휠·터치 입력에서도 이 부분은 불러야 하는데
+   * (짧은 대화는 스크롤이 안 생겨 `scroll` 이 오지 않는다), 따라가기 판정을
+   * 거기서 하면 브라우저가 스크롤을 적용하기 전의 위치로 판정하게 된다 —
+   * 바닥에서 위로 굴리자마자 "아직 바닥이네" 하고 도로 붙여 끌어내렸다.
+   */
+  const handleTopReach = useCallback(async () => {
     if (!isActive) return;
     const container = scrollContainerRef.current;
     if (!container) return;
-
-    // 놓는 선과 붙는 선이 다르다(위 상수 참고). 어느 선을 적용할지는 이전
-    // 값에 달려 있는데, 붙는 쪽은 바닥까지 끌어내리는 부수효과까지 함께
-    // 일으켜야 하므로 상태 갱신 함수 안이 아니라 ref 로 판정한다.
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const liveDistance = scrollHeight - scrollTop - clientHeight;
-    // 겨냥한 바닥은 그 입력이 반영된 이 스크롤 한 번에만 유효하다. 남겨 두면
-    // 한참 뒤 스크롤바를 조금 끌었을 때 이미 낡아 버린(그래서 가까운) 기준에
-    // 걸려 또 바닥으로 붙는다.
-    const aimedHeight = aimedBottomHeightRef.current;
-    aimedBottomHeightRef.current = null;
-    const wasScrolledUp = isUserScrolledUpRef.current;
-    const nextScrolledUp = wasScrolledUp
-      ? readAimedDistanceFromBottom(
-          aimedHeight,
-          scrollTop,
-          clientHeight,
-          scrollHeight,
-        ) > REATTACH_TO_BOTTOM_PX
-      : liveDistance >= DETACH_FROM_BOTTOM_PX;
-    if (nextScrolledUp !== wasScrolledUp) {
-      isUserScrolledUpRef.current = nextScrolledUp;
-      setIsUserScrolledUp(nextScrolledUp);
-      if (!nextScrolledUp) {
-        // 플래그만 바꾸면 스트리밍으로 자란 만큼 바닥이 떨어져 있어서, 다음
-        // scroll 이벤트가 "50px 이상 멀어졌네" 하고 도로 놓아 버린다.
-        scrollToBottom();
-      }
-    }
-    scrollPositionRef.current = {
-      height: container.scrollHeight,
-      top: container.scrollTop,
-    };
 
     const scrolledNearTop = container.scrollTop < 100;
 
@@ -675,7 +683,42 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [hasMoreMessages, isActive, loadOlderMessages, scrollToBottom]);
+  }, [hasMoreMessages, isActive, loadOlderMessages]);
+
+  /** 실제 `scroll` 이벤트. 스크롤이 반영된 뒤라 여기서만 따라가기를 판정한다. */
+  const handleScroll = useCallback(async () => {
+    if (!isActive) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    // 붙는 쪽은 바닥까지 끌어내리는 부수효과까지 함께 일으켜야 하므로 상태
+    // 갱신 함수 안이 아니라 ref 로 판정한다.
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const wasScrolledUp = isUserScrolledUpRef.current;
+    const nextScrolledUp = resolveScrolledUpAfterScroll({
+      wasScrolledUp,
+      previous: scrollSampleRef.current,
+      top: scrollTop,
+      height: scrollHeight,
+      clientHeight,
+    });
+    scrollSampleRef.current = { top: scrollTop, height: scrollHeight };
+    if (nextScrolledUp !== wasScrolledUp) {
+      isUserScrolledUpRef.current = nextScrolledUp;
+      setIsUserScrolledUp(nextScrolledUp);
+      if (!nextScrolledUp) {
+        // 플래그만 바꾸면 스트리밍으로 자란 만큼 바닥이 떨어져 있다. 지금
+        // 바닥까지 내려 두어야 화면이 실제로 따라가기 시작한다.
+        scrollToBottom();
+      }
+    }
+    scrollPositionRef.current = {
+      height: container.scrollHeight,
+      top: container.scrollTop,
+    };
+
+    await handleTopReach();
+  }, [handleTopReach, isActive, scrollToBottom]);
 
   const wasChatActiveRef = useRef(isActive);
   useLayoutEffect(() => {
@@ -730,7 +773,7 @@ export function useChatSessionState({
     topLoadLockRef.current = false;
     pendingScrollRestoreRef.current = null;
     wasNearTopRef.current = false;
-    aimedBottomHeightRef.current = null;
+    scrollSampleRef.current = null;
     setIsUserScrolledUp(false);
   }, [selectedProject?.projectId, selectedSession?.id]);
 
@@ -1157,16 +1200,13 @@ export function useChatSessionState({
   }, [isActive, scrollToBottom]);
 
   /**
-   * 휠 방향으로 따라가기를 끄고, 다시 붙을 기준을 잡는다.
+   * 휠 방향으로 따라가기를 끈다.
    *
    * `scroll` 이벤트만으로는 사용자가 올린 것인지 우리가 내린 것인지 구분할 수
    * 없다. 답이 자라는 속도가 빠르면 사용자가 위로 올려도 곧바로 다시 끌려
    * 내려가서, 읽던 자리를 붙잡을 수 없었다. 휠 방향은 의도가 분명하다 —
-   * 위로 굴리면 즉시 놓는다.
-   *
-   * 반대로 아래로 굴릴 때는 여기서 판정하지 않는다. 바닥에 닿았는지는 이
-   * 입력이 스크롤에 반영된 뒤에야 알 수 있으므로, 겨냥한 바닥 높이만 적어
-   * 두고 판정은 `handleScroll` 에 넘긴다.
+   * 위로 굴리면 즉시 놓는다. 다시 붙는 것은 `handleScroll` 이 스크롤이 반영된
+   * 뒤에 판정한다.
    */
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -1175,20 +1215,13 @@ export function useChatSessionState({
     }
 
     const applyIntent = (deltaY: number) => {
-      const intent = resolveFollowIntent(deltaY);
-      if (intent === 'release') {
-        aimedBottomHeightRef.current = null;
-        isUserScrolledUpRef.current = true;
-        setIsUserScrolledUp(true);
+      // 이미 맨 위면 위로 굴려도 움직일 곳이 없다. 여기서 놓으면 짧은 대화가
+      // 스크롤이 생길 만큼 자란 뒤에도 따라가지 않고 위에 멈춰 있다.
+      if (resolveFollowIntent(deltaY) !== 'release' || container.scrollTop <= 0) {
         return;
       }
-      if (intent !== 'aim' || !isUserScrolledUpRef.current) {
-        return;
-      }
-      // 아래로 굴렸다고 바로 붙이지 않는다. 지금 겨냥한 바닥만 기억해 두고,
-      // 브라우저가 이 입력을 실제로 스크롤에 반영한 다음(= 이어서 오는
-      // `scroll` 이벤트) 거기 닿았는지 본다. 끝까지 내려갔을 때만 붙는다.
-      aimedBottomHeightRef.current = container.scrollHeight;
+      isUserScrolledUpRef.current = true;
+      setIsUserScrolledUp(true);
     };
 
     const handleWheel = (event: WheelEvent) => {
@@ -1196,7 +1229,7 @@ export function useChatSessionState({
     };
 
     // 모바일에서는 휠이 없다. 손가락 이동을 같은 의도로 읽는다 — 아래로
-    // 끌면(= 위로 스크롤) 놓고, 위로 끌면(= 아래로 스크롤) 바닥을 겨냥한다.
+    // 끌면(= 위로 스크롤) 놓는다.
     let touchStartY = 0;
     const handleTouchStart = (event: TouchEvent) => {
       touchStartY = event.touches[0]?.clientY ?? 0;
@@ -1347,6 +1380,7 @@ export function useChatSessionState({
     scrollToBottom,
     scrollToBottomAndReset,
     handleScroll,
+    handleTopReach,
     requestLatestMessages,
   };
 }
