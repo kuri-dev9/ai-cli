@@ -3,6 +3,15 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.38.0](https://github.com/kuri-dev9/ai-cli/releases/tag/v1.38.0) (2026-10-25)
+
+### New Features
+
+* **rooms:** 한 대화에 여러 AI(Claude·Codex)를 역할과 함께 참가자로 불러 차례로, 또는 @이름으로 지목해 함께 일하는 팀 룸
+* **rooms:** 룸 화면 위에서 룸이 되기 전 원래 대화를 펼쳐 볼 수 있다
+* **sidebar:** 룸을 한 줄로 묶고, 펼치면 호스트를 포함한 참가자별 세션이 나온다
+* **rooms:** 참가자 원본 대화를 열 수 있고, 그 창에서 룸으로 돌아갈 수 있다
+
 ## [1.37.3](https://github.com/siteboon/claudecodeui/compare/v1.37.2...v1.37.3) (2026-09-08)
 
 ### New Features
