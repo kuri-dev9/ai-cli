@@ -191,5 +191,10 @@
     "filterPlaceholder": "프로젝트 찾기",
     "noProjects": "옮길 수 있는 다른 프로젝트가 없습니다.",
     "moving": "옮기는 중…"
+  },
+  "rooms": {
+    "expandRoom": "룸 참가자 {{count}}명 보기",
+    "collapseRoom": "룸 참가자 접기",
+    "host": "호스트"
   }
 }

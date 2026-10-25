@@ -4,7 +4,11 @@ import type { TFunction } from 'i18next';
 
 import { Button } from '@/shared/ui';
 import type { LLMProvider, Project, ProjectSession, SessionWithProvider } from '@/shared/types';
+import { useRoomIndex } from '@/shared/hooks/useRoomIndex';
 import SidebarSessionItem from '@/modules/sidebar/SidebarSessionItem';
+import SidebarRoomGroup from '@/modules/sidebar/SidebarRoomGroup';
+import { groupRoomSessions, sessionIdsOfRow } from '@/modules/sidebar/utils/roomGroups';
+import type { SidebarRoomGroup as RoomGroup } from '@/modules/sidebar/utils/roomGroups';
 
 type SidebarProjectSessionsProps = {
   project: Project;
@@ -42,17 +46,21 @@ const RECENT_SESSION_LIMIT = 5;
  * 최근 N개에 더해, 열려 있거나 돌고 있거나 확인을 기다리는 세션은 오래됐어도
  * 개수 제한 없이 남긴다. 그렇지 않으면 프로젝트에 알림 점이 떠 있는데 목록을
  * 펼쳐도 해당 세션이 안 보이는 상황이 생긴다. 순서는 원래 목록(최근순)을 따른다.
+ * 룸 행은 그 안에 접힌 참가자 세션의 상태까지 함께 본다.
  */
 const selectCollapsedSessions = (
   sessions: SessionWithProvider[],
+  roomsByHostId: Map<string, RoomGroup>,
   selectedSessionId: string | undefined,
   activeSessions: ReadonlySet<string>,
   attentionSessionIds: ReadonlySet<string>,
 ): SessionWithProvider[] => sessions.filter((session, index) => (
   index < RECENT_SESSION_LIMIT
-  || session.id === selectedSessionId
-  || activeSessions.has(session.id)
-  || attentionSessionIds.has(session.id)
+  || sessionIdsOfRow(session.id, roomsByHostId).some((id) => (
+    id === selectedSessionId
+    || activeSessions.has(id)
+    || attentionSessionIds.has(id)
+  ))
 ));
 
 function SessionListSkeleton() {
@@ -102,17 +110,20 @@ export default function SidebarProjectSessions({
   // 오래된 세션까지 펼쳐 보고 있는지. 프로젝트를 접었다 펼쳐도 유지되도록
   // 프로젝트 행마다 따로 들고 있다.
   const [showOlderSessions, setShowOlderSessions] = useState(false);
+  const rooms = useRoomIndex();
 
   if (!isExpanded) {
     return null;
   }
 
-  const hasSessions = sessions.length > 0;
+  // 룸 참가자 세션은 목록에서 빼서 호스트 행 아래에 묶는다.
+  const { sessions: rowSessions, roomsByHostId } = groupRoomSessions(sessions, rooms);
+  const hasSessions = rowSessions.length > 0;
   const visibleSessions = showOlderSessions
-    ? sessions
-    : selectCollapsedSessions(sessions, selectedSession?.id, activeSessions, attentionSessionIds);
-  const hiddenSessionCount = sessions.length - visibleSessions.length;
-  const canCollapse = showOlderSessions && sessions.length > RECENT_SESSION_LIMIT;
+    ? rowSessions
+    : selectCollapsedSessions(rowSessions, roomsByHostId, selectedSession?.id, activeSessions, attentionSessionIds);
+  const hiddenSessionCount = rowSessions.length - visibleSessions.length;
+  const canCollapse = showOlderSessions && rowSessions.length > RECENT_SESSION_LIMIT;
 
   // 서버에서 더 받아 온 세션이 접힌 쪽으로 사라지면 눌러도 아무 일 없어 보이므로 함께 펼친다.
   const loadMoreSessions = () => {
@@ -130,29 +141,55 @@ export default function SidebarProjectSessions({
         </div>
       ) : (
         <>
-          {visibleSessions.map((session) => (
-            <SidebarSessionItem
-              key={session.id}
-              project={project}
-              session={session}
-              selectedSession={selectedSession}
-              isProcessing={activeSessions.has(session.id)}
-              needsAttention={attentionSessionIds.has(session.id)}
-              currentTime={currentTime}
-              onRenameDraftChange={onRenameDraftChange}
-              isEditing={session.id === sessionRenameId}
-              renameDraft={session.id === sessionRenameId ? sessionRenameDraft : ''}
-              onStartEditingSession={onStartEditingSession}
-              onCancelEditingSession={onCancelEditingSession}
-              onSaveEditingSession={onSaveEditingSession}
-              onProjectSelect={onProjectSelect}
-              onSessionSelect={onSessionSelect}
-              onDeleteSession={onDeleteSession}
-              onForkSession={onForkSession}
-              onMoveSession={onMoveSession}
-              t={t}
-            />
-          ))}
+          {visibleSessions.map((session) => {
+            const roomGroup = roomsByHostId.get(session.id);
+            return roomGroup ? (
+              <SidebarRoomGroup
+                key={session.id}
+                group={roomGroup}
+                project={project}
+                session={session}
+                selectedSession={selectedSession}
+                activeSessions={activeSessions}
+                attentionSessionIds={attentionSessionIds}
+                currentTime={currentTime}
+                sessionRenameId={sessionRenameId}
+                sessionRenameDraft={sessionRenameDraft}
+                onRenameDraftChange={onRenameDraftChange}
+                onStartEditingSession={onStartEditingSession}
+                onCancelEditingSession={onCancelEditingSession}
+                onSaveEditingSession={onSaveEditingSession}
+                onProjectSelect={onProjectSelect}
+                onSessionSelect={onSessionSelect}
+                onDeleteSession={onDeleteSession}
+                onForkSession={onForkSession}
+                onMoveSession={onMoveSession}
+                t={t}
+              />
+            ) : (
+              <SidebarSessionItem
+                key={session.id}
+                project={project}
+                session={session}
+                selectedSession={selectedSession}
+                isProcessing={activeSessions.has(session.id)}
+                needsAttention={attentionSessionIds.has(session.id)}
+                currentTime={currentTime}
+                onRenameDraftChange={onRenameDraftChange}
+                isEditing={session.id === sessionRenameId}
+                renameDraft={session.id === sessionRenameId ? sessionRenameDraft : ''}
+                onStartEditingSession={onStartEditingSession}
+                onCancelEditingSession={onCancelEditingSession}
+                onSaveEditingSession={onSaveEditingSession}
+                onProjectSelect={onProjectSelect}
+                onSessionSelect={onSessionSelect}
+                onDeleteSession={onDeleteSession}
+                onForkSession={onForkSession}
+                onMoveSession={onMoveSession}
+                t={t}
+              />
+            );
+          })}
 
           {/*
             더보기는 한 줄만 둔다. 접어 둔 세션이 있으면 먼저 그것을 펼치고, 받아 둔

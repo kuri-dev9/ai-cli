@@ -1483,3 +1483,75 @@ export type ProviderRateLimitSnapshot = {
    */
   source?: 'live' | 'cli' | 'events';
 };
+
+// ---------------------------
+//----------------- TEAM ROOM CONTRACTS ------------
+/**
+ * 룸 턴에 얼마나 허용할지. 텔레그램 턴과 같은 뜻이다 — `ask` 는 승인을 묻고,
+ * `read` 는 읽기 도구만 자동 허용, `full` 은 묻지 않는다. 룸 화면이 지금 차례인
+ * 참가자의 승인 요청을 띄우므로 기본은 `ask` 다.
+ */
+export type RoomPermissionMode = 'ask' | 'read' | 'full';
+
+/**
+ * 룸 참가자 한 명. 각자 실제 앱 세션 하나를 가진다. 같은 프로바이더·모델이라도
+ * 역할이 다르면 별개의 참가자다. `isHost` 는 룸으로 바뀐 원래 대화다.
+ *
+ * Rooms 모듈의 서비스·턴 엔진·프롬프트 빌더가 같이 쓰고, 그대로 화면에 내려간다.
+ */
+export type RoomParticipant = {
+  participantId: string;
+  roomId: string;
+  sessionId: string;
+  provider: string;
+  model: string | null;
+  /** `@이름` 으로 부르는 이름. 공백과 `@` 없이, 룸 안에서 겹치지 않는다. */
+  displayName: string;
+  roleName: string;
+  rolePrompt: string;
+  position: number;
+  isHost: boolean;
+};
+
+/**
+ * 룸 타임라인의 한 줄. `speaker` 는 `'user'` 이거나 참가자 id 다. 참가자의
+ * 답이면 `sessionId` 가 그 답을 낸 세션이다.
+ */
+export type RoomMessage = {
+  id: number;
+  roomId: string;
+  speaker: string;
+  text: string;
+  status: 'complete' | 'aborted' | 'error';
+  sessionId: string | null;
+  createdAt: string;
+};
+
+/**
+ * 룸이 지금 돌고 있는지. 메모리에만 있다 — 서버가 다시 뜨면 모두 `idle` 이다.
+ * `pendingUserMessage` 는 참가자가 일하는 중에 사용자가 보낸 글이 다음 차례를
+ * 기다리고 있다는 뜻이다.
+ */
+export type RoomRuntimeState = {
+  status: 'idle' | 'running';
+  activeParticipantId: string | null;
+  activeSessionId: string | null;
+  turnCount: number;
+  maxAutoTurns: number;
+  pendingUserMessage: boolean;
+};
+
+/** 룸 하나를 화면에 그리는 데 필요한 전부. REST 응답 그대로다. */
+export type RoomDetail = {
+  room: {
+    roomId: string;
+    hostSessionId: string;
+    projectPath: string;
+    permissionMode: RoomPermissionMode;
+    maxAutoTurns: number;
+    createdAt: string;
+  };
+  participants: RoomParticipant[];
+  messages: RoomMessage[];
+  state: RoomRuntimeState;
+};

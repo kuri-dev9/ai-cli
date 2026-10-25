@@ -6,7 +6,9 @@ import { Button, LLMProviderLogo, Tooltip } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 import type { ProjectSession, RecentConversationListItem, SessionRowActions } from '@/shared/types';
 import { formatCompactAge } from '@/modules/sidebar/utils/sidebarProjectFormatting';
+import { useRoomIndex } from '@/shared/hooks/useRoomIndex';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
+import { roomParticipantSessionIds } from '@/modules/sidebar/utils/roomGroups';
 
 type SidebarRecentConversationsProps = {
   conversations: RecentConversationListItem[];
@@ -50,7 +52,7 @@ function RecentConversationSkeleton() {
 
 /** Rendered by SidebarContent in the recents search mode to list recently active sessions across all projects. */
 export default function SidebarRecentConversations({
-  conversations,
+  conversations: allConversations,
   total,
   hasMore,
   isLoading,
@@ -64,6 +66,13 @@ export default function SidebarRecentConversations({
   onRetry,
   t,
 }: SidebarRecentConversationsProps) {
+  // 룸 참가자 세션은 룸(호스트 대화) 하나로 대표되므로 최근 목록에 따로 늘어놓지 않는다.
+  const rooms = useRoomIndex();
+  const participantIds = roomParticipantSessionIds(rooms);
+  const conversations = participantIds.size
+    ? allConversations.filter((conversation) => !participantIds.has(conversation.sessionId))
+    : allConversations;
+
   // 다음 페이지를 받는 중에도 보여줄 행이 없으면 스켈레톤을 유지한다. 꺼 둔 CLI 의
   // 대화만 들어 있던 페이지를 건너뛰는 동안 "대화가 없습니다" 가 잠깐 스치면 안 된다.
   if ((isLoading || isLoadingMore) && conversations.length === 0) {

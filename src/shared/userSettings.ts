@@ -37,6 +37,8 @@ export type UserPreferences = {
   quietFolders: unknown;
   /** 플레이어 패널이 훑을 폴더 목록 — 실제 프로젝트가 아니라 보기 방식이다. */
   mediaFolders: unknown;
+  /** 룸 초대 창의 역할 프리셋 목록. 없으면 기본 프리셋을 쓴다. */
+  roomRolePresets: unknown;
 };
 
 export type UserPreferenceKey = keyof UserPreferences;
@@ -89,6 +91,8 @@ const LEGACY_STORAGE_KEYS: Record<UserPreferenceKey, string> = {
   // Unused: quiet folders were introduced as a server-stored setting.
   quietFolders: '',
   mediaFolders: '',
+  // Unused: room role presets were introduced as a server-stored setting.
+  roomRolePresets: '',
 };
 
 const PREFERENCE_KEYS = Object.keys(LEGACY_STORAGE_KEYS) as UserPreferenceKey[];

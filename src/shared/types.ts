@@ -380,6 +380,8 @@ export type Question = {
 /** Options for a programmatic session navigation, currently only whether the route change should replace the current history entry instead of pushing a new one. */
 export type SessionNavigationOptions = {
   replace?: boolean;
+  /** Open a room host session as its own plain chat instead of the room view. */
+  view?: 'chat';
 };
 
 /** Context handed to the workspace when a chat run creates a session, naming the provider that created it, the owning project and the session summary, so the session can be selected and labelled. */
@@ -1325,6 +1327,86 @@ export type TelegramDiscoveredChat = {
 export type TelegramChatDiscovery = {
   chats: TelegramDiscoveredChat[];
   bridgeRunning: boolean;
+};
+
+// ---------------------------
+
+//----------------- TEAM ROOMS ------------
+
+/** One AI member of a team room: a real ai-cli session plus the name, role and prompt it speaks under. `isHost` marks the session the room was created from. */
+export type RoomParticipant = {
+  participantId: string;
+  roomId: string;
+  sessionId: string;
+  provider: string;
+  model: string | null;
+  displayName: string;
+  roleName: string;
+  rolePrompt: string;
+  position: number;
+  isHost: boolean;
+};
+
+/** One persisted entry of a room's shared timeline; `speaker` is `'user'` or the participantId that wrote it, and `sessionId` points at the participant session that produced it. */
+export type RoomMessage = {
+  id: number;
+  roomId: string;
+  speaker: string;
+  text: string;
+  status: 'complete' | 'aborted' | 'error';
+  sessionId: string | null;
+  createdAt: string;
+};
+
+/** The server's live view of a room's turn loop: who is speaking now and how many automatic turns have run, broadcast as `room_state` frames. */
+export type RoomRuntimeState = {
+  status: 'idle' | 'running';
+  activeParticipantId: string | null;
+  activeSessionId: string | null;
+  turnCount: number;
+  maxAutoTurns: number;
+  pendingUserMessage: boolean;
+};
+
+/** Permission preset a room applies to every participant run: ask before tools, read-only, or full access. */
+export type RoomPermissionMode = 'ask' | 'read' | 'full';
+
+/** Everything the room view needs in one fetch: room settings, members, persisted timeline and runtime state. */
+export type RoomDetail = {
+  room: {
+    roomId: string;
+    hostSessionId: string;
+    projectPath: string;
+    permissionMode: RoomPermissionMode;
+    maxAutoTurns: number;
+    createdAt: string;
+  };
+  participants: RoomParticipant[];
+  messages: RoomMessage[];
+  state: RoomRuntimeState;
+};
+
+/** Lightweight per-room summary listed by `GET /api/rooms`, used to badge room sessions in the sidebar and to decide whether a session opens as a room. */
+export type RoomIndexEntry = {
+  roomId: string;
+  hostSessionId: string;
+  participants: Array<Pick<RoomParticipant, 'participantId' | 'sessionId' | 'provider' | 'displayName' | 'roleName' | 'isHost'>>;
+};
+
+/** The identity a new participant is invited with, sent when creating a room or adding a member. */
+export type RoomParticipantInput = {
+  provider: string;
+  model?: string | null;
+  displayName: string;
+  roleName: string;
+  rolePrompt?: string;
+};
+
+/** Body of `POST /api/rooms`: converts the host session into a room and adds the first invitee. */
+export type CreateRoomInput = {
+  hostSessionId: string;
+  host?: { displayName?: string; roleName?: string; rolePrompt?: string };
+  participant: RoomParticipantInput;
 };
 
 // ---------------------------

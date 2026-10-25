@@ -28,7 +28,8 @@ type PermissionRequestsBannerProps = {
 
 /**
  * Rendered by chat's ChatComposer above the input to surface pending tool
- * permission requests and their allow/deny/remember actions.
+ * permission requests and their allow/deny/remember actions. The rooms module
+ * renders it (via the chat barrel) for the running participant's prompts.
  */
 export default function PermissionRequestsBanner({
   pendingPermissionRequests,

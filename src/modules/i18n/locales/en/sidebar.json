@@ -192,5 +192,10 @@
     "filterPlaceholder": "Find a project",
     "noProjects": "No other project to move to.",
     "moving": "Moving…"
+  },
+  "rooms": {
+    "expandRoom": "Show {{count}} room participants",
+    "collapseRoom": "Hide room participants",
+    "host": "host"
   }
 }

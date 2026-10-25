@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/shared/ui';
 import type { AppTab, Project, ProjectSession } from '@/shared/types';
 import { cn } from '@/shared/utils';
+import { InviteParticipantButton } from '@/modules/rooms';
 import MobileMenuButton from '@/modules/project-workspace/MobileMenuButton';
 import WorkspaceTabs from '@/modules/project-workspace/WorkspaceTabs';
 import WorkspaceTitle from '@/modules/project-workspace/WorkspaceTitle';
@@ -108,6 +109,10 @@ export default function WorkspaceHeader({
             selectedSession={selectedSession}
             shouldShowTasksTab={shouldShowTasksTab}
           />
+
+          {activeTab === 'chat' && selectedSession?.id && (
+            <InviteParticipantButton sessionId={selectedSession.id} />
+          )}
 
           {onToggleMediaLibrary && (
             <Button

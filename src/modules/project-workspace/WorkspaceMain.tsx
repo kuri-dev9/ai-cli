@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 
 import { ChatInterface } from '@/modules/chat';
+import { RoomInterface, RoomSessionNotice } from '@/modules/rooms';
 import { FileTree } from '@/modules/file-tree';
 import { StandaloneShell } from '@/modules/standalone-shell';
 import { GitPanel } from '@/modules/git-panel';
@@ -15,6 +16,7 @@ import { EditorSidebar, getPreviewKind, useEditorSidebar } from '@/modules/code-
 import { MediaLibraryPanel } from '@/modules/media-library';
 import type { CodeEditorDiffInfo } from '@/shared/types';
 import { useMediaFolders } from '@/shared/hooks/useMediaFolders';
+import { useIsPlainChatView, useRoomIndexSync, useRoomMembership } from '@/shared/hooks/useRoomIndex';
 import WorkspaceHeader from '@/modules/project-workspace/WorkspaceHeader';
 import WorkspaceStateView from '@/modules/project-workspace/WorkspaceStateView';
 import WorkspaceErrorBoundary from '@/modules/project-workspace/WorkspaceErrorBoundary';
@@ -40,7 +42,7 @@ type WorkspaceMainProps = {
   onProjectsRefresh: () => void;
 };
 
-/** Rendered by ProjectMainRegion to show the selected project's active tab: chat, files, shell, git, tasks, browser or a plugin. */
+/** Rendered by ProjectMainRegion to show the selected project's active tab: chat (or the team room view for a room host session), files, shell, git, tasks, browser or a plugin. */
 function WorkspaceMain({
   selectedProject,
   selectedSession,
@@ -66,6 +68,15 @@ function WorkspaceMain({
   const browserUseEnabled = useBrowserUseEnabled();
 
   useTaskMasterProjectSync(selectedProject);
+
+  // A session that hosts a team room opens as the room view instead of chat,
+  // unless the URL asks for its plain chat. Participant sessions are not hosts,
+  // so they always open as chats. Any room member's chat gets a notice that
+  // leads back to the room.
+  useRoomIndexSync();
+  const plainChatView = useIsPlainChatView();
+  const roomMembership = useRoomMembership(selectedSession?.id);
+  const roomHostSessionId = roomMembership?.isHost && !plainChatView ? roomMembership.room.hostSessionId : null;
 
   const shouldShowTasksTab = Boolean(tasksEnabled && isTaskMasterInstalled);
   const shouldShowBrowserTab = browserUseEnabled;
@@ -180,23 +191,46 @@ function WorkspaceMain({
         <div className={`flex min-h-0 min-w-[200px] flex-col overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
           <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
             <WorkspaceErrorBoundary showDetails>
-              <ChatInterface
-                isActive={activeTab === 'chat'}
-                selectedProject={selectedProject}
-                selectedSession={selectedSession}
-                ws={ws}
-                sendMessage={sendMessage}
-                onFileOpen={handleWorkspaceFileOpen}
-                onNavigateToSession={onNavigateToSession}
-                onSessionEstablished={onSessionEstablished}
-                onShowSettings={onShowSettings}
-                showRawParameters={showRawParameters}
-                showThinking={showThinking}
-                sendByCtrlEnter={sendByCtrlEnter}
-                externalMessageUpdate={externalMessageUpdate}
-                newSessionTrigger={newSessionTrigger}
-                onShowAllTasks={tasksEnabled ? showAllTasks : null}
-              />
+              {roomHostSessionId ? (
+                <RoomInterface
+                  key={roomHostSessionId}
+                  hostSessionId={roomHostSessionId}
+                  selectedProject={selectedProject}
+                  onNavigateToSession={onNavigateToSession}
+                  onFileOpen={handleWorkspaceFileOpen}
+                  showRawParameters={showRawParameters}
+                  showThinking={showThinking}
+                  sendByCtrlEnter={sendByCtrlEnter}
+                />
+              ) : (
+                <div className="flex h-full flex-col">
+                  {roomMembership && (
+                    <RoomSessionNotice
+                      membership={roomMembership}
+                      onBackToRoom={(hostSessionId) => onNavigateToSession(hostSessionId)}
+                    />
+                  )}
+                  <div className="min-h-0 flex-1">
+                    <ChatInterface
+                      isActive={activeTab === 'chat'}
+                      selectedProject={selectedProject}
+                      selectedSession={selectedSession}
+                      ws={ws}
+                      sendMessage={sendMessage}
+                      onFileOpen={handleWorkspaceFileOpen}
+                      onNavigateToSession={onNavigateToSession}
+                      onSessionEstablished={onSessionEstablished}
+                      onShowSettings={onShowSettings}
+                      showRawParameters={showRawParameters}
+                      showThinking={showThinking}
+                      sendByCtrlEnter={sendByCtrlEnter}
+                      externalMessageUpdate={externalMessageUpdate}
+                      newSessionTrigger={newSessionTrigger}
+                      onShowAllTasks={tasksEnabled ? showAllTasks : null}
+                    />
+                  </div>
+                </div>
+              )}
             </WorkspaceErrorBoundary>
           </div>
 

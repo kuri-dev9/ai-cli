@@ -288,3 +288,13 @@ export const PROVIDER_CONNECTION_TONES: Record<ProviderConnectionTone, ProviderC
     dotClass: 'bg-red-500',
   },
 };
+
+// ---------------------------
+
+//----------------- TEAM ROOMS ------------
+
+/** Most participants (host included) a team room accepts; the invite controls disable themselves at this count. Mirrors the server's ROOM_FULL limit. */
+export const ROOM_MAX_PARTICIPANTS = 3;
+
+/** Providers that can be invited into a team room, in the order the invite modal lists them. */
+export const ROOM_INVITABLE_PROVIDERS = ['claude', 'codex'] as const;

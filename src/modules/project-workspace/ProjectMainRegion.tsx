@@ -2,6 +2,7 @@ import { memo, useCallback } from 'react';
 
 import { useProjectMainState } from '@/modules/project-workspace/context/ProjectsStateContext';
 import type { SessionEstablishedContext, SessionNavigationOptions,ProjectWorkspaceShellProps } from '@/shared/types';
+import { sessionPath } from '@/shared/hooks/useRoomIndex';
 import WorkspaceMain from '@/modules/project-workspace/WorkspaceMain';
 
 /** Rendered by ProjectWorkspaceShell to bind this module's project state to WorkspaceMain. */
@@ -34,7 +35,7 @@ function ProjectMainRegion({
     targetSessionId: string,
     options?: SessionNavigationOptions,
   ) => {
-    navigate(`/session/${targetSessionId}`, { replace: Boolean(options?.replace) });
+    navigate(sessionPath(targetSessionId, options?.view), { replace: Boolean(options?.replace) });
   }, [navigate]);
 
   const handleSessionEstablished = useCallback((

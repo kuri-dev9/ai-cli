@@ -58,6 +58,7 @@ import {
     isSessionHandedToTelegram,
     telegramRoutes,
 } from './modules/telegram-bridge/index.js';
+import { roomsRoutes, roomTurnEngine } from './modules/rooms/index.js';
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
@@ -239,6 +240,8 @@ app.use('/api/browser-use', authenticateToken, browserUseRoutes);
 // Unified provider MCP routes (protected)
 app.use('/api/providers', authenticateToken, providerRoutes);
 app.use('/api/scheduled-messages', authenticateToken, scheduledMessagesRoutes);
+// 팀 룸: 한 대화에 여러 모델 세션이 참가해 차례로 일한다.
+app.use('/api/rooms', authenticateToken, roomsRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
@@ -420,6 +423,8 @@ async function startServer() {
             // 설정이 있을 때만 켜진다. 텔레그램 쪽으로 나가는 연결만 쓰므로
             // 인바운드 포트는 열지 않는다.
             initializeTelegramBridge(providerRuntimeService);
+            // 룸의 차례는 소켓 없이 도는 턴이라 런타임을 직접 받아 둔다.
+            roomTurnEngine.initialize(providerRuntimeService);
             // 브라우저 밖에서 시작된 턴(텔레그램·예약 메시지)도 열려 있는
             // 화면에 "돌고 있음"이 보이게 한다.
             initializeRunStateBroadcast();
@@ -438,6 +443,7 @@ async function startServer() {
             await closeSessionsWatcher();
             closeScheduledMessageDispatcher();
             closeTelegramBridge();
+            roomTurnEngine.close();
             try {
                 await browserUseService.stopAllSessions();
             } catch (err) {

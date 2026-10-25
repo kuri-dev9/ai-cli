@@ -274,6 +274,74 @@ CREATE TABLE IF NOT EXISTS superseded_provider_sessions (
 );
 `;
 
+/**
+ * 팀 룸. 한 대화에 여러 모델 세션이 참가해 같이 일하는 자리다.
+ *
+ * 참가자의 대화 기록은 각 프로바이더의 파일(Claude `.jsonl` 등)에 따로 남고,
+ * 거기에는 다른 모델의 발언을 끼워 넣을 수 없다. 그래서 룸 타임라인은
+ * `room_messages` 에 따로 둔다.
+ *
+ * `host_session_id` 는 룸으로 바뀐 원래 대화다. 그 세션이 지워지면 룸도 같이
+ * 사라진다.
+ */
+export const ROOMS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS rooms (
+    room_id TEXT PRIMARY KEY,
+    host_session_id TEXT NOT NULL UNIQUE,
+    project_path TEXT NOT NULL,
+    -- ask | read | full. 텔레그램 턴과 같은 뜻이다.
+    permission_mode TEXT NOT NULL DEFAULT 'ask',
+    -- 사용자 메시지 하나에 참가자끼리 자동으로 주고받는 최대 턴 수.
+    max_auto_turns INTEGER NOT NULL DEFAULT 6,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (host_session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
+`;
+
+export const ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS room_participants (
+    participant_id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT,
+    display_name TEXT NOT NULL,
+    role_name TEXT NOT NULL,
+    role_prompt TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL,
+    -- 이 참가자가 마지막으로 읽은 룸 메시지. 다음 차례에는 그 뒤의 것만 보낸다.
+    last_seen_message_id INTEGER NOT NULL DEFAULT 0,
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (room_id, display_name),
+    FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
+`;
+
+export const ROOM_MESSAGES_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS room_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id TEXT NOT NULL,
+    -- 'user' 또는 participant_id
+    speaker TEXT NOT NULL,
+    text TEXT NOT NULL,
+    -- complete | aborted | error
+    status TEXT NOT NULL DEFAULT 'complete',
+    -- 이 답을 낸 참가자 세션. 사용자 메시지는 NULL.
+    session_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
+);
+`;
+
+/** 룸 표에 붙는 색인. 처음 만들 때와 기존 설치를 올릴 때 같이 쓴다. */
+export const ROOM_INDEXES_SQL = `
+CREATE INDEX IF NOT EXISTS idx_room_participants_room ON room_participants(room_id, position);
+CREATE INDEX IF NOT EXISTS idx_room_participants_session ON room_participants(session_id);
+CREATE INDEX IF NOT EXISTS idx_room_messages_room ON room_messages(room_id, id);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -330,4 +398,9 @@ ${MESSAGE_SOURCES_TABLE_SCHEMA_SQL}
 CREATE INDEX IF NOT EXISTS idx_message_sources_session ON message_sources(session_id);
 
 ${SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL}
+
+${ROOMS_TABLE_SCHEMA_SQL}
+${ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL}
+${ROOM_MESSAGES_TABLE_SCHEMA_SQL}
+${ROOM_INDEXES_SQL}
 `;

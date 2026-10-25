@@ -5,7 +5,12 @@ import {
 } from '@/shared/authToken';
 import { IS_PLATFORM } from '@/shared/utils';
 import { readVoiceConfig, voiceConfigHeaders } from '@/shared/voiceConfig';
-import type { TelegramSettingsUpdate } from '@/shared/types';
+import type {
+  CreateRoomInput,
+  RoomParticipantInput,
+  RoomPermissionMode,
+  TelegramSettingsUpdate,
+} from '@/shared/types';
 
 // Headers are a plain record rather than the full `HeadersInit` union so the
 // defaults below can be merged with a caller's headers by spreading.
@@ -421,6 +426,24 @@ export const api = {
       worktreePath: string,
       options: { force?: boolean; deleteBranch?: boolean },
     ) => post('/api/worktrees/remove', { project: projectId, worktreePath, ...options }),
+  },
+
+  // Team rooms: several AI participant sessions sharing one timeline. Every
+  // response is the `{ success, data }` envelope — unwrap with readApiJson.
+  rooms: {
+    list: () => get('/api/rooms'),
+    // Resolves to null data when the session is not a room host.
+    bySession: (sessionId: string) =>
+      get(`/api/rooms/by-session/${encodeURIComponent(sessionId)}`),
+    get: (roomId: string) => get(`/api/rooms/${encodeURIComponent(roomId)}`),
+    create: (input: CreateRoomInput) => post('/api/rooms', input),
+    addParticipant: (roomId: string, participant: RoomParticipantInput) =>
+      post(`/api/rooms/${encodeURIComponent(roomId)}/participants`, participant),
+    update: (roomId: string, changes: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number }) =>
+      patch(`/api/rooms/${encodeURIComponent(roomId)}`, changes),
+    postMessage: (roomId: string, content: string) =>
+      post(`/api/rooms/${encodeURIComponent(roomId)}/messages`, { content }),
+    stop: (roomId: string) => post(`/api/rooms/${encodeURIComponent(roomId)}/stop`),
   },
 
   // Provider (coding agent) endpoints — models, capabilities, sessions, MCP, skills.

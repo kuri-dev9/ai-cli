@@ -1,4 +1,5 @@
 import { memo, useState } from 'react';
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { Check, Edit2, Loader2, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -9,6 +10,7 @@ import { PROVIDER_LABELS, createSessionViewModel, formatCompactAge } from '@/mod
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
 import { useProviderSessionIdCopy } from '@/modules/sidebar/hooks/useProviderSessionIdCopy';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
+import { RoomSessionBadge } from '@/modules/rooms';
 
 type SidebarSessionItemProps = {
   project: Project;
@@ -31,6 +33,14 @@ type SidebarSessionItemProps = {
   onForkSession?: (session: SessionWithProvider) => void;
   /** Opens the project picker for this session; absent when its provider cannot move. */
   onMoveSession?: (session: SessionWithProvider) => void;
+  /**
+   * Replaces the provider logo at the start of the row with a clickable mark of
+   * its own, e.g. a room's members. A row with one also drops the room badge
+   * under its title, since the mark already says it is a room.
+   */
+  leading?: { content: ReactNode; label: string; expanded: boolean; onClick: () => void };
+  /** Drops the room badge under the title, for rows already drawn inside their room. */
+  hideRoomBadge?: boolean;
   t: TFunction;
 };
 
@@ -53,6 +63,8 @@ function SidebarSessionItem({
   onDeleteSession,
   onForkSession,
   onMoveSession,
+  leading,
+  hideRoomBadge = false,
   t,
 }: SidebarSessionItemProps) {
   const isCompact = useCompactSidebar();
@@ -92,6 +104,40 @@ function SidebarSessionItem({
       onCancelEditingSession();
     }
   };
+
+  // The row itself is a link (or a tap target on mobile), so the leading mark
+  // is a span with button semantics and keeps its click from opening the session.
+  const activateLeading = (event: MouseEvent | KeyboardEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    leading?.onClick();
+  };
+
+  const renderLeading = () => (leading ? (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={leading.label}
+      aria-expanded={leading.expanded}
+      title={leading.label}
+      onClick={activateLeading}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') activateLeading(event);
+      }}
+      className="flex-shrink-0 rounded-md transition-colors hover:bg-accent"
+    >
+      {leading.content}
+    </span>
+  ) : (
+    <div
+      className={cn(
+        'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md',
+        isSelected ? 'bg-primary/10' : 'bg-muted/50',
+      )}
+    >
+      <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
+    </div>
+  ));
 
   const startMobileRename = () => {
     onStartEditingSession(project.projectId, session.id, sessionView.sessionName);
@@ -141,14 +187,7 @@ function SidebarSessionItem({
           onClick={selectMobileSession}
         >
           <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                'w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0',
-                isSelected ? 'bg-primary/10' : 'bg-muted/50',
-              )}
-            >
-              <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
-            </div>
+            {renderLeading()}
 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -170,12 +209,13 @@ function SidebarSessionItem({
                   <span className="ml-auto flex-shrink-0 text-[11px] text-muted-foreground">{compactSessionAge}</span>
                 )}
               </div>
-              <div className="mt-0.5 flex items-center">
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                 {sessionView.messageCount > 0 && (
                   <Badge variant="secondary" className="px-1 py-0 text-xs">
                     {sessionView.messageCount}
                   </Badge>
                 )}
+                {!leading && !hideRoomBadge && <RoomSessionBadge sessionId={session.id} />}
               </div>
             </div>
 
@@ -349,14 +389,7 @@ function SidebarSessionItem({
           }}
         >
           <div className="flex w-full min-w-0 items-center gap-2">
-            <div
-              className={cn(
-                'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md',
-                isSelected ? 'bg-primary/10' : 'bg-muted/50',
-              )}
-            >
-              <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
-            </div>
+            {renderLeading()}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <div
@@ -389,8 +422,9 @@ function SidebarSessionItem({
                   </span>
                 )}
               </div>
-              <div className="mt-0.5 flex items-center">
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                 {sessionView.messageCount > 0 && <Badge variant="secondary" className="px-1 py-0 text-xs">{sessionView.messageCount}</Badge>}
+                {!leading && !hideRoomBadge && <RoomSessionBadge sessionId={session.id} />}
               </div>
             </div>
           </div>

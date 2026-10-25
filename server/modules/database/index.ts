@@ -29,3 +29,6 @@ export { userPreferencesDb } from '@/modules/database/repositories/user-preferen
 export { vapidKeysDb } from '@/modules/database/repositories/vapid-keys.js';
 export { scheduledMessagesDb } from './repositories/scheduled-messages.db.js';
 export type { ScheduledMessageRow, ScheduledMessageStatus } from './repositories/scheduled-messages.db.js';
+// roomsDb: used by the Rooms module to persist team rooms, their participant sessions and the shared timeline.
+export { roomsDb } from './repositories/rooms.db.js';
+export type { RoomMessageRow, RoomParticipantRow, RoomRow } from './repositories/rooms.db.js';
