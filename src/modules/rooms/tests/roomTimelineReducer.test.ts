@@ -48,6 +48,8 @@ const message = (overrides: Partial<RoomMessage>): RoomMessage => ({
   status: 'complete',
   sessionId: null,
   attachments: [],
+  finalText: null,
+  handoff: null,
   createdAt: '2026-10-25T00:00:01.000Z',
   ...overrides,
 });

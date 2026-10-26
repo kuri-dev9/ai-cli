@@ -1367,8 +1367,18 @@ export type RoomMessage = {
   sessionId: string | null;
   /** Files attached to a user message; always empty on participant replies. */
   attachments: RoomAttachment[];
+  /** A reply's last message (its conclusion); `text` also holds what was said while working. Null on user messages and older replies. */
+  finalText: string | null;
+  /** Where the reply handed the turn, shown at its foot as "→ @name" or "done". */
+  handoff: RoomMessageHandoff | null;
   createdAt: string;
 };
+
+/** The next turn a participant reply pointed at with its last line; null on the message when it had none. */
+export type RoomMessageHandoff =
+  | { kind: 'done' }
+  | { kind: 'pass' }
+  | { kind: 'mention'; participantId: string };
 
 /** The server's live view of a room's turn loop: who is speaking now and how many automatic turns have run, broadcast as `room_state` frames. */
 export type RoomRuntimeState = {

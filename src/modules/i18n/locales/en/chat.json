@@ -458,6 +458,13 @@
     "pendingHint": "Goes out once the current participant finishes",
     "interruptNow": "Interrupt now",
     "interruptNowTitle": "Cut the current participant off and handle your message first",
-    "formerParticipant": "Left"
+    "formerParticipant": "Left",
+    "answering": "answering",
+    "jumpToLive": "Jump to it",
+    "handoffTo": "is up next",
+    "handoffDone": "Done · needs your review",
+    "handoffPass": "Nothing to add",
+    "showWorkProcess": "Show work in progress",
+    "hideWorkProcess": "Hide work in progress"
   }
 }

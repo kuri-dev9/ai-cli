@@ -15,8 +15,10 @@ import {
   parseHandoff,
   pickSpeakerForUserMessage,
 } from '@/modules/rooms/services/room-prompt.service.js';
+import type { RoomHandoff } from '@/modules/rooms/services/room-prompt.service.js';
 import {
   parseRoomPermissionMode,
+  serializeHandoff,
   toRoomMessage,
   toRoomParticipant,
 } from '@/modules/rooms/services/room-records.service.js';
@@ -52,7 +54,7 @@ type RoomLoopState = {
   userId: string | number | null;
 };
 
-type TurnResult = { message: RoomMessage; lastText: string };
+type TurnResult = { message: RoomMessage; handoff: RoomHandoff };
 
 const loops = new Map<string, RoomLoopState>();
 let runtime: ProviderRuntimeGateway | null = null;
@@ -235,16 +237,22 @@ function recordTurnReply(
     text = '(응답 없음)';
   }
 
+  // 넘김 표시는 끝까지 해낸 답에서만 읽는다. 끊기거나 실패한 답의 멘션은 뜻이 없다.
+  const handoff: RoomHandoff = status === 'complete'
+    ? parseHandoff(texts.last, loadParticipants(room), me.participantId)
+    : { kind: 'none' };
   const row = roomsDb.insertMessage({
     roomId: room.room_id,
     speaker: me.participantId,
     text,
     status,
     sessionId: me.sessionId,
+    finalText: texts.last || null,
+    handoff: serializeHandoff(handoff.kind === 'none' ? null : handoff),
   });
   const message = toRoomMessage(row);
   broadcastRoomFrame({ kind: 'room_message', roomId: room.room_id, message });
-  return { message, lastText: texts.last };
+  return { message, handoff };
 }
 
 function latestUserMessageText(roomId: string): string {
@@ -296,7 +304,7 @@ async function runLoop(roomId: string): Promise<void> {
         break;
       }
 
-      const { message, lastText } = await runParticipantTurn(room, speaker, loop);
+      const { message, handoff } = await runParticipantTurn(room, speaker, loop);
       loop.turnCount += 1;
       loop.activeParticipantId = null;
       loop.activeSessionId = null;
@@ -312,7 +320,6 @@ async function runLoop(roomId: string): Promise<void> {
         break;
       }
 
-      const handoff = parseHandoff(lastText, participants, speaker.participantId);
       if (handoff.kind === 'done') {
         break;
       }

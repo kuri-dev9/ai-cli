@@ -47,6 +47,10 @@ export type RoomMessageRow = {
   session_id: string | null;
   /** 첨부 파일 설명의 JSON 배열. 없으면 NULL. */
   attachments: string | null;
+  /** 참가자 답의 마지막 말. 사용자 글이나 예전 행은 NULL. */
+  final_text: string | null;
+  /** `done` | `pass` | `mention:<participant_id>`. 없으면 NULL. */
+  handoff: string | null;
   created_at: string;
 };
 
@@ -206,14 +210,25 @@ export const roomsDb = {
     status: string;
     sessionId: string | null;
     attachments?: string | null;
+    finalText?: string | null;
+    handoff?: string | null;
   }): RoomMessageRow {
     const db = getConnection();
     const result = db
       .prepare(
-        `INSERT INTO room_messages (room_id, speaker, text, status, session_id, attachments)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO room_messages (room_id, speaker, text, status, session_id, attachments, final_text, handoff)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(message.roomId, message.speaker, message.text, message.status, message.sessionId, message.attachments ?? null);
+      .run(
+        message.roomId,
+        message.speaker,
+        message.text,
+        message.status,
+        message.sessionId,
+        message.attachments ?? null,
+        message.finalText ?? null,
+        message.handoff ?? null,
+      );
     this.touchRoom(message.roomId);
     return db
       .prepare('SELECT * FROM room_messages WHERE id = ?')

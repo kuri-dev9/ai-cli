@@ -457,6 +457,13 @@
     "pendingHint": "지금 답하는 참가자가 끝나면 반영됩니다",
     "interruptNow": "지금 끼어들기",
     "interruptNowTitle": "지금 답하는 참가자를 끊고 내 메시지부터 처리합니다",
-    "formerParticipant": "퇴장함"
+    "formerParticipant": "퇴장함",
+    "answering": "답하는 중",
+    "jumpToLive": "보러 가기",
+    "handoffTo": "에게 넘김",
+    "handoffDone": "완료 · 사용자 확인 필요",
+    "handoffPass": "덧붙일 말 없음",
+    "showWorkProcess": "작업 과정 보기",
+    "hideWorkProcess": "작업 과정 접기"
   }
 }

@@ -1539,8 +1539,22 @@ export type RoomMessage = {
   sessionId: string | null;
   /** 사용자 메시지에 붙은 파일. 참가자 답에는 늘 비어 있다. */
   attachments: RoomAttachment[];
+  /**
+   * 참가자 답의 마지막 말(결론). `text` 는 작업 중에 남긴 말까지 다 이은
+   * 것이라, 화면은 결론을 펼치고 나머지를 '작업 과정'으로 접는다. 사용자 글과
+   * 예전 답은 null 이다.
+   */
+  finalText: string | null;
+  /** 답이 남긴 넘김 표시. 화면이 답 끝에 "→ @이름" 이나 "완료"로 보여준다. */
+  handoff: RoomMessageHandoff | null;
   createdAt: string;
 };
+
+/** 참가자 답의 마지막 줄이 가리킨 다음 차례. 표시가 없으면 메시지에 null 로 남는다. */
+export type RoomMessageHandoff =
+  | { kind: 'done' }
+  | { kind: 'pass' }
+  | { kind: 'mention'; participantId: string };
 
 /**
  * 룸이 지금 돌고 있는지. 메모리에만 있다 — 서버가 다시 뜨면 모두 `idle` 이다.

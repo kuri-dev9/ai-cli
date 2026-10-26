@@ -37,8 +37,11 @@ const roomDetail: RoomDetail = {
   ],
   formerParticipants: [],
   messages: [
-    { id: 1, roomId: 'room-1', speaker: 'user', text: '로그인 화면 설계해줘', status: 'complete', sessionId: null, attachments: [], createdAt: '2026-10-25T00:00:01.000Z' },
-    { id: 2, roomId: 'room-1', speaker: 'p-host', text: '설계안입니다', status: 'complete', sessionId: 'host-session', attachments: [], createdAt: '2026-10-25T00:00:02.000Z' },
+    { id: 1, roomId: 'room-1', speaker: 'user', text: '로그인 화면 설계해줘', status: 'complete', sessionId: null, attachments: [], finalText: null, handoff: null, createdAt: '2026-10-25T00:00:01.000Z' },
+    {
+      id: 2, roomId: 'room-1', speaker: 'p-host', text: '화면 구조를 살펴보는 중이에요\n\n설계안입니다\n@리뷰어', status: 'complete', sessionId: 'host-session',
+      attachments: [], finalText: '설계안입니다\n@리뷰어', handoff: { kind: 'mention', participantId: 'p-rev' }, createdAt: '2026-10-25T00:00:02.000Z',
+    },
   ],
   state: {
     status: 'idle', activeParticipantId: null, activeSessionId: null, turnCount: 1, maxAutoTurns: 6, pendingUserMessage: false,
@@ -209,5 +212,16 @@ describe('RoomInterface', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '지금 끼어들기' }));
     await waitFor(() => expect(roomCalls.some((call) => call.name === 'interrupt')).toBe(true));
+  });
+  it('shows a reply as a card with its conclusion up front, the work folded away and the handoff at its foot', async () => {
+    await renderRoom();
+
+    // The handoff line itself is read into the footer rather than repeated in the text.
+    expect(screen.queryByText('@리뷰어')).toBeNull();
+    expect(screen.getByText('에게 넘김')).toBeTruthy();
+
+    expect(screen.queryByText('화면 구조를 살펴보는 중이에요')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '작업 과정 보기' }));
+    expect(screen.getByText('화면 구조를 살펴보는 중이에요')).toBeTruthy();
   });
 });

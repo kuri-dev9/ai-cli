@@ -29,7 +29,7 @@ function participant(id: string, displayName: string, position: number, extra: P
 }
 
 function message(id: number, speaker: string, text: string): RoomMessage {
-  return { id, roomId: 'room', speaker, text, status: 'complete', sessionId: null, attachments: [], createdAt: '' };
+  return { id, roomId: 'room', speaker, text, status: 'complete', sessionId: null, attachments: [], finalText: null, handoff: null, createdAt: '' };
 }
 
 // 같은 Claude 라도 역할이 다르면 별개의 참가자다. 이름이 앞부분까지 겹친다.

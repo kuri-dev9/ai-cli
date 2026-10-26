@@ -115,6 +115,12 @@ test('the host answers first, hands off by mention, and the room stops on DONE',
     // 참가자별 모델이 턴마다 실린다.
     assert.equal(calls[1].options.model, 'sonnet');
     assert.equal(calls[0].options.model, undefined);
+
+    // 화면이 결론과 넘김 표시를 따로 그릴 수 있게 함께 남는다.
+    const [, hostReply, reviewerReply] = roomsService.getRoomDetail(ROOM_ID).messages;
+    assert.equal(hostReply.finalText, '설계안: 세션 토큰 사용\n@Claude2');
+    assert.deepEqual(hostReply.handoff, { kind: 'mention', participantId: 'p-rev' });
+    assert.deepEqual(reviewerReply.handoff, { kind: 'done' });
   });
 });
 

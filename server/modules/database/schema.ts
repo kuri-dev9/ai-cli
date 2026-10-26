@@ -336,6 +336,10 @@ CREATE TABLE IF NOT EXISTS room_messages (
     session_id TEXT,
     -- 사용자가 함께 올린 첨부 파일 설명(JSON 배열). 없으면 NULL.
     attachments TEXT,
+    -- 참가자 답의 마지막 말(결론). text 는 작업 중에 남긴 말까지 다 이은 것이다.
+    final_text TEXT,
+    -- 답이 남긴 넘김 표시: done | pass | mention:<participant_id>. 없으면 NULL.
+    handoff TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
 );

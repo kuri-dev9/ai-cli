@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, KeyboardEvent, MouseEvent, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, Settings2, Square, UserPlus } from 'lucide-react';
+import { ArrowDown, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Loader2, Settings2, Square, UserPlus } from 'lucide-react';
 
 import {
   ChatComposer,
@@ -28,13 +28,15 @@ import type {
   RoomPermissionMode,
   SessionNavigationOptions,
 } from '@/shared/types';
-import { Button, LLMProviderLogo } from '@/shared/ui';
+import { Button } from '@/shared/ui';
 import { cn, isImageAttachment } from '@/shared/utils';
 import { useHostHistory } from '@/modules/rooms/hooks/useHostHistory';
 import { useRoom } from '@/modules/rooms/hooks/useRoom';
 import { useSessionTokenUsage } from '@/modules/rooms/hooks/useSessionTokenUsage';
 import InviteParticipantModal from '@/modules/rooms/InviteParticipantModal';
+import { ParticipantBadge, participantColor } from '@/modules/rooms/ParticipantBadge';
 import ParticipantSettingsPanel from '@/modules/rooms/ParticipantSettingsPanel';
+import RoomTurnCard from '@/modules/rooms/RoomTurnCard';
 import {
   applyMention,
   filterMentionCandidates,
@@ -57,23 +59,40 @@ type RoomInterfaceProps = {
   sendByCtrlEnter?: boolean;
 };
 
-// Name-badge colours by participant position (host first).
-const PARTICIPANT_COLORS = [
-  { dot: 'bg-sky-500', text: 'text-sky-700 dark:text-sky-300', ring: 'border-sky-500/40 bg-sky-500/10' },
-  { dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-300', ring: 'border-amber-500/40 bg-amber-500/10' },
-  { dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-300', ring: 'border-emerald-500/40 bg-emerald-500/10' },
-  { dot: 'bg-violet-500', text: 'text-violet-700 dark:text-violet-300', ring: 'border-violet-500/40 bg-violet-500/10' },
-];
-
 const MAX_AUTO_TURN_CHOICES = [3, 5, 10, 20];
-
-const colorFor = (participant: RoomParticipant | undefined) =>
-  PARTICIPANT_COLORS[(participant?.position ?? 0) % PARTICIPANT_COLORS.length];
 
 // MessageComponent draws a "Claude"/"Codex" header unless the previous row is
 // of the same type. Room rows carry their own name badge, so they are always
 // rendered as if grouped under this anchor.
 const GROUPED_ASSISTANT_ANCHOR: ChatMessage = { type: 'assistant', timestamp: 0 };
+
+/** Drops the handoff marker the engine already read from a reply's last line; the card shows it as a footer instead. */
+function stripHandoffMarker(text: string): string {
+  const lines = text.trimEnd().split('\n');
+  const last = (lines.at(-1) ?? '').replace(/\s*\[(DONE|PASS)\]\s*$/i, '');
+  if (/^\s*@[^\s@]+\s*$/u.test(last) || !last.trim()) {
+    lines.pop();
+  } else {
+    lines[lines.length - 1] = last;
+  }
+  return lines.join('\n').trimEnd();
+}
+
+/**
+ * Splits a reply into what was said while working and the conclusion. The
+ * server stores both joined in `text` and the last message as `finalText`.
+ */
+function splitReply(message: RoomMessage): { process: string; conclusion: string } {
+  const conclusion = message.finalText?.trim();
+  const full = message.text.trim();
+  if (!conclusion || !full.endsWith(conclusion) || conclusion === full) {
+    return { process: '', conclusion: message.handoff ? stripHandoffMarker(full) : full };
+  }
+  return {
+    process: full.slice(0, full.length - conclusion.length).trim(),
+    conclusion: message.handoff ? stripHandoffMarker(conclusion) : conclusion,
+  };
+}
 
 // The composer's own permission menu is not shown in a room (each participant
 // has its own preset), so these stand in for the chat-session permission hooks.
@@ -81,35 +100,6 @@ const noop = () => {};
 const keepPermissionMode = (_provider: unknown, mode: PermissionMode | string) => mode as PermissionMode;
 // Room permission prompts come from useRoom, not from the composer's state.
 const ignorePermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>> = noop;
-
-function ParticipantBadge({
-  participant,
-  hostLabel,
-  leftLabel,
-}: {
-  participant: RoomParticipant | undefined;
-  hostLabel: string;
-  /** Set for a member who has left, to mark their earlier entries. */
-  leftLabel?: string;
-}) {
-  const color = colorFor(participant);
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <span className={cn('h-2 w-2 flex-shrink-0 rounded-full', color.dot)} aria-hidden />
-      <LLMProviderLogo provider={participant?.provider ?? 'claude'} className="h-3.5 w-3.5 flex-shrink-0" />
-      <span className={cn('truncate text-sm font-semibold', color.text)}>{participant?.displayName ?? '?'}</span>
-      {participant?.roleName && (
-        <span className="truncate text-xs text-muted-foreground">{participant.roleName}</span>
-      )}
-      {participant?.isHost && (
-        <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{hostLabel}</span>
-      )}
-      {leftLabel && (
-        <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{leftLabel}</span>
-      )}
-    </span>
-  );
-}
 
 /**
  * Used by the project-workspace module in place of ChatInterface when the
@@ -166,10 +156,14 @@ export function RoomInterface({
   const [actionError, setActionError] = useState<string | null>(null);
   // Whether the add-participant modal is open.
   const [inviteOpen, setInviteOpen] = useState(false);
+  // Replies whose folded "work in progress" part the user opened.
+  const [openProcessIds, setOpenProcessIds] = useState<Set<number>>(() => new Set());
   // The participant whose settings strip is open under the chips; one at a time.
   const [settingsParticipantId, setSettingsParticipantId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // The live turn's card, scrolled into view from the "working" bar over the composer.
+  const liveCardRef = useRef<HTMLDivElement | null>(null);
   // Follow new content only while the user is already at the bottom.
   const followBottomRef = useRef(true);
 
@@ -403,41 +397,88 @@ export function RoomInterface({
     }
 
     const participant = participantsById.get(message.speaker);
+    const { process, conclusion } = splitReply(message);
+    const processOpen = openProcessIds.has(message.id);
+    const toggleProcess = () => setOpenProcessIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(message.id)) next.delete(message.id); else next.add(message.id);
+      return next;
+    });
+    const renderText = (content: string) => (
+      <MessageComponent
+        message={{ type: 'assistant', content, timestamp: message.createdAt }}
+        prevMessage={GROUPED_ASSISTANT_ANCHOR}
+        createDiff={createDiff}
+        provider={participant?.provider ?? 'claude'}
+        selectedProject={selectedProject}
+        onFileOpen={onFileOpen}
+        showRawParameters={showRawParameters}
+        showThinking={showThinking}
+      />
+    );
+    const handoffTarget = message.handoff?.kind === 'mention' ? participantsById.get(message.handoff.participantId) : undefined;
+
     return (
-      <div key={message.id} className="space-y-1">
-        <div className="flex items-center gap-2 px-3 sm:px-0">
-          <ParticipantBadge
-            participant={participant}
-            hostLabel={t('rooms.host')}
-            leftLabel={formerParticipantIds.has(message.speaker) ? t('rooms.formerParticipant') : undefined}
-          />
-          {message.status !== 'complete' && (
-            <span className="rounded bg-red-500/10 px-1.5 text-[10px] text-red-600 dark:text-red-400">
-              {message.status === 'aborted' ? t('rooms.aborted') : t('rooms.error')}
+      <RoomTurnCard
+        key={message.id}
+        participant={participant}
+        header={(
+          <>
+            <ParticipantBadge
+              participant={participant}
+              hostLabel={t('rooms.host')}
+              leftLabel={formerParticipantIds.has(message.speaker) ? t('rooms.formerParticipant') : undefined}
+            />
+            {message.status !== 'complete' && (
+              <span className="rounded bg-red-500/10 px-1.5 text-[10px] text-red-600 dark:text-red-400">
+                {message.status === 'aborted' ? t('rooms.aborted') : t('rooms.error')}
+              </span>
+            )}
+            {message.sessionId && onNavigateToSession && (
+              <button
+                type="button"
+                onClick={() => openParticipantSession(message.sessionId as string)}
+                className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <ExternalLink className="h-3 w-3" />
+                {t('rooms.openSession')}
+              </button>
+            )}
+          </>
+        )}
+        footer={message.handoff ? (
+          message.handoff.kind === 'mention' ? (
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <ArrowRight className="h-3.5 w-3.5" />
+              <ParticipantBadge participant={handoffTarget} hostLabel={t('rooms.host')} />
+              {t('rooms.handoffTo')}
             </span>
-          )}
-          {message.sessionId && onNavigateToSession && (
+          ) : message.handoff.kind === 'done' ? (
+            <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {t('rooms.handoffDone')}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">{t('rooms.handoffPass')}</span>
+          )
+        ) : undefined}
+      >
+        {process && (
+          <div className="px-2">
             <button
               type="button"
-              onClick={() => openParticipantSession(message.sessionId as string)}
-              className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+              onClick={toggleProcess}
+              aria-expanded={processOpen}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
             >
-              <ExternalLink className="h-3 w-3" />
-              {t('rooms.openSession')}
+              {processOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {processOpen ? t('rooms.hideWorkProcess') : t('rooms.showWorkProcess')}
             </button>
-          )}
-        </div>
-        <MessageComponent
-          message={{ type: 'assistant', content: message.text, timestamp: message.createdAt }}
-          prevMessage={GROUPED_ASSISTANT_ANCHOR}
-          createDiff={createDiff}
-          provider={participant?.provider ?? 'claude'}
-          selectedProject={selectedProject}
-          onFileOpen={onFileOpen}
-          showRawParameters={showRawParameters}
-          showThinking={showThinking}
-        />
-      </div>
+            {processOpen && <div className="mt-1 opacity-80">{renderText(process)}</div>}
+          </div>
+        )}
+        {conclusion && renderText(conclusion)}
+      </RoomTurnCard>
     );
   };
 
@@ -448,6 +489,21 @@ export function RoomInterface({
 
   const composerNotices = (
     <>
+      {isRunning && activeParticipant && (
+        <div className="mx-auto mb-2 flex max-w-[54.25rem] items-center gap-2 rounded-xl border border-border/50 bg-card/80 px-3 py-1.5 text-xs">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+          <ParticipantBadge participant={activeParticipant} hostLabel={t('rooms.host')} />
+          <span className="text-muted-foreground">{t('rooms.answering')}</span>
+          <button
+            type="button"
+            onClick={() => liveCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
+            className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+            {t('rooms.jumpToLive')}
+          </button>
+        </div>
+      )}
       {actionError && (
         <p role="alert" className="mx-auto mb-2 max-w-[54.25rem] px-1 text-xs text-red-600 dark:text-red-400">{actionError}</p>
       )}
@@ -510,7 +566,7 @@ export function RoomInterface({
               key={participant.participantId}
               className={cn(
                 'flex max-w-[16rem] items-center rounded-full border',
-                colorFor(participant).ring,
+                participantColor(participant).ring,
                 roomState?.activeParticipantId === participant.participantId && 'ring-2 ring-primary/40',
               )}
             >
@@ -656,12 +712,23 @@ export function RoomInterface({
           )}
           {detail.messages.map(renderRoomMessage)}
 
-          {liveMessages.length > 0 && (
-            <div className="space-y-2" aria-live="polite">
-              <div className="flex items-center gap-2 px-3 sm:px-0">
-                <ParticipantBadge participant={activeParticipant} hostLabel={t('rooms.host')} />
-                {isRunning && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-              </div>
+          {(liveMessages.length > 0 || (isRunning && activeParticipant)) && (
+            <div ref={liveCardRef} aria-live="polite">
+            <RoomTurnCard
+              participant={activeParticipant}
+              live={isRunning}
+              header={(
+                <>
+                  <ParticipantBadge participant={activeParticipant} hostLabel={t('rooms.host')} />
+                  {isRunning && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      {t('rooms.answering')}
+                    </span>
+                  )}
+                </>
+              )}
+            >
               {liveMessages.map((message, index) => (
                 <MessageComponent
                   key={`${String(message.toolId ?? '')}-${index}`}
@@ -675,6 +742,7 @@ export function RoomInterface({
                   showThinking={showThinking}
                 />
               ))}
+            </RoomTurnCard>
             </div>
           )}
         </div>
