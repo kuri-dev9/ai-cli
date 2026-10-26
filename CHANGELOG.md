@@ -3,6 +3,17 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.39.0](https://github.com/kuri-dev9/ai-cli/releases/tag/v1.39.0) (2026-10-26)
+
+### New Features
+
+* **rooms:** 룸 입력창을 일반 채팅과 같게 한다 — 높이 자동 조절, 파일 첨부, 토큰, 명령, 음성 입력. 슬래시 명령은 호스트 세션에서 실행된다
+* **rooms:** 참가자 칩의 설정 버튼에서 참가자별 모델·추론 강도, 권한, 토큰을 보고 바꾸고, 참가자를 내보낼 수 있다
+* **rooms:** 답하는 중에 보낸 글은 대기 카드로 보이고, [지금 끼어들기]로 바로 처리할 수 있다
+* **rooms:** 답마다 참가자 색 카드와 고정 이름표로 누가 말하는지 보이고, 작업 과정은 접히며 넘김·완료가 카드 아래에 표시된다
+* **rooms:** 분담 — 리더가 일을 나눠 맡기면 참가자들이 동시에 일하고(수정은 한 명만) 리더가 결과를 정리한다
+* **rooms:** 의견 — 한 참가자의 답마다 나머지가 짧게 의견을 낸다. 분담·의견은 헤더에서 켜고 끈다
+
 ## [1.38.0](https://github.com/kuri-dev9/ai-cli/releases/tag/v1.38.0) (2026-10-25)
 
 ### New Features
