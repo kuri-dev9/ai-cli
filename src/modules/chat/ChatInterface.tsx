@@ -8,6 +8,7 @@ import PermissionContext from '@/modules/chat/context/PermissionContext';
 import { api } from '@/shared/api';
 import type {
   ChatMessage,
+  ConversationCutPoint,
   LLMProvider,
   Project,
   ProjectSession,
@@ -238,7 +239,9 @@ function ChatInterface({
     closeCommandModal,
     showCostModal,
     editingAnchorId,
+    editingMode,
     beginEditMessage,
+    beginCutFromAnchor,
     cancelEditMessage,
   } = useChatComposerState({
     selectedProject,
@@ -366,6 +369,42 @@ function ChatInterface({
       console.error('Error forking session:', error);
     }
   }, [onNavigateToSession, selectedSession?.id]);
+
+  /**
+   * The already-sent user turns the token-usage modal offers as cut points.
+   *
+   * Only turns carrying a transcript anchor qualify — without one the provider
+   * has nothing to resume through, so offering them would be a dead button.
+   */
+  const conversationCutPoints = useMemo<ConversationCutPoint[]>(() => {
+    if (!supportsMessageEditing) return [];
+
+    return chatMessages.flatMap((message) => {
+      if (message.type !== 'user' || !message.transcriptAnchorId) return [];
+      const preview = (message.content || '').replace(/\s+/g, ' ').trim();
+      return [{
+        anchorId: message.transcriptAnchorId,
+        preview: preview || t('misc.cutPointNoText', { defaultValue: '(no text)' }),
+        timestamp: message.timestamp as ConversationCutPoint['timestamp'],
+      }];
+    });
+  }, [chatMessages, supportsMessageEditing, t]);
+
+  /** Sends `/compact` as an ordinary turn — every provider CLI owns the command itself. */
+  const handleCompactConversation = useCallback(() => {
+    closeCommandModal();
+    void handleSubmit(
+      // 버튼에서 보내는 것이라 진짜 폼 이벤트가 없다. handleSubmit 이 쓰는
+      // 것은 preventDefault 하나뿐이다.
+      { preventDefault: () => undefined } as unknown as React.FormEvent<HTMLFormElement>,
+      { content: '/compact', attachments: [] },
+    );
+  }, [closeCommandModal, handleSubmit]);
+
+  const handleCutConversationFrom = useCallback((anchorId: string) => {
+    closeCommandModal();
+    beginCutFromAnchor(anchorId);
+  }, [beginCutFromAnchor, closeCommandModal]);
 
   const { scheduledMessages, schedule: scheduleMessage, cancel: cancelScheduledMessage } =
     useScheduledMessages(currentSessionId || selectedSession?.id || null);
@@ -541,6 +580,7 @@ function ChatInterface({
           tokenBudget={tokenBudget}
           onShowTokenUsage={showCostModal}
           isEditingSentMessage={Boolean(editingAnchorId)}
+          editingMode={editingMode}
           onCancelEditMessage={cancelEditMessage}
           scheduledMessages={scheduledMessages}
           onScheduleMessage={handleScheduleMessage}
@@ -603,6 +643,12 @@ function ChatInterface({
         activeProviderModel={currentProviderModel}
         currentSessionId={currentSessionId || selectedSession?.id || null}
         onSelectProviderModel={selectProviderModel}
+        onCompactConversation={handleCompactConversation}
+        conversationCutPoints={conversationCutPoints}
+        // 자르기는 대화 모양을 바꾸는 일이라, 편집을 할 수 있는 프로바이더에서만 연다.
+        onCutConversationFrom={supportsMessageEditing ? handleCutConversationFrom : undefined}
+        // 스트리밍이 쓰고 있는 트랜스크립트는 접지도 자르지도 못한다.
+        reduceActionsBusy={isProcessing}
       />
     </PermissionContext.Provider>
   );

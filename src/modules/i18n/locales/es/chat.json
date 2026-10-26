@@ -142,6 +142,8 @@
     "editing": {
       "title": "Reemplazando un mensaje anterior",
       "filesNotReverted": "los archivos ya modificados no se revierten",
+      "cutTitle": "Recortando la conversación desde aquí",
+      "cutAppliesOnSend": "ese turno y todo lo posterior se descartan al enviar el siguiente mensaje",
       "cancel": "Cancelar"
     }
   },

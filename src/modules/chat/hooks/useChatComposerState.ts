@@ -252,6 +252,14 @@ export function useChatComposerState({
    * transcript refreshes underneath the composer.
    */
   const [editingAnchorId, setEditingAnchorId] = useState<string | null>(null);
+  /**
+   * Why the composer holds an anchor: the user is rewriting that turn
+   * ('edit'), or dropping it and everything after it ('cut').
+   *
+   * Both ride the same send — the provider resumes through the turn before the
+   * anchor either way — so only the wording the composer shows differs.
+   */
+  const [editingMode, setEditingMode] = useState<'edit' | 'cut'>('edit');
 
   const [inputState, setInputState] = useState<{ scope: string | null; value: string }>(() => {
     if (typeof window === 'undefined') {
@@ -978,6 +986,7 @@ export function useChatComposerState({
         },
       });
       setEditingAnchorId(null);
+      setEditingMode('edit');
 
       // Recorded under the (possibly just-allocated) session id, so the first
       // message of a new chat lands in the history of the session the user is
@@ -1333,14 +1342,36 @@ export function useChatComposerState({
   /** Loads an already-sent message back into the composer to be replaced. */
   const beginEditMessage = useCallback((message: ChatMessage) => {
     if (!message.transcriptAnchorId) return;
+    setEditingMode('edit');
     setEditingAnchorId(message.transcriptAnchorId);
     setInput(message.content || '');
     inputValueRef.current = message.content || '';
     textareaRef.current?.focus();
   }, [setInput]);
 
+  /**
+   * Arms a cut at an already-sent turn: it and everything after it leave the
+   * conversation when the next message is sent.
+   *
+   * The composer is left empty on purpose. A cut is not a rewrite — the user
+   * picked a point to go back to, and what they say from there is new.
+   *
+   * It cannot take effect any sooner than that send: providers rejoin a
+   * conversation partway only as part of a run, so there is nothing to apply a
+   * cut to until the next turn starts.
+   */
+  const beginCutFromAnchor = useCallback((anchorId: string) => {
+    if (!anchorId) return;
+    setEditingMode('cut');
+    setEditingAnchorId(anchorId);
+    setInput('');
+    inputValueRef.current = '';
+    textareaRef.current?.focus();
+  }, [setInput]);
+
   const cancelEditMessage = useCallback(() => {
     setEditingAnchorId(null);
+    setEditingMode('edit');
     setInput('');
     inputValueRef.current = '';
   }, [setInput]);
@@ -1349,7 +1380,9 @@ export function useChatComposerState({
     input,
     setInput,
     editingAnchorId,
+    editingMode,
     beginEditMessage,
+    beginCutFromAnchor,
     cancelEditMessage,
     textareaRef,
     inputHighlightRef,

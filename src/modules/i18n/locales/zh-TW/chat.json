@@ -257,6 +257,8 @@
     "editing": {
       "title": "正在取代先前的訊息",
       "filesNotReverted": "已修改的檔案不會還原",
+      "cutTitle": "正在從此處裁剪對話",
+      "cutAppliesOnSend": "傳送下一則訊息時，該輪及其之後的內容會被移除",
       "cancel": "取消"
     }
   },

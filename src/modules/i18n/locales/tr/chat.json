@@ -221,6 +221,8 @@
     "editing": {
       "title": "Önceki bir mesaj değiştiriliyor",
       "filesNotReverted": "zaten değiştirilen dosyalar geri alınmaz",
+      "cutTitle": "Konuşma buradan kesiliyor",
+      "cutAppliesOnSend": "bu tur ve sonrasındaki her şey bir sonraki mesajı gönderdiğinizde çıkar",
       "cancel": "İptal"
     }
   },

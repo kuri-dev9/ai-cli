@@ -221,6 +221,8 @@
     "editing": {
       "title": "Sostituzione di un messaggio precedente",
       "filesNotReverted": "i file già modificati non vengono ripristinati",
+      "cutTitle": "Conversazione tagliata da qui",
+      "cutAppliesOnSend": "quel turno e tutto ciò che segue vengono rimossi all'invio del prossimo messaggio",
       "cancel": "Annulla"
     }
   },

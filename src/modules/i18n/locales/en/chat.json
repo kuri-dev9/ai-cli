@@ -152,6 +152,8 @@
     "editing": {
       "title": "Replacing an earlier message",
       "filesNotReverted": "files the agent already changed are not reverted",
+      "cutTitle": "Cutting the conversation back",
+      "cutAppliesOnSend": "the turn and everything after it drop out when you send your next message",
       "cancel": "Cancel"
     }
   },
@@ -373,7 +375,17 @@
     "lastReplyTokens": "Last reply",
     "contextUsedPercent": "Context filled",
     "contextUsageDisclaimer": "This is how full the conversation is — not your plan usage. For that, including reset times, check /usage in the CLI.",
-    "contextResetHint": "It does not reset on a timer — compact the conversation or start a new one to clear it."
+    "contextResetHint": "It does not reset on a timer — compact the conversation or start a new one to clear it.",
+    "reduceContextTitle": "Free up context",
+    "compactConversation": "Compact conversation",
+    "compactConversationHint": "Summarizes the conversation so far. Nothing is lost from the transcript — only the live context shrinks.",
+    "cutConversationHint": "Drops a turn and everything after it from the conversation. It takes effect with your next message.",
+    "showCutPoints": "Pick a turn",
+    "hideCutPoints": "Hide turns",
+    "cutNoTurns": "No turn in this conversation can be cut yet.",
+    "cutDropsTurns": "−{{turns}} turns",
+    "cutPointNoText": "(no text)",
+    "reduceWhileRunning": "The conversation is still running — try again once this turn finishes."
   },
   "rooms": {
     "inviteButton": "Participant",

@@ -223,6 +223,8 @@
     "editing": {
       "title": "Remplacement d’un message précédent",
       "filesNotReverted": "les fichiers déjà modifiés ne sont pas restaurés",
+      "cutTitle": "Conversation coupée à partir d'ici",
+      "cutAppliesOnSend": "ce tour et tout ce qui suit disparaissent à l'envoi du prochain message",
       "cancel": "Annuler"
     }
   },

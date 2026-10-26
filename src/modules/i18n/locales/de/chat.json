@@ -221,6 +221,8 @@
     "editing": {
       "title": "Ersetzt eine frühere Nachricht",
       "filesNotReverted": "bereits geänderte Dateien werden nicht zurückgesetzt",
+      "cutTitle": "Unterhaltung wird hier zurückgeschnitten",
+      "cutAppliesOnSend": "diese Runde und alles danach fallen weg, sobald Sie die nächste Nachricht senden",
       "cancel": "Abbrechen"
     }
   },

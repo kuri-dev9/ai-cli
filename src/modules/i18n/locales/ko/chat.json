@@ -152,6 +152,8 @@
     "editing": {
       "title": "이전 메시지를 교체하는 중",
       "filesNotReverted": "이미 변경된 파일은 되돌리지 않습니다",
+      "cutTitle": "여기서부터 대화를 자르는 중",
+      "cutAppliesOnSend": "다음 메시지를 보내면 이 턴부터 뒤가 빠집니다",
       "cancel": "취소"
     }
   },
@@ -372,7 +374,17 @@
     "lastReplyTokens": "마지막 응답",
     "contextUsedPercent": "컨텍스트 사용률",
     "contextUsageDisclaimer": "지금 대화가 컨텍스트 창을 얼마나 채웠는지입니다. 요금제 사용량이 아니며, 리셋 시각을 포함한 그 정보는 CLI 의 /usage 에서 확인하세요.",
-    "contextResetHint": "시간이 지나도 초기화되지 않습니다. /compact 로 압축하거나 새 대화를 시작하면 비워집니다."
+    "contextResetHint": "시간이 지나도 초기화되지 않습니다. /compact 로 압축하거나 새 대화를 시작하면 비워집니다.",
+    "reduceContextTitle": "컨텍스트 줄이기",
+    "compactConversation": "대화 압축",
+    "compactConversationHint": "지금까지 오간 대화를 요약해 컨텍스트를 줄입니다. 기록에서 사라지는 말은 없습니다.",
+    "cutConversationHint": "고른 턴과 그 뒤를 대화에서 뺍니다. 다음 메시지를 보낼 때 적용됩니다.",
+    "showCutPoints": "턴 고르기",
+    "hideCutPoints": "접기",
+    "cutNoTurns": "아직 자를 수 있는 턴이 없습니다.",
+    "cutDropsTurns": "−{{turns}}턴",
+    "cutPointNoText": "(내용 없음)",
+    "reduceWhileRunning": "지금은 대화가 돌고 있어 줄일 수 없습니다. 이번 턴이 끝난 뒤에 다시 시도하세요."
   },
   "rooms": {
     "inviteButton": "참가자",

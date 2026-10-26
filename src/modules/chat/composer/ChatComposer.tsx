@@ -10,7 +10,7 @@ import type {
   RefObject,
   TouchEvent,
 } from 'react';
-import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon, PencilIcon } from 'lucide-react';
+import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon, PencilIcon, ScissorsIcon } from 'lucide-react';
 
 import { useVoiceInput } from '@/modules/chat/hooks/useVoiceInput';
 import { useVoiceAvailable } from '@/modules/chat/hooks/useVoiceAvailable';
@@ -77,6 +77,8 @@ type ChatComposerProps = {
   queuedDrafts: QueuedDraft[];
   /** Set while the composer is replacing an already-sent message. */
   isEditingSentMessage: boolean;
+  /** Whether that replacement is a rewrite of the turn or a cut back to it. */
+  editingMode?: 'edit' | 'cut';
   onCancelEditMessage: () => void;
   /** Messages waiting to be sent to this session later. */
   scheduledMessages?: ScheduledMessage[];
@@ -156,6 +158,7 @@ export default function ChatComposer({
   isDragActive,
   queuedDrafts,
   isEditingSentMessage,
+  editingMode = 'edit',
   onCancelEditMessage,
   scheduledMessages,
   onScheduleMessage,
@@ -309,11 +312,19 @@ export default function ChatComposer({
 
       {isEditingSentMessage && (
         <div className="mx-auto mb-2 flex max-w-[54.25rem] items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
-          <PencilIcon className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          {editingMode === 'cut' ? (
+            <ScissorsIcon className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          ) : (
+            <PencilIcon className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          )}
           <span className="min-w-0 flex-1">
-            {t('composer.editing.title')}
+            {editingMode === 'cut' ? t('composer.editing.cutTitle') : t('composer.editing.title')}
             {' — '}
-            <span className="text-muted-foreground">{t('composer.editing.filesNotReverted')}</span>
+            <span className="text-muted-foreground">
+              {editingMode === 'cut'
+                ? t('composer.editing.cutAppliesOnSend')
+                : t('composer.editing.filesNotReverted')}
+            </span>
           </span>
           <button
             type="button"

@@ -631,6 +631,18 @@ export type SlashCommand = {
 /** Discriminator naming which slash-command result the chat command modal is showing: 'help', 'models', 'cost' or 'status'. */
 type CommandModalKind = 'help' | 'models' | 'cost' | 'status';
 
+/**
+ * One already-sent user turn offered as a cut point in the token-usage modal.
+ *
+ * `anchorId` is the transcript anchor the provider resumes through, so only
+ * turns the provider can actually address belong in this list.
+ */
+export type ConversationCutPoint = {
+  anchorId: string;
+  preview: string;
+  timestamp?: number | string | Date;
+};
+
 // ---------------------------
 
 //----------------- CHAT VOICE ------------

@@ -208,6 +208,8 @@
     "editing": {
       "title": "以前のメッセージを置き換えています",
       "filesNotReverted": "変更済みのファイルは元に戻りません",
+      "cutTitle": "ここから会話を切り戻し中",
+      "cutAppliesOnSend": "次のメッセージを送ると、このターン以降が外れます",
       "cancel": "キャンセル"
     }
   },

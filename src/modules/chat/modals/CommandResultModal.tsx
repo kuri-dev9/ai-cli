@@ -11,8 +11,10 @@ import {
   PieChart,
   Package,
   Plus,
+  Scissors,
   Search,
   Server,
+  Shrink,
   Sparkles,
   TerminalSquare,
   Timer,
@@ -22,6 +24,7 @@ import {
 
 import { Badge, Button, Dialog, DialogContent, DialogTitle, Input } from '@/shared/ui';
 import type {
+  ConversationCutPoint,
   LLMProvider,
   ProviderModelActions,
   ProviderModelOption,
@@ -45,6 +48,14 @@ type CommandResultModalProps = {
     scope: 'default' | 'session';
     model: string;
   }>;
+  /** Sends `/compact` to the open conversation; omitted where the host cannot. */
+  onCompactConversation?: () => void;
+  /** Already-sent user turns the conversation can be cut back to, newest last. */
+  conversationCutPoints?: ConversationCutPoint[];
+  /** Arms the cut: the turn and everything after it leave the conversation on the next send. */
+  onCutConversationFrom?: (anchorId: string) => void;
+  /** A turn is in flight, so neither compacting nor cutting can start yet. */
+  reduceActionsBusy?: boolean;
 };
 
 type CommandEntry = {
@@ -420,8 +431,21 @@ function ModelsContent({
   );
 }
 
-function CostContent({ data }: { data: CostCommandData }) {
+function CostContent({
+  data,
+  onCompactConversation,
+  conversationCutPoints,
+  onCutConversationFrom,
+  reduceActionsBusy = false,
+}: {
+  data: CostCommandData;
+  onCompactConversation?: CommandResultModalProps['onCompactConversation'];
+  conversationCutPoints?: CommandResultModalProps['conversationCutPoints'];
+  onCutConversationFrom?: CommandResultModalProps['onCutConversationFrom'];
+  reduceActionsBusy?: boolean;
+}) {
   const { t } = useTranslation();
+  const [showCutPoints, setShowCutPoints] = useState(false);
   const used = Number(data.tokenUsage?.used ?? 0);
   const total = Number(data.tokenUsage?.total ?? 0);
   const model = data.model || 'Unknown';
@@ -501,6 +525,21 @@ function CostContent({ data }: { data: CostCommandData }) {
         ]
       : []),
   ];
+
+  // 자르는 지점은 최근 것부터 고르게 된다 — "어디까지 되돌릴까"는 거의 늘
+  // 대화 끝에서부터 세어 나가는 질문이다. 원래 순서(오래된 것이 앞)는 몇 번째
+  // 턴인지와 뒤에 몇 개가 딸려 나가는지를 세는 데 그대로 쓴다.
+  const cutPoints = conversationCutPoints ?? [];
+  const cutRows = cutPoints
+    .map((point, index) => ({
+      ...point,
+      turnNumber: index + 1,
+      // 자기 자신까지 포함해서 대화에서 빠지는 턴 수.
+      dropsTurns: cutPoints.length - index,
+    }))
+    .reverse();
+  const canCut = Boolean(onCutConversationFrom);
+  const showReduceSection = Boolean(onCompactConversation) || canCut;
 
   return (
     <div className="space-y-4">
@@ -588,6 +627,112 @@ function CostContent({ data }: { data: CostCommandData }) {
         </div>
       )}
 
+      {/*
+        숫자만 보여 주고 끝내면 "그래서 어떻게 줄이냐"가 남는다. 컨텍스트를
+        줄이는 두 가지 방법이 여기 있다: 지난 대화를 요약해 접는 압축과,
+        특정 지점부터 뒤를 아예 대화에서 빼는 잘라내기.
+      */}
+      {showReduceSection && (
+        <div className="space-y-3 rounded-2xl border border-border/70 bg-background/75 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            {t('chat:misc.reduceContextTitle', { defaultValue: 'Free up context' })}
+          </p>
+
+          {/*
+            돌고 있는 대화는 줄일 수 없다 — 쓰이는 중인 트랜스크립트를 자르거나
+            접을 수는 없다. 버튼을 숨기는 대신 왜 눌리지 않는지 적어 둔다.
+          */}
+          {reduceActionsBusy && (
+            <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+              {t('chat:misc.reduceWhileRunning', {
+                defaultValue: 'The conversation is still running — try again once this turn finishes.',
+              })}
+            </p>
+          )}
+
+          {onCompactConversation && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="min-w-0 text-[12px] leading-5 text-muted-foreground">
+                {t('chat:misc.compactConversationHint', {
+                  defaultValue:
+                    'Summarizes the conversation so far. Nothing is lost from the transcript — only the live context shrinks.',
+                })}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                disabled={reduceActionsBusy}
+                onClick={onCompactConversation}
+                className="shrink-0 gap-2 rounded-xl"
+              >
+                <Shrink className="h-3.5 w-3.5" />
+                {t('chat:misc.compactConversation', { defaultValue: 'Compact conversation' })}
+              </Button>
+            </div>
+          )}
+
+          {canCut && (
+            <div className="space-y-2 border-t border-border/60 pt-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="min-w-0 text-[12px] leading-5 text-muted-foreground">
+                  {t('chat:misc.cutConversationHint', {
+                    defaultValue:
+                      'Drops a turn and everything after it from the conversation. It takes effect with your next message.',
+                  })}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={reduceActionsBusy || cutRows.length === 0}
+                  onClick={() => setShowCutPoints((previous) => !previous)}
+                  className="shrink-0 gap-2 rounded-xl"
+                >
+                  <Scissors className="h-3.5 w-3.5" />
+                  {showCutPoints
+                    ? t('chat:misc.hideCutPoints', { defaultValue: 'Hide turns' })
+                    : t('chat:misc.showCutPoints', { defaultValue: 'Pick a turn' })}
+                </Button>
+              </div>
+
+              {cutRows.length === 0 && (
+                <p className="text-[11px] leading-4 text-muted-foreground/70">
+                  {t('chat:misc.cutNoTurns', {
+                    defaultValue: 'No turn in this conversation can be cut yet.',
+                  })}
+                </p>
+              )}
+
+              {showCutPoints && cutRows.length > 0 && (
+                <div className="scrollbar-thin max-h-56 space-y-1.5 overflow-y-auto pr-1">
+                  {cutRows.map((row) => (
+                    <button
+                      key={row.anchorId}
+                      type="button"
+                      onClick={() => onCutConversationFrom?.(row.anchorId)}
+                      className="flex w-full items-center gap-3 rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-left transition-colors hover:border-destructive/40 hover:bg-destructive/5"
+                    >
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                        #{row.turnNumber}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">
+                        {row.preview}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {t('chat:misc.cutDropsTurns', {
+                          defaultValue: '−{{turns}} turns',
+                          turns: row.dropsTurns,
+                        })}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
@@ -656,11 +801,16 @@ function CommandResultModal({
   activeProviderModel,
   currentSessionId,
   onSelectProviderModel,
+  onCompactConversation,
+  conversationCutPoints,
+  onCutConversationFrom,
+  reduceActionsBusy,
 }: CommandResultModalProps) {
   const { t } = useTranslation();
   const isOpen = Boolean(payload);
   const kind = payload?.kind;
   const isModelsModal = kind === 'models';
+  const isScrollingContent = kind === 'cost' || kind === 'status';
 
   const modalMeta = {
     help: {
@@ -735,7 +885,17 @@ function CommandResultModal({
           </Button>
         </div>
 
-        <div className="settings-content-enter min-h-0 flex-1 overflow-hidden px-4 py-4 sm:px-6 sm:py-5">
+        {/*
+          help 와 models 는 자기 안에 스크롤 영역을 들고 있어 바깥이 잘라 줘야
+          하지만, cost 와 status 는 그냥 위에서 아래로 쌓이는 문서다. 바깥까지
+          overflow-hidden 이면 창 높이를 넘는 아랫부분(Provider/Model 줄,
+          압축·잘라내기 영역)이 스크롤 없이 잘려 보이지 않는다.
+        */}
+        <div
+          className={`settings-content-enter min-h-0 flex-1 px-4 py-4 sm:px-6 sm:py-5 ${
+            isScrollingContent ? 'scrollbar-thin overflow-y-auto' : 'overflow-hidden'
+          }`}
+        >
           {payload?.kind === 'help' && <HelpContent data={payload.data as HelpCommandData} />}
           {payload?.kind === 'models' && (
             <ModelsContent
@@ -748,7 +908,15 @@ function CommandResultModal({
               onSelectProviderModel={onSelectProviderModel}
             />
           )}
-          {payload?.kind === 'cost' && <CostContent data={payload.data as CostCommandData} />}
+          {payload?.kind === 'cost' && (
+            <CostContent
+              data={payload.data as CostCommandData}
+              onCompactConversation={onCompactConversation}
+              conversationCutPoints={conversationCutPoints}
+              onCutConversationFrom={onCutConversationFrom}
+              reduceActionsBusy={reduceActionsBusy}
+            />
+          )}
           {payload?.kind === 'status' && <StatusContent data={payload.data as StatusCommandData} />}
         </div>
 
