@@ -101,7 +101,7 @@ test('the host answers first, hands off by mention, and the room stops on DONE',
       [REVIEWER]: ['토큰 만료 처리가 빠졌지만 나머지는 좋습니다.\n[DONE]'],
     }, calls));
 
-    roomsService.postUserMessage(ROOM_ID, '로그인 기능 설계해줘', 1);
+    roomsService.postUserMessage(ROOM_ID, { content: '로그인 기능 설계해줘' }, 1);
     await waitFor(() => speakers().length === 3 && isIdle(), 'two turns');
 
     assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev']);
@@ -126,7 +126,7 @@ test('later turns send only what the participant has not seen yet', async () => 
       [REVIEWER]: ['리뷰 의견 @Claude'],
     }, calls));
 
-    roomsService.postUserMessage(ROOM_ID, '시작', 1);
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
     await waitFor(() => speakers().length === 4 && isIdle(), 'three turns');
 
     const hostSecondPrompt = calls[2].command;
@@ -146,7 +146,7 @@ test('replies without a handoff keep alternating until the auto-turn cap', async
       [REVIEWER]: ['의견 2', '의견 4'],
     }, calls));
 
-    roomsService.postUserMessage(ROOM_ID, '토론해봐', 1);
+    roomsService.postUserMessage(ROOM_ID, { content: '토론해봐' }, 1);
     await waitFor(() => isIdle() && speakers().length === 4, 'cap');
 
     assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER, HOST]);
@@ -158,7 +158,7 @@ test('everyone else passing ends the round', async () => {
     const calls: Call[] = [];
     roomTurnEngine.initialize(createRuntime({ [HOST]: ['답했습니다'], [REVIEWER]: ['[PASS]'] }, calls));
 
-    roomsService.postUserMessage(ROOM_ID, '질문', 1);
+    roomsService.postUserMessage(ROOM_ID, { content: '질문' }, 1);
     await waitFor(() => isIdle() && speakers().length === 3, 'pass');
     assert.equal(calls.length, 2);
   });
@@ -175,10 +175,10 @@ test('a message sent mid-turn is picked up at the next turn and redirects the ro
       [REVIEWER]: ['테스트부터 보겠습니다 [DONE]'],
     }, calls));
 
-    roomsService.postUserMessage(ROOM_ID, '구현해줘', 1);
+    roomsService.postUserMessage(ROOM_ID, { content: '구현해줘' }, 1);
     await waitFor(() => calls.length === 1, 'host turn started');
 
-    const { state } = roomsService.postUserMessage(ROOM_ID, '@Claude2 테스트도 같이 봐줘', 1);
+    const { state } = roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 테스트도 같이 봐줘' }, 1);
     assert.equal(state.status, 'running');
     assert.equal(state.pendingUserMessage, true);
     release();
@@ -201,7 +201,7 @@ test('stop aborts the active participant and records the turn as aborted', async
       [HOST]: [async () => { await gate; return '늦은 답 @Claude2'; }],
     }, calls, aborts));
 
-    roomsService.postUserMessage(ROOM_ID, '오래 걸리는 일', 1);
+    roomsService.postUserMessage(ROOM_ID, { content: '오래 걸리는 일' }, 1);
     await waitFor(() => calls.length === 1, 'host turn started');
 
     const stopping = roomsService.stop(ROOM_ID);
@@ -243,5 +243,111 @@ test('the room is capped at three participants and names stay unique', async () 
       roomsService.addParticipant(ROOM_ID, { provider: 'claude', displayName: 'Four', roleName: '넷째' }),
       (error: Error & { code?: string }) => error.code === 'ROOM_FULL',
     );
+  });
+});
+
+test('each participant runs with its own permission, model and effort', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['답 @Claude2'], [REVIEWER]: ['[DONE]'] }, calls));
+
+    roomsService.updateParticipant(ROOM_ID, 'p-rev', { permissionMode: 'full' });
+    // 참가자 설정에서 바꾼 모델은 세션에 적힌다. 초대할 때의 값보다 이것이 이긴다.
+    sessionsDb.setSessionModel(REVIEWER, 'opus');
+    sessionsDb.setSessionEffort(REVIEWER, 'high');
+
+    const detail = roomsService.getRoomDetail(ROOM_ID);
+    assert.deepEqual(detail.participants.map((participant) => participant.permissionMode), ['ask', 'full']);
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'two turns');
+
+    assert.equal(calls[0].options.permissionMode, undefined);
+    assert.equal(calls[1].options.permissionMode, 'bypassPermissions');
+    assert.equal(calls[1].options.model, 'opus');
+    assert.equal(calls[1].options.effort, 'high');
+  });
+});
+
+test('attachments are kept on the user message and handed to each participant once', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['봤어요 @Claude2', '[DONE]'], [REVIEWER]: ['저도요 @Claude'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, {
+      content: '이 화면 봐줘',
+      // 업로드 저장소 밖의 파일은 버린다.
+      attachments: [{ path: 'shot.png', name: 'shot.png', mimeType: 'image/png' }, { path: '/etc/passwd' }],
+    }, 1);
+    await waitFor(() => isIdle() && speakers().length === 4, 'three turns');
+
+    const stored = roomsService.getRoomDetail(ROOM_ID).messages[0];
+    assert.deepEqual(stored.attachments.map((attachment) => attachment.name), ['shot.png']);
+    assert.equal((calls[0].options.attachments as unknown[]).length, 1);
+    assert.equal((calls[1].options.attachments as unknown[]).length, 1);
+    // 이미 본 글의 첨부는 다음 차례에 다시 오지 않는다.
+    assert.equal(((calls[2].options.attachments as unknown[]) ?? []).length, 0);
+  });
+});
+
+test('interrupting aborts the current speaker and moves straight to the waiting message', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    const aborts: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await gate; return '길게 쓰던 답 @Claude'; }],
+      [REVIEWER]: ['바로 볼게요 [DONE]'],
+    }, calls, aborts));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '오래 걸리는 일' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 잠깐, 이것부터' }, 1);
+
+    const interrupting = roomsService.interrupt(ROOM_ID);
+    release();
+    await interrupting;
+    await waitFor(() => isIdle() && speakers().length === 4, 'interrupted round');
+
+    assert.deepEqual(aborts, [HOST]);
+    const rows = roomsDb.listMessages(ROOM_ID);
+    assert.deepEqual(rows.map((row) => row.speaker), ['user', 'user', 'p-host', 'p-rev']);
+    // 끊긴 답은 실패가 아니라 중단이고, 루프는 멈추지 않고 지목된 참가자로 넘어간다.
+    assert.equal(rows[2].status, 'aborted');
+    assert.equal(rows[3].status, 'complete');
+    assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER]);
+  });
+});
+
+test('a host command runs as written in the host session and does not start a round', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['압축했습니다'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '/compact', hostCommand: true }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'host command');
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].sessionId, HOST);
+    assert.equal(calls[0].command, '/compact');
+    assert.deepEqual(speakers(), ['user', 'p-host']);
+  });
+});
+
+test('a participant can leave, but the host cannot', async () => {
+  await withRoom(6, async () => {
+    assert.throws(
+      () => roomsService.removeParticipant(ROOM_ID, 'p-host'),
+      (error: Error & { code?: string }) => error.code === 'HOST_CANNOT_LEAVE',
+    );
+
+    const detail = roomsService.removeParticipant(ROOM_ID, 'p-rev');
+    assert.deepEqual(detail.participants.map((participant) => participant.participantId), ['p-host']);
+    assert.deepEqual(detail.formerParticipants.map((participant) => participant.participantId), ['p-rev']);
+    // 나간 세션은 다시 평범한 대화로 열린다.
+    assert.equal(roomsDb.getParticipantBySession(REVIEWER), null);
+    assert.deepEqual(roomsService.listRoomIndex()[0].participants.map((participant) => participant.participantId), ['p-host']);
   });
 });

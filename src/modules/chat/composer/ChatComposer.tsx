@@ -52,17 +52,20 @@ type ChatComposerProps = {
   activity: SessionActivity | null;
   isLoading: boolean;
   onAbortSession: () => void;
-  permissionMode: PermissionMode;
-  availablePermissionModes: PermissionMode[];
-  onSelectPermissionMode: (mode: PermissionMode) => void;
-  providerLabel: string;
-  effort: string;
-  availableEffortOptions: NonNullable<ProviderModelOption['effort']>['values'];
-  onSelectEffort: (effort: string) => void;
-  model: string;
-  availableModelOptions: ProviderModelOption[];
-  onSelectModel: (model: string) => void;
-  modelsLoading: boolean;
+  // The model, permission and schedule controls are optional as groups: the
+  // rooms module sets these per participant elsewhere and has no schedule, so
+  // it leaves them out and the footer drops the matching menu.
+  permissionMode?: PermissionMode;
+  availablePermissionModes?: PermissionMode[];
+  onSelectPermissionMode?: (mode: PermissionMode) => void;
+  providerLabel?: string;
+  effort?: string;
+  availableEffortOptions?: NonNullable<ProviderModelOption['effort']>['values'];
+  onSelectEffort?: (effort: string) => void;
+  model?: string;
+  availableModelOptions?: ProviderModelOption[];
+  onSelectModel?: (model: string) => void;
+  modelsLoading?: boolean;
   tokenBudget: Record<string, unknown> | null;
   onShowTokenUsage: () => void;
   slashCommandsCount: number;
@@ -76,9 +79,13 @@ type ChatComposerProps = {
   isEditingSentMessage: boolean;
   onCancelEditMessage: () => void;
   /** Messages waiting to be sent to this session later. */
-  scheduledMessages: ScheduledMessage[];
-  onScheduleMessage: (scheduledFor: Date) => void;
-  onCancelScheduledMessage: (id: string) => void;
+  scheduledMessages?: ScheduledMessage[];
+  onScheduleMessage?: (scheduledFor: Date) => void;
+  onCancelScheduledMessage?: (id: string) => void;
+  /** Extra notice drawn right above the input, after any queued drafts. */
+  aboveInput?: ReactNode;
+  /** Suggestion list anchored to the input, like the file dropdown; position it `absolute bottom-full`. */
+  inputPopover?: ReactNode;
   onEditQueuedDraft: (index: number) => void;
   onDeleteQueuedDraft: (index: number) => void;
   attachedFiles: File[];
@@ -118,7 +125,8 @@ type ChatComposerProps = {
 /**
  * Rendered by chat's ChatInterface as the whole input area: textarea, pending
  * attachments, queued message, permission banner, voice input and the
- * model/permission popovers that drive the next turn.
+ * model/permission popovers that drive the next turn. The rooms module renders
+ * it too, so a team room types, attaches and sends exactly like a chat.
  */
 export default function ChatComposer({
   pendingPermissionRequests,
@@ -186,6 +194,8 @@ export default function ChatComposer({
   placeholder,
   isTextareaExpanded,
   sendByCtrlEnter,
+  aboveInput,
+  inputPopover,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
   const fileDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -290,10 +300,12 @@ export default function ChatComposer({
         </div>
       )}
 
-      <ScheduledMessageList
-        scheduledMessages={scheduledMessages}
-        onCancel={onCancelScheduledMessage}
-      />
+      {scheduledMessages && onCancelScheduledMessage && (
+        <ScheduledMessageList
+          scheduledMessages={scheduledMessages}
+          onCancel={onCancelScheduledMessage}
+        />
+      )}
 
       {isEditingSentMessage && (
         <div className="mx-auto mb-2 flex max-w-[54.25rem] items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
@@ -325,7 +337,10 @@ export default function ChatComposer({
         />
       ))}
 
+      {aboveInput}
+
       {!hasQuestionPanel && <div className="relative mx-auto max-w-[54.25rem]">
+        {inputPopover}
         {showFileDropdown && filteredFiles.length > 0 && (
           <div
             ref={fileDropdownRef}
@@ -478,27 +493,33 @@ export default function ChatComposer({
           </PromptInputTools>
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <ScheduleMessagePopover
-              disabled={!input.trim()}
-              onSchedule={onScheduleMessage}
-            />
+            {onScheduleMessage && (
+              <ScheduleMessagePopover
+                disabled={!input.trim()}
+                onSchedule={onScheduleMessage}
+              />
+            )}
 
-            <ComposerModelMenu
-              effort={effort}
-              effortOptions={availableEffortOptions}
-              onSelectEffort={onSelectEffort}
-              model={model}
-              modelOptions={availableModelOptions}
-              onSelectModel={onSelectModel}
-              modelsLoading={modelsLoading}
-            />
+            {onSelectModel && onSelectEffort && (
+              <ComposerModelMenu
+                effort={effort ?? ''}
+                effortOptions={availableEffortOptions ?? []}
+                onSelectEffort={onSelectEffort}
+                model={model ?? ''}
+                modelOptions={availableModelOptions ?? []}
+                onSelectModel={onSelectModel}
+                modelsLoading={modelsLoading ?? false}
+              />
+            )}
 
-            <ComposerPermissionMenu
-              permissionMode={permissionMode}
-              permissionModes={availablePermissionModes}
-              onSelectPermissionMode={onSelectPermissionMode}
-              providerLabel={providerLabel}
-            />
+            {onSelectPermissionMode && permissionMode && availablePermissionModes && (
+              <ComposerPermissionMenu
+                permissionMode={permissionMode}
+                permissionModes={availablePermissionModes}
+                onSelectPermissionMode={onSelectPermissionMode}
+                providerLabel={providerLabel ?? ''}
+              />
+            )}
 
             <PromptInputSubmit
               onClick={

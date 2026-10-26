@@ -312,7 +312,11 @@ CREATE TABLE IF NOT EXISTS room_participants (
     position INTEGER NOT NULL,
     -- 이 참가자가 마지막으로 읽은 룸 메시지. 다음 차례에는 그 뒤의 것만 보낸다.
     last_seen_message_id INTEGER NOT NULL DEFAULT 0,
+    -- ask | read | full. NULL 이면 룸의 permission_mode 를 따른다.
+    permission_mode TEXT,
     joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- 퇴장한 시각. 행은 남겨 두어 타임라인의 지난 발언이 누구 것인지 보이게 한다.
+    left_at DATETIME,
     UNIQUE (room_id, display_name),
     FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE,
     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -330,6 +334,8 @@ CREATE TABLE IF NOT EXISTS room_messages (
     status TEXT NOT NULL DEFAULT 'complete',
     -- 이 답을 낸 참가자 세션. 사용자 메시지는 NULL.
     session_id TEXT,
+    -- 사용자가 함께 올린 첨부 파일 설명(JSON 배열). 없으면 NULL.
+    attachments TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
 );

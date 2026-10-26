@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-import type { Project, ProjectSession, ProviderAuthStatus, ProviderConnectionTone } from '@/shared/types';
+import type { ChatAttachment, Project, ProjectSession, ProviderAuthStatus, ProviderConnectionTone } from '@/shared/types';
 
 //----------------- DEPLOYMENT MODE ------------
 
@@ -246,3 +246,17 @@ export const readProviderConnectionTone = (
   }
   return authStatus.authenticated ? 'connected' : 'disconnected';
 };
+
+// ---------------------------
+
+//----------------- CHAT ATTACHMENTS ------------
+
+/**
+ * Whether an uploaded chat attachment is an image, by MIME type or file
+ * extension. The chat composer and the rooms timeline use it to split a
+ * message's attachments into inline images and file chips.
+ */
+export function isImageAttachment(attachment: ChatAttachment): boolean {
+  if (attachment.mimeType?.startsWith('image/')) return true;
+  return /\.(gif|jpe?g|png|svg|webp)$/i.test(attachment.path || attachment.name || '');
+}

@@ -63,10 +63,13 @@ export function useRoom(hostSessionId: string) {
     reload: reloadInBackground,
   });
 
-  /** Posts a user message. The server queues it for the next turn when a participant is running. */
-  const postMessage = useCallback(async (content: string) => {
+  /**
+   * Posts a user message. The server queues it for the next turn when a
+   * participant is running; a host command runs as written in the host session.
+   */
+  const postMessage = useCallback(async (message: { content: string; attachments?: unknown[]; hostCommand?: boolean }) => {
     if (!roomIdRef.current) return;
-    const response = await api.rooms.postMessage(roomIdRef.current, content);
+    const response = await api.rooms.postMessage(roomIdRef.current, message);
     const body = await readApiJson<{ data?: { message?: RoomMessage; state?: RoomRuntimeState } }>(response);
     if (body.data?.message) {
       dispatch({ type: 'room_message', message: body.data.message });
@@ -83,6 +86,36 @@ export function useRoom(hostSessionId: string) {
     if (body.data?.state) {
       dispatch({ type: 'room_state', state: body.data.state });
     }
+  }, []);
+
+  /** Cuts the running participant off so the waiting user message is handled now. */
+  const interrupt = useCallback(async () => {
+    if (!roomIdRef.current) return;
+    const response = await api.rooms.interrupt(roomIdRef.current);
+    const body = await readApiJson<{ data?: { state?: RoomRuntimeState } }>(response);
+    if (body.data?.state) {
+      dispatch({ type: 'room_state', state: body.data.state });
+    }
+  }, []);
+
+  const updateParticipant = useCallback(async (participantId: string, changes: { permissionMode?: RoomPermissionMode }) => {
+    if (!roomIdRef.current) return;
+    const response = await api.rooms.updateParticipant(roomIdRef.current, participantId, changes);
+    const body = await readApiJson<{ data?: RoomDetail }>(response);
+    if (body.data) {
+      dispatch({ type: 'detail_loaded', detail: body.data });
+    }
+  }, []);
+
+  /** Returns the updated room so the caller can refresh the sidebar index too. */
+  const removeParticipant = useCallback(async (participantId: string): Promise<RoomDetail | null> => {
+    if (!roomIdRef.current) return null;
+    const response = await api.rooms.removeParticipant(roomIdRef.current, participantId);
+    const body = await readApiJson<{ data?: RoomDetail }>(response);
+    if (body.data) {
+      dispatch({ type: 'detail_loaded', detail: body.data });
+    }
+    return body.data ?? null;
   }, []);
 
   const updateSettings = useCallback(async (changes: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number }) => {
@@ -123,8 +156,11 @@ export function useRoom(hostSessionId: string) {
     pendingPermissions: viewState.pendingPermissions,
     loadError,
     postMessage,
+    interrupt,
     stop,
     updateSettings,
+    updateParticipant,
+    removeParticipant,
     applyDetail,
     answerPermission,
   };

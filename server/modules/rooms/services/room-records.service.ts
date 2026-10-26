@@ -1,5 +1,6 @@
 import type { RoomMessageRow, RoomParticipantRow, RoomRow } from '@/modules/database/index.js';
-import type { RoomMessage, RoomParticipant, RoomPermissionMode } from '@/shared/types.js';
+import { normalizeAttachmentDescriptors } from '@/shared/image-attachments.js';
+import type { RoomAttachment, RoomMessage, RoomParticipant, RoomPermissionMode } from '@/shared/types.js';
 
 /**
  * 저장된 행을 화면·턴 엔진이 쓰는 모양으로 바꾼다. 룸 서비스와 턴 엔진이 같이
@@ -27,7 +28,20 @@ export function toRoomParticipant(row: RoomParticipantRow, room: RoomRow): RoomP
     rolePrompt: row.role_prompt,
     position: row.position,
     isHost: row.session_id === room.host_session_id,
+    permissionMode: parseRoomPermissionMode(row.permission_mode ?? room.permission_mode),
   };
+}
+
+/** 저장된 JSON 을 읽는다. 깨진 값은 첨부가 없는 것으로 본다. */
+function parseStoredAttachments(value: string | null): RoomAttachment[] {
+  if (!value) {
+    return [];
+  }
+  try {
+    return normalizeAttachmentDescriptors(JSON.parse(value));
+  } catch {
+    return [];
+  }
 }
 
 export function toRoomMessage(row: RoomMessageRow): RoomMessage {
@@ -39,6 +53,7 @@ export function toRoomMessage(row: RoomMessageRow): RoomMessage {
     text: row.text,
     status,
     sessionId: row.session_id,
+    attachments: parseStoredAttachments(row.attachments),
     createdAt: row.created_at,
   };
 }

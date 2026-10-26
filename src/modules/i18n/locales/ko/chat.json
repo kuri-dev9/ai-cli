@@ -419,8 +419,6 @@
     "memberSessionNotice": "{{name}}의 개인 세션입니다. 여기서 보내는 메시지는 룸이 아니라 이 참가자에게만 갑니다.",
     "backToRoom": "룸으로 돌아가기",
     "composerPlaceholder": "메시지를 입력하세요 (@이름으로 지정)",
-    "send": "보내기",
-    "queuedHint": "다음 차례에 반영됨",
     "sendFailed": "메시지를 보내지 못했습니다: {{error}}",
     "permissionMode": "권한",
     "permissionAsk": "매번 묻기",
@@ -448,6 +446,17 @@
     "presetSaveCurrent": "지금 입력을 프리셋으로 저장",
     "presetSaved": "저장했습니다",
     "hostPreset": "호스트 역할 프리셋",
-    "hostPresetNone": "프리셋 없이 직접 입력"
+    "hostPresetNone": "프리셋 없이 직접 입력",
+    "participantSettings": "{{name}} 설정",
+    "closeSettings": "설정 닫기",
+    "tokens": "토큰",
+    "leave": "퇴장",
+    "leaveConfirm": "{{name}}을(를) 룸에서 내보낼까요? 세션은 지워지지 않고 일반 대화로 남습니다.",
+    "leaveWhileSpeaking": "지금 답하는 중이라 끝나거나 중지한 뒤 내보낼 수 있습니다.",
+    "pendingTitle": "대기 중",
+    "pendingHint": "지금 답하는 참가자가 끝나면 반영됩니다",
+    "interruptNow": "지금 끼어들기",
+    "interruptNowTitle": "지금 답하는 참가자를 끊고 내 메시지부터 처리합니다",
+    "formerParticipant": "퇴장함"
   }
 }

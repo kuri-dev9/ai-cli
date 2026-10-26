@@ -195,9 +195,11 @@ function WorkspaceMain({
                 <RoomInterface
                   key={roomHostSessionId}
                   hostSessionId={roomHostSessionId}
+                  hostSession={selectedSession}
                   selectedProject={selectedProject}
                   onNavigateToSession={onNavigateToSession}
                   onFileOpen={handleWorkspaceFileOpen}
+                  onShowSettings={onShowSettings}
                   showRawParameters={showRawParameters}
                   showThinking={showThinking}
                   sendByCtrlEnter={sendByCtrlEnter}

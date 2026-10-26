@@ -14,6 +14,7 @@ import { useDropzone } from 'react-dropzone';
 import { api } from '@/shared/api';
 import { PROVIDER_PERMISSION_PREFERENCE_KEYS } from '@/shared/constants';
 import { readUserPreference } from '@/shared/userSettings';
+import { isImageAttachment } from '@/shared/utils';
 import type { CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionProcessing, ModelCommandData, QueuedDraft, SessionActivityMap, StatusCommandData,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
 import { grantClaudeToolPermission } from '@/modules/chat/utils/chatPermissions';
 import {
@@ -65,6 +66,20 @@ type UseChatComposerStateArgs = {
   addMessage: (msg: ChatMessage) => void;
   setIsUserScrolledUp: (isScrolledUp: boolean) => void;
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
+  /**
+   * Takes over delivery of a ready message (text plus already-uploaded
+   * attachments) instead of the websocket send. The rooms module uses it to
+   * post to the room. `fromCommand` marks text a custom slash command expanded
+   * into. Rejecting keeps the draft in the composer.
+   */
+  submitOverride?: (submission: ComposerSubmission) => Promise<void>;
+};
+
+/** What `submitOverride` receives. */
+type ComposerSubmission = {
+  content: string;
+  attachments: unknown[];
+  fromCommand: boolean;
 };
 
 type MentionableFile = {
@@ -92,11 +107,6 @@ const createFakeSubmitEvent = () => {
 
 const MAX_ATTACHMENT_COUNT = 10;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-
-const isImageAttachment = (attachment: ChatAttachment) => {
-  if (attachment.mimeType?.startsWith('image/')) return true;
-  return /\.(gif|jpe?g|png|svg|webp)$/i.test(attachment.path || attachment.name || '');
-};
 
 const uploadAttachmentFiles = async (files: File[]): Promise<unknown[]> => {
   if (files.length === 0) {
@@ -194,6 +204,11 @@ const getNotificationSessionSummary = (
   return normalizedFallback.length > 80 ? `${normalizedFallback.slice(0, 77)}...` : normalizedFallback;
 };
 
+/**
+ * Everything ChatComposer needs: input, attachments, mentions, slash commands
+ * and the send. Used by chat's ChatInterface, and by the rooms module with a
+ * submitOverride that posts to the room instead.
+ */
 export function useChatComposerState({
   selectedProject,
   selectedSession,
@@ -217,6 +232,7 @@ export function useChatComposerState({
   addMessage,
   setIsUserScrolledUp,
   setPendingPermissionRequests,
+  submitOverride,
 }: UseChatComposerStateArgs) {
   // The composer text together with the chat scope it belongs to. They are one
   // state rather than a value plus a ref because they have to move in lockstep:
@@ -265,6 +281,9 @@ export function useChatComposerState({
     ) => Promise<void>) | null
   >(null);
   const inputValueRef = useRef(input);
+  // Set while a custom command's expanded text is being submitted, so a
+  // submitOverride can tell it apart from text the user typed.
+  const submittingCommandRef = useRef(false);
   const selectedProjectId = selectedProject?.projectId;
   // Prefer the stable backend-allocated id (selectedSession.id) but fall back
   // to currentSessionId for a just-established session that hasn't been
@@ -402,7 +421,10 @@ export function useChatComposerState({
     // Defer submit to next tick so the command text is reflected in UI before dispatching.
     setTimeout(() => {
       if (handleSubmitRef.current) {
-        handleSubmitRef.current(createFakeSubmitEvent());
+        submittingCommandRef.current = true;
+        void handleSubmitRef.current(createFakeSubmitEvent()).finally(() => {
+          submittingCommandRef.current = false;
+        });
       }
     }, 0);
   }, [addMessage]);
@@ -823,6 +845,33 @@ export function useChatComposerState({
         }
       }
 
+      if (submitOverride) {
+        try {
+          await submitOverride({
+            content: messageContent,
+            attachments: uploadedAttachments,
+            fromCommand: submittingCommandRef.current,
+          });
+        } catch {
+          // The override reports its own failure; the draft stays for a retry.
+          return;
+        }
+        recordSentMessage(currentInput, sessionKey);
+        setInput('');
+        inputValueRef.current = '';
+        resetCommandMenuState();
+        setAttachedFiles([]);
+        setFileErrors(new Map());
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        if (draftScopeRef.current) {
+          writeDraftText(draftScopeRef.current, '');
+        }
+        return;
+      }
+
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
       const sessionSummary = getNotificationSessionSummary(selectedSession, currentInput);
 
@@ -970,6 +1019,7 @@ export function useChatComposerState({
       addMessage,
       setIsUserScrolledUp,
       slashCommands,
+      submitOverride,
     ],
   );
 

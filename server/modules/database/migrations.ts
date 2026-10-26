@@ -481,6 +481,15 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
+/** 참가자별 권한·퇴장과 메시지 첨부. 처음 나온 룸 표에는 없던 칸이다. */
+const addRoomSettingsColumns = (db: Database): void => {
+  const participantColumns = getTableInfo(db, 'room_participants').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'permission_mode', 'TEXT');
+  addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'left_at', 'DATETIME');
+  const messageColumns = getTableInfo(db, 'room_messages').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'attachments', 'TEXT');
+};
+
 export const runMigrations = (db: Database) => {
   try {
     const usersTableInfo = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
@@ -533,6 +542,7 @@ export const runMigrations = (db: Database) => {
     db.exec(ROOMS_TABLE_SCHEMA_SQL);
     db.exec(ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL);
     db.exec(ROOM_MESSAGES_TABLE_SCHEMA_SQL);
+    addRoomSettingsColumns(db);
     db.exec(ROOM_INDEXES_SQL);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');

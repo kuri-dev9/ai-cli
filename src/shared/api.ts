@@ -441,8 +441,14 @@ export const api = {
       post(`/api/rooms/${encodeURIComponent(roomId)}/participants`, participant),
     update: (roomId: string, changes: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number }) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}`, changes),
-    postMessage: (roomId: string, content: string) =>
-      post(`/api/rooms/${encodeURIComponent(roomId)}/messages`, { content }),
+    // `hostCommand` runs the text as written in the host session instead of starting a round.
+    postMessage: (roomId: string, message: { content: string; attachments?: unknown[]; hostCommand?: boolean }) =>
+      post(`/api/rooms/${encodeURIComponent(roomId)}/messages`, message),
+    updateParticipant: (roomId: string, participantId: string, changes: { permissionMode?: RoomPermissionMode }) =>
+      patch(`/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`, changes),
+    removeParticipant: (roomId: string, participantId: string) =>
+      del(`/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`),
+    interrupt: (roomId: string) => post(`/api/rooms/${encodeURIComponent(roomId)}/interrupt`),
     stop: (roomId: string) => post(`/api/rooms/${encodeURIComponent(roomId)}/stop`),
   },
 

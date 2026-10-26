@@ -34,7 +34,8 @@ const readUsageNumber = (value: unknown) => {
 
 /**
  * Rendered by chat's ChatComposer to show the session's context-window usage
- * and open the detailed token breakdown on click.
+ * and open the detailed token breakdown on click, and by the rooms module's
+ * participant settings to show each participant session's usage.
  */
 function TokenUsageSummary({ usage, onClick }: TokenUsageSummaryProps) {
   const { t } = useTranslation();

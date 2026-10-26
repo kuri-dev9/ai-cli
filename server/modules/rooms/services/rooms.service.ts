@@ -15,6 +15,7 @@ import {
   toRoomParticipant,
 } from '@/modules/rooms/services/room-records.service.js';
 import { roomTurnEngine } from '@/modules/rooms/services/room-turn-engine.service.js';
+import { filterAttachmentsToUploadStore } from '@/modules/websocket/index.js';
 import type { LLMProvider, RoomDetail, RoomMessage, RoomPermissionMode, RoomRuntimeState } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -79,6 +80,7 @@ function buildDetail(room: RoomRow): RoomDetail {
       createdAt: room.created_at,
     },
     participants: roomsDb.listParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
+    formerParticipants: roomsDb.listFormerParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
     messages: roomsDb.listMessages(room.room_id).map(toRoomMessage),
     state: roomTurnEngine.getState(room.room_id, room.max_auto_turns),
   };
@@ -109,6 +111,14 @@ function resolveDisplayName(requested: string | null | undefined, provider: stri
       return candidate;
     }
   }
+}
+
+function requireParticipant(roomId: string, participantId: string) {
+  const participant = roomsDb.listParticipants(roomId).find((row) => row.participant_id === participantId);
+  if (!participant) {
+    throw new AppError('이 룸에 그런 참가자가 없습니다.', { code: 'PARTICIPANT_NOT_FOUND', statusCode: 404 });
+  }
+  return participant;
 }
 
 function requireRoleName(roleName: string | null | undefined): string {
@@ -267,7 +277,9 @@ export const roomsService = {
     }
 
     const provider = await assertProviderUsable(input.provider);
-    const displayName = resolveDisplayName(input.displayName, provider, existing.map((row) => row.display_name));
+    // 퇴장한 참가자의 이름도 표에 남아 있어 다시 쓸 수 없다.
+    const takenNames = [...existing, ...roomsDb.listFormerParticipants(roomId)].map((row) => row.display_name);
+    const displayName = resolveDisplayName(input.displayName, provider, takenNames);
     const roleName = requireRoleName(input.roleName);
     const model = input.model?.trim() || null;
     const sessionId = createParticipantSession(provider, room.project_path, displayName, roleName, model);
@@ -302,9 +314,62 @@ export const roomsService = {
     return this.getRoomDetail(roomId);
   },
 
-  postUserMessage(roomId: string, content: string, userId: string | number | null): { message: RoomMessage; state: RoomRuntimeState } {
+  /** 참가자 한 명의 권한. 모델과 추론 강도는 그 참가자 세션에 적으므로 여기서 다루지 않는다. */
+  updateParticipant(roomId: string, participantId: string, settings: { permissionMode?: RoomPermissionMode }): RoomDetail {
+    requireRoom(roomId);
+    requireParticipant(roomId, participantId);
+    if (settings.permissionMode !== undefined) {
+      roomsDb.updateParticipantPermission(participantId, settings.permissionMode);
+    }
+    roomsDb.touchRoom(roomId);
+    broadcastRoomFrame({ kind: 'room_updated', roomId });
+    return this.getRoomDetail(roomId);
+  },
+
+  /**
+   * 참가자를 내보낸다. 그 세션은 지워지지 않고 평범한 대화로 남는다. 호스트는
+   * 룸 자체이므로 나갈 수 없고, 지금 차례를 쥔 참가자는 끝나거나 정지한 뒤에만
+   * 내보낼 수 있다.
+   */
+  removeParticipant(roomId: string, participantId: string): RoomDetail {
     const room = requireRoom(roomId);
-    return roomTurnEngine.postUserMessage(room, content, userId);
+    const participant = requireParticipant(roomId, participantId);
+    if (participant.session_id === room.host_session_id) {
+      throw new AppError('호스트는 룸에서 나갈 수 없습니다.', { code: 'HOST_CANNOT_LEAVE', statusCode: 400 });
+    }
+    if (roomTurnEngine.isSpeaking(roomId, participantId)) {
+      throw new AppError('지금 답하고 있는 참가자입니다. 끝나거나 정지한 뒤 내보내 주세요.', {
+        code: 'PARTICIPANT_SPEAKING',
+        statusCode: 409,
+      });
+    }
+    roomsDb.markParticipantLeft(roomId, participantId);
+    broadcastRoomFrame({ kind: 'room_updated', roomId });
+    return this.getRoomDetail(roomId);
+  },
+
+  /**
+   * 사용자 글을 올린다. 첨부는 업로드 저장소 안의 파일만 남긴다. `hostCommand`
+   * 는 슬래시 명령처럼 호스트 세션에서 그대로 돌릴 글이다.
+   */
+  postUserMessage(
+    roomId: string,
+    input: { content: string; attachments?: unknown; hostCommand?: boolean },
+    userId: string | number | null,
+  ): { message: RoomMessage; state: RoomRuntimeState } {
+    const room = requireRoom(roomId);
+    const attachments = filterAttachmentsToUploadStore(input.attachments);
+    if (!input.content.trim() && attachments.length === 0) {
+      throw new AppError('보낼 내용이 없습니다.', { code: 'EMPTY_MESSAGE', statusCode: 400 });
+    }
+    return roomTurnEngine.postUserMessage(room, input.content, userId, {
+      attachments,
+      hostCommand: input.hostCommand,
+    });
+  },
+
+  async interrupt(roomId: string): Promise<RoomRuntimeState> {
+    return roomTurnEngine.interrupt(requireRoom(roomId));
   },
 
   async stop(roomId: string): Promise<RoomRuntimeState> {

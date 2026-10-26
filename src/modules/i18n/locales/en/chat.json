@@ -420,8 +420,6 @@
     "memberSessionNotice": "{{name}}'s own session. Messages sent here reach only this participant, not the room.",
     "backToRoom": "Back to the room",
     "composerPlaceholder": "Type a message (@name to direct it)",
-    "send": "Send",
-    "queuedHint": "Will be picked up next turn",
     "sendFailed": "Could not send the message: {{error}}",
     "permissionMode": "Permissions",
     "permissionAsk": "Ask every time",
@@ -449,6 +447,17 @@
     "presetSaveCurrent": "Save current input as a preset",
     "presetSaved": "Saved",
     "hostPreset": "Host role preset",
-    "hostPresetNone": "No preset, type it in"
+    "hostPresetNone": "No preset, type it in",
+    "participantSettings": "{{name}} settings",
+    "closeSettings": "Close settings",
+    "tokens": "Tokens",
+    "leave": "Remove",
+    "leaveConfirm": "Remove {{name}} from the room? The session is kept as a regular conversation.",
+    "leaveWhileSpeaking": "This participant is answering now; remove them once they finish or after stopping.",
+    "pendingTitle": "Waiting",
+    "pendingHint": "Goes out once the current participant finishes",
+    "interruptNow": "Interrupt now",
+    "interruptNowTitle": "Cut the current participant off and handle your message first",
+    "formerParticipant": "Left"
   }
 }

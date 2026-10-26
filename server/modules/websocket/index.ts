@@ -11,6 +11,9 @@ export { initializeRunStateBroadcast } from './services/run-state-broadcast.serv
 // runDetachedChatTurn: used by the scheduled-messages module to run a turn
 // from a timer, with no socket to stream to or report errors on.
 export { runDetachedChatTurn } from './services/chat-websocket.service.js';
+// filterAttachmentsToUploadStore: used by the rooms module to keep only
+// uploaded files on a room message, the same trust boundary chat.send applies.
+export { filterAttachmentsToUploadStore } from './services/chat-websocket.service.js';
 // 폰으로 넘어간 턴에 얼마나 허용할지. 설정 화면이 읽고 쓴다.
 export {
   parseTelegramPermissionMode,

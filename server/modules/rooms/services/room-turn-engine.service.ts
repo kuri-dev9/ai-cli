@@ -1,4 +1,4 @@
-import { roomsDb } from '@/modules/database/index.js';
+import { roomsDb, sessionsDb } from '@/modules/database/index.js';
 import type { RoomRow } from '@/modules/database/index.js';
 import { sessionsService } from '@/modules/providers/index.js';
 import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/index.js';
@@ -20,7 +20,8 @@ import {
   toRoomMessage,
   toRoomParticipant,
 } from '@/modules/rooms/services/room-records.service.js';
-import type { NormalizedMessage, RoomMessage, RoomParticipant, RoomRuntimeState } from '@/shared/types.js';
+import type { NormalizedMessage, RoomAttachment, RoomMessage, RoomParticipant, RoomRuntimeState } from '@/shared/types.js';
+import { AppError } from '@/shared/utils.js';
 
 /**
  * 룸의 차례를 돌린다.
@@ -42,6 +43,11 @@ type RoomLoopState = {
   turnCount: number;
   /** 차례가 도는 중에 사용자가 보낸 글이 있다. 다음 차례 경계에서 처리한다. */
   pendingUserMessage: boolean;
+  /**
+   * 사용자가 지금 차례를 끊고 끼어들었다. 끊긴 답은 실패가 아니라 중단으로
+   * 남기고, 루프는 멈추지 않은 채 기다리던 글로 넘어간다.
+   */
+  interrupting: boolean;
   /** 마지막으로 글을 보낸 사용자. 참가자 턴을 그 사용자 이름으로 돌린다. */
   userId: string | number | null;
 };
@@ -65,6 +71,7 @@ function getLoop(roomId: string): RoomLoopState {
       activeSessionId: null,
       turnCount: 0,
       pendingUserMessage: false,
+      interrupting: false,
       userId: null,
     };
     loops.set(roomId, loop);
@@ -155,32 +162,70 @@ async function runParticipantTurn(room: RoomRow, me: RoomParticipant, loop: Room
   const readThroughId = unread.at(-1)?.id ?? lastSeen;
 
   const prompt = buildTurnPrompt({ me, participants, delta, isFirstTurn, priorContext });
+  // 사용자가 그동안 붙인 파일. 참가자마다 자기가 아직 못 본 글의 것만 받는다.
+  const attachments = delta.filter((message) => message.speaker === 'user').flatMap((message) => message.attachments);
 
-  loop.activeParticipantId = me.participantId;
-  loop.activeSessionId = me.sessionId;
-  broadcastState(room);
-
-  const result = await runDetachedChatTurn(
-    {
-      sessionId: me.sessionId,
-      userId: loop.userId,
-      content: prompt,
-      options: {
-        ...(me.model ? { model: me.model } : {}),
-        ...resolveTelegramRunPermissions(parseRoomPermissionMode(room.permission_mode)),
-      },
-    },
-    { runtime, isSessionHandedToTelegram },
-  );
+  const result = await runTurnInSession(room, me, loop, prompt, attachments);
 
   // 이 차례에 보낸 데까지는 읽은 것이다. 일하는 동안 들어온 사용자 글은 그 뒤에
   // 있으므로 다음 차례에 간다.
   roomsDb.markParticipantSeen(me.participantId, readThroughId);
 
+  return recordTurnReply(room, me, loop, result);
+}
+
+/**
+ * 참가자 세션에서 한 차례를 돌린다. 모델과 추론 강도는 그 세션에 적힌 것을
+ * 먼저 쓴다 — 참가자 설정에서 바꾼 값이 세션에 적히고, 여기서 초대할 때의
+ * 값을 다시 실으면 실행이 그 값으로 되돌려 적어 버린다.
+ */
+async function runTurnInSession(
+  room: RoomRow,
+  me: RoomParticipant,
+  loop: RoomLoopState,
+  content: string,
+  attachments: RoomAttachment[],
+): Promise<{ started: boolean; error: string | null }> {
+  if (!runtime) {
+    throw new Error('Room engine is not initialized.');
+  }
+  // 앞 차례 끝에 늦게 닿은 끼어들기 표시가 이 차례를 중단으로 만들지 않게 한다.
+  loop.interrupting = false;
+  loop.activeParticipantId = me.participantId;
+  loop.activeSessionId = me.sessionId;
+  broadcastState(room);
+
+  const session = sessionsDb.getSessionById(me.sessionId);
+  const model = session?.model || me.model;
+  const effort = session?.effort;
+  return runDetachedChatTurn(
+    {
+      sessionId: me.sessionId,
+      userId: loop.userId,
+      content,
+      options: {
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
+        ...(attachments.length ? { attachments } : {}),
+        ...resolveTelegramRunPermissions(parseRoomPermissionMode(me.permissionMode)),
+      },
+    },
+    { runtime, isSessionHandedToTelegram },
+  );
+}
+
+/** 끝난 차례의 답을 타임라인에 올린다. */
+function recordTurnReply(
+  room: RoomRow,
+  me: RoomParticipant,
+  loop: RoomLoopState,
+  result: { started: boolean; error: string | null },
+): TurnResult {
   const texts = result.started ? readTurnTexts(me.sessionId) : { all: '', last: '', errors: [] };
   let status: RoomMessage['status'] = 'complete';
   let text = texts.all;
-  if (loop.halted) {
+  if (loop.halted || loop.interrupting) {
+    loop.interrupting = false;
     status = 'aborted';
     text = text || '(중단됨)';
   } else if (!result.started || result.error || (!text && texts.errors.length)) {
@@ -304,6 +349,59 @@ async function runLoop(roomId: string): Promise<void> {
   }
 }
 
+/** 지금 일하는 참가자의 실행을 끊는다. 런타임은 끊긴 실행에 `complete` 를 내지 않으므로 여기서 대신 낸다. */
+async function abortActiveRun(loop: RoomLoopState): Promise<void> {
+  const sessionId = loop.activeSessionId;
+  const run = sessionId ? chatRunRegistry.getRun(sessionId) : undefined;
+  if (sessionId && run && run.status === 'running' && runtime) {
+    // `chat.abort` 와 같은 모양이다.
+    const aborted = await runtime.abort(run.provider, sessionId);
+    chatRunRegistry.completeRun(sessionId, { exitCode: aborted ? 0 : 1, aborted: true });
+  }
+}
+
+/**
+ * 호스트 세션에서 명령 하나를 그대로 돌린다. 룸 안내문으로 감싸면 `/compact`
+ * 같은 명령이 명령으로 읽히지 않으므로 사용자가 쓴 그대로 보낸다. 답은
+ * 타임라인에 호스트 발언으로 남고, 다른 참가자에게 넘기지 않는다.
+ */
+async function runHostCommand(roomId: string, commandMessageId: number, content: string, attachments: RoomAttachment[]): Promise<void> {
+  const loop = getLoop(roomId);
+  loop.running = true;
+  try {
+    const room = roomsDb.getRoom(roomId);
+    const host = room ? loadParticipants(room).find((participant) => participant.isHost) : undefined;
+    if (!room || !host) {
+      return;
+    }
+    const lastSeenBefore = roomsDb.listParticipants(roomId).find((row) => row.participant_id === host.participantId)?.last_seen_message_id ?? 0;
+    // 명령 앞에 호스트가 아직 못 본 다른 글이 없으면, 명령과 그 답까지 읽은 것으로 친다.
+    // 남아 있으면 그대로 두어 다음 차례에 함께 받게 한다.
+    const unreadBefore = roomsDb.listMessagesAfter(roomId, lastSeenBefore).filter((row) => row.id < commandMessageId);
+
+    const result = await runTurnInSession(room, host, loop, content, attachments);
+    const { message } = recordTurnReply(room, host, loop, result);
+    if (unreadBefore.length === 0) {
+      roomsDb.markParticipantSeen(host.participantId, message.id);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Rooms] Host command failed', { roomId, error: message });
+  } finally {
+    loop.running = false;
+    loop.activeParticipantId = null;
+    loop.activeSessionId = null;
+    const room = roomsDb.getRoom(roomId);
+    if (room) {
+      broadcastState(room);
+    }
+    // 명령이 도는 동안 보낸 글은 여기서 이어받는다.
+    if (loop.pendingUserMessage && !loop.halted && room) {
+      void runLoop(roomId);
+    }
+  }
+}
+
 /** Rooms 모듈 안에서 룸 서비스가 쓰는 턴 엔진. */
 export const roomTurnEngine = {
   initialize(gateway: ProviderRuntimeGateway): void {
@@ -326,20 +424,64 @@ export const roomTurnEngine = {
    * 사용자 글을 올린다. 쉬고 있으면 바로 차례를 시작하고, 돌고 있으면 다음
    * 차례 경계에서 반영되도록 표시만 해 둔다.
    */
-  postUserMessage(room: RoomRow, content: string, userId: string | number | null): { message: RoomMessage; state: RoomRuntimeState } {
+  postUserMessage(
+    room: RoomRow,
+    content: string,
+    userId: string | number | null,
+    options: { attachments?: RoomAttachment[]; hostCommand?: boolean } = {},
+  ): { message: RoomMessage; state: RoomRuntimeState } {
     const loop = getLoop(room.room_id);
-    const row = roomsDb.insertMessage({ roomId: room.room_id, speaker: 'user', text: content, status: 'complete', sessionId: null });
+    const attachments = options.attachments ?? [];
+    // 명령은 호스트 세션 하나를 쓰므로, 다른 차례와 겹치면 받지 않는다.
+    if (options.hostCommand && loop.running) {
+      throw new AppError('참가자가 일하는 중에는 명령을 실행할 수 없습니다. 끝나거나 정지한 뒤 다시 보내 주세요.', {
+        code: 'ROOM_BUSY',
+        statusCode: 409,
+      });
+    }
+    const row = roomsDb.insertMessage({
+      roomId: room.room_id,
+      speaker: 'user',
+      text: content,
+      status: 'complete',
+      sessionId: null,
+      attachments: attachments.length ? JSON.stringify(attachments) : null,
+    });
     const message = toRoomMessage(row);
     broadcastRoomFrame({ kind: 'room_message', roomId: room.room_id, message });
 
     loop.userId = userId;
     loop.halted = false;
-    loop.pendingUserMessage = true;
-    if (!loop.running) {
-      void runLoop(room.room_id);
+    if (options.hostCommand) {
+      void runHostCommand(room.room_id, message.id, content, attachments);
+    } else {
+      loop.pendingUserMessage = true;
+      if (!loop.running) {
+        void runLoop(room.room_id);
+      }
     }
     broadcastState(room);
     return { message, state: readState(room.room_id, room.max_auto_turns) };
+  },
+
+  /**
+   * 기다리던 사용자 글이 있을 때 지금 차례를 끊고 그 글로 넘어간다. 정지와 달리
+   * 루프는 멈추지 않고, 끊긴 답은 중단으로 남는다.
+   */
+  async interrupt(room: RoomRow): Promise<RoomRuntimeState> {
+    const loop = getLoop(room.room_id);
+    if (loop.running && loop.pendingUserMessage && loop.activeSessionId) {
+      loop.interrupting = true;
+      await abortActiveRun(loop);
+    }
+    broadcastState(room);
+    return readState(room.room_id, room.max_auto_turns);
+  },
+
+  /** 이 참가자가 지금 차례를 쥐고 있는지. 퇴장은 차례가 끝난 뒤에만 받는다. */
+  isSpeaking(roomId: string, participantId: string): boolean {
+    const loop = loops.get(roomId);
+    return Boolean(loop?.running && loop.activeParticipantId === participantId);
   },
 
   /** 정지. 지금 일하는 참가자의 실행을 끊고, 기다리던 글도 내려놓는다. */
@@ -347,15 +489,7 @@ export const roomTurnEngine = {
     const loop = getLoop(room.room_id);
     loop.halted = true;
     loop.pendingUserMessage = false;
-
-    const sessionId = loop.activeSessionId;
-    const run = sessionId ? chatRunRegistry.getRun(sessionId) : undefined;
-    if (sessionId && run && run.status === 'running' && runtime) {
-      // `chat.abort` 와 같은 모양이다. 런타임은 끊긴 실행에 `complete` 를 내지
-      // 않으므로 여기서 대신 낸다.
-      const aborted = await runtime.abort(run.provider, sessionId);
-      chatRunRegistry.completeRun(sessionId, { exitCode: aborted ? 0 : 1, aborted: true });
-    }
+    await abortActiveRun(loop);
     broadcastState(room);
     return readState(room.room_id, room.max_auto_turns);
   },

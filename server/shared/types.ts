@@ -1511,6 +1511,19 @@ export type RoomParticipant = {
   rolePrompt: string;
   position: number;
   isHost: boolean;
+  /** 이 참가자의 차례에 쓰는 권한. 따로 정하지 않았으면 룸 설정과 같다. */
+  permissionMode: RoomPermissionMode;
+};
+
+/**
+ * 사용자가 룸 메시지에 붙인 파일 하나. 채팅 첨부와 같은 모양으로, 업로드
+ * 저장소 안의 파일만 저장된다. 참가자 차례에 그대로 실려 넘어간다.
+ */
+export type RoomAttachment = {
+  path: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
 };
 
 /**
@@ -1524,6 +1537,8 @@ export type RoomMessage = {
   text: string;
   status: 'complete' | 'aborted' | 'error';
   sessionId: string | null;
+  /** 사용자 메시지에 붙은 파일. 참가자 답에는 늘 비어 있다. */
+  attachments: RoomAttachment[];
   createdAt: string;
 };
 
@@ -1552,6 +1567,8 @@ export type RoomDetail = {
     createdAt: string;
   };
   participants: RoomParticipant[];
+  /** 퇴장한 참가자. 타임라인의 지난 발언에 이름을 붙이는 데만 쓴다. */
+  formerParticipants: RoomParticipant[];
   messages: RoomMessage[];
   state: RoomRuntimeState;
 };

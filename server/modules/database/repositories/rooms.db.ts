@@ -28,8 +28,15 @@ export type RoomParticipantRow = {
   role_prompt: string;
   position: number;
   last_seen_message_id: number;
+  /** 참가자 혼자만 다르게 둔 권한. NULL 이면 룸 설정을 따른다. */
+  permission_mode: string | null;
   joined_at: string;
+  /** 퇴장한 시각. NULL 이면 아직 룸에 있다. */
+  left_at: string | null;
 };
+
+/** 새로 넣을 때 정하는 칸. 나머지는 기본값으로 시작한다. */
+type NewRoomParticipantRow = Omit<RoomParticipantRow, 'last_seen_message_id' | 'permission_mode' | 'joined_at' | 'left_at'>;
 
 export type RoomMessageRow = {
   id: number;
@@ -38,11 +45,13 @@ export type RoomMessageRow = {
   text: string;
   status: string;
   session_id: string | null;
+  /** 첨부 파일 설명의 JSON 배열. 없으면 NULL. */
+  attachments: string | null;
   created_at: string;
 };
 
 const PARTICIPANT_COLUMNS = `participant_id, room_id, session_id, provider, model, display_name,
-  role_name, role_prompt, position, last_seen_message_id, joined_at`;
+  role_name, role_prompt, position, last_seen_message_id, permission_mode, joined_at, left_at`;
 
 export const roomsDb = {
   /**
@@ -51,7 +60,7 @@ export const roomsDb = {
    */
   createRoom(
     room: { roomId: string; hostSessionId: string; projectPath: string; permissionMode: string; maxAutoTurns: number },
-    participants: Array<Omit<RoomParticipantRow, 'room_id' | 'last_seen_message_id' | 'joined_at'>>,
+    participants: Array<Omit<NewRoomParticipantRow, 'room_id'>>,
   ): void {
     const db = getConnection();
     const insertRoom = db.prepare(
@@ -81,7 +90,7 @@ export const roomsDb = {
     })();
   },
 
-  addParticipant(participant: Omit<RoomParticipantRow, 'last_seen_message_id' | 'joined_at'>): void {
+  addParticipant(participant: NewRoomParticipantRow): void {
     getConnection()
       .prepare(
         `INSERT INTO room_participants
@@ -114,10 +123,13 @@ export const roomsDb = {
       .get(sessionId) as RoomRow | undefined) ?? null;
   },
 
-  /** 이 세션이 어느 룸의 참가자인지. 원래 세션도 참가자로 들어 있으므로 같이 잡힌다. */
+  /**
+   * 이 세션이 어느 룸의 참가자인지. 원래 세션도 참가자로 들어 있으므로 같이 잡힌다.
+   * 퇴장한 세션은 다시 평범한 대화이므로 잡지 않는다.
+   */
   getParticipantBySession(sessionId: string): RoomParticipantRow | null {
     return (getConnection()
-      .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants WHERE session_id = ? LIMIT 1`)
+      .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants WHERE session_id = ? AND left_at IS NULL LIMIT 1`)
       .get(sessionId) as RoomParticipantRow | undefined) ?? null;
   },
 
@@ -127,16 +139,37 @@ export const roomsDb = {
       .all() as RoomRow[];
   },
 
+  /** 지금 룸에 있는 참가자. 퇴장한 참가자는 빠진다. */
   listParticipants(roomId: string): RoomParticipantRow[] {
     return getConnection()
-      .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants WHERE room_id = ? ORDER BY position`)
+      .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants WHERE room_id = ? AND left_at IS NULL ORDER BY position`)
+      .all(roomId) as RoomParticipantRow[];
+  },
+
+  /** 퇴장한 참가자. 타임라인의 지난 발언에 이름을 붙이는 데만 쓴다. */
+  listFormerParticipants(roomId: string): RoomParticipantRow[] {
+    return getConnection()
+      .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants WHERE room_id = ? AND left_at IS NOT NULL ORDER BY position`)
       .all(roomId) as RoomParticipantRow[];
   },
 
   listAllParticipants(): RoomParticipantRow[] {
     return getConnection()
-      .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants ORDER BY room_id, position`)
+      .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants WHERE left_at IS NULL ORDER BY room_id, position`)
       .all() as RoomParticipantRow[];
+  },
+
+  updateParticipantPermission(participantId: string, permissionMode: string): void {
+    getConnection()
+      .prepare('UPDATE room_participants SET permission_mode = ? WHERE participant_id = ?')
+      .run(permissionMode, participantId);
+  },
+
+  markParticipantLeft(roomId: string, participantId: string): void {
+    getConnection()
+      .prepare('UPDATE room_participants SET left_at = CURRENT_TIMESTAMP WHERE participant_id = ? AND room_id = ?')
+      .run(participantId, roomId);
+    this.touchRoom(roomId);
   },
 
   updateRoomSettings(roomId: string, settings: { permissionMode?: string; maxAutoTurns?: number }): void {
@@ -166,14 +199,21 @@ export const roomsDb = {
       .run(messageId, participantId, messageId);
   },
 
-  insertMessage(message: { roomId: string; speaker: string; text: string; status: string; sessionId: string | null }): RoomMessageRow {
+  insertMessage(message: {
+    roomId: string;
+    speaker: string;
+    text: string;
+    status: string;
+    sessionId: string | null;
+    attachments?: string | null;
+  }): RoomMessageRow {
     const db = getConnection();
     const result = db
       .prepare(
-        `INSERT INTO room_messages (room_id, speaker, text, status, session_id)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO room_messages (room_id, speaker, text, status, session_id, attachments)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(message.roomId, message.speaker, message.text, message.status, message.sessionId);
+      .run(message.roomId, message.speaker, message.text, message.status, message.sessionId, message.attachments ?? null);
     this.touchRoom(message.roomId);
     return db
       .prepare('SELECT * FROM room_messages WHERE id = ?')

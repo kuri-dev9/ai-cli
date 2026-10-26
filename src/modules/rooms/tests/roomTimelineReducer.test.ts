@@ -35,6 +35,7 @@ const detail: RoomDetail = {
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [],
+  formerParticipants: [],
   messages: [],
   state: idleState,
 };
@@ -46,6 +47,7 @@ const message = (overrides: Partial<RoomMessage>): RoomMessage => ({
   text: 'hello',
   status: 'complete',
   sessionId: null,
+  attachments: [],
   createdAt: '2026-10-25T00:00:01.000Z',
   ...overrides,
 });

@@ -1,20 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { ChangeEvent, Dispatch, KeyboardEvent, MouseEvent, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, SendIcon, Square, UserPlus } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, Loader2, Settings2, Square, UserPlus } from 'lucide-react';
 
 import {
+  ChatComposer,
+  CommandResultModal,
   MessageComponent,
-  PermissionRequestsBanner,
   createCachedDiffCalculator,
   grantClaudeToolPermission,
   normalizedToChatMessages,
+  useChatComposerState,
+  useChatProviderState,
 } from '@/modules/chat';
 import { ROOM_MAX_PARTICIPANTS } from '@/shared/constants';
+import { useWebSocket } from '@/shared/context/WebSocketContext';
 import { applyRoomDetailToIndex } from '@/shared/hooks/useRoomIndex';
 import type {
   ChatMessage,
+  PendingPermissionRequest,
+  PermissionMode,
   Project,
+  ProjectSession,
   RoomDetail,
   RoomMessage,
   RoomParticipant,
@@ -22,10 +29,12 @@ import type {
   SessionNavigationOptions,
 } from '@/shared/types';
 import { Button, LLMProviderLogo } from '@/shared/ui';
-import { cn } from '@/shared/utils';
+import { cn, isImageAttachment } from '@/shared/utils';
 import { useHostHistory } from '@/modules/rooms/hooks/useHostHistory';
 import { useRoom } from '@/modules/rooms/hooks/useRoom';
+import { useSessionTokenUsage } from '@/modules/rooms/hooks/useSessionTokenUsage';
 import InviteParticipantModal from '@/modules/rooms/InviteParticipantModal';
+import ParticipantSettingsPanel from '@/modules/rooms/ParticipantSettingsPanel';
 import {
   applyMention,
   filterMentionCandidates,
@@ -36,10 +45,13 @@ import type { MentionQuery } from '@/modules/rooms/utils/roomMentions';
 type RoomInterfaceProps = {
   /** The room host session currently selected in the workspace. */
   hostSessionId: string;
+  /** The same host session as a session record; slash commands run against it. */
+  hostSession?: ProjectSession | null;
   selectedProject: Project;
   onNavigateToSession?: (targetSessionId: string, options?: SessionNavigationOptions) => void;
   // Same loose signature as ChatInterface: the workspace's opener takes diff info typed by the code editor.
   onFileOpen?: (filePath: string, diffInfo?: any) => void;
+  onShowSettings?: () => void;
   showRawParameters?: boolean;
   showThinking?: boolean;
   sendByCtrlEnter?: boolean;
@@ -63,7 +75,23 @@ const colorFor = (participant: RoomParticipant | undefined) =>
 // rendered as if grouped under this anchor.
 const GROUPED_ASSISTANT_ANCHOR: ChatMessage = { type: 'assistant', timestamp: 0 };
 
-function ParticipantBadge({ participant, hostLabel }: { participant: RoomParticipant | undefined; hostLabel: string }) {
+// The composer's own permission menu is not shown in a room (each participant
+// has its own preset), so these stand in for the chat-session permission hooks.
+const noop = () => {};
+const keepPermissionMode = (_provider: unknown, mode: PermissionMode | string) => mode as PermissionMode;
+// Room permission prompts come from useRoom, not from the composer's state.
+const ignorePermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>> = noop;
+
+function ParticipantBadge({
+  participant,
+  hostLabel,
+  leftLabel,
+}: {
+  participant: RoomParticipant | undefined;
+  hostLabel: string;
+  /** Set for a member who has left, to mark their earlier entries. */
+  leftLabel?: string;
+}) {
   const color = colorFor(participant);
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -76,6 +104,9 @@ function ParticipantBadge({ participant, hostLabel }: { participant: RoomPartici
       {participant?.isHost && (
         <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{hostLabel}</span>
       )}
+      {leftLabel && (
+        <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{leftLabel}</span>
+      )}
     </span>
   );
 }
@@ -83,27 +114,34 @@ function ParticipantBadge({ participant, hostLabel }: { participant: RoomPartici
 /**
  * Used by the project-workspace module in place of ChatInterface when the
  * selected session hosts a team room: one shared timeline with per-speaker
- * badges, the running participant's live turn, its permission prompts and a
- * composer that accepts messages at any time.
+ * badges, the running participant's live turn, its permission prompts, the
+ * per-participant settings under the member chips, and the same composer a
+ * chat uses, which accepts messages at any time.
  */
 export function RoomInterface({
   hostSessionId,
+  hostSession = null,
   selectedProject,
   onNavigateToSession,
   onFileOpen,
+  onShowSettings,
   showRawParameters,
   showThinking,
   sendByCtrlEnter,
 }: RoomInterfaceProps) {
   const { t } = useTranslation('chat');
+  const { sendMessage } = useWebSocket();
   const {
     detail,
     liveFrames,
     pendingPermissions,
     loadError,
     postMessage,
+    interrupt,
     stop,
     updateSettings,
+    updateParticipant,
+    removeParticipant,
     applyDetail,
     answerPermission,
   } = useRoom(hostSessionId);
@@ -120,39 +158,45 @@ export function RoomInterface({
     [hostHistory.state],
   );
 
-  // Composer text, owned here because mention completion rewrites it.
-  const [input, setInput] = useState('');
   // The `@` mention being typed at the caret, which drives the suggestion list.
   const [mention, setMention] = useState<MentionQuery | null>(null);
   // Highlighted suggestion while the mention list is open.
   const [mentionIndex, setMentionIndex] = useState(0);
-  // In-flight flag for the send request, to block duplicate submits.
-  const [sending, setSending] = useState(false);
   // Last send/stop/settings failure, shown above the composer until the next attempt.
   const [actionError, setActionError] = useState<string | null>(null);
   // Whether the add-participant modal is open.
   const [inviteOpen, setInviteOpen] = useState(false);
+  // The participant whose settings strip is open under the chips; one at a time.
+  const [settingsParticipantId, setSettingsParticipantId] = useState<string | null>(null);
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Follow new content only while the user is already at the bottom.
   const followBottomRef = useRef(true);
 
   const participants = useMemo(() => detail?.participants ?? [], [detail]);
+  const formerParticipantIds = useMemo(
+    () => new Set((detail?.formerParticipants ?? []).map((participant) => participant.participantId)),
+    [detail],
+  );
+  // Former members stay resolvable so their earlier entries keep a name.
   const participantsById = useMemo(
-    () => new Map(participants.map((participant) => [participant.participantId, participant])),
-    [participants],
+    () => new Map([...(detail?.formerParticipants ?? []), ...participants].map((participant) => [participant.participantId, participant])),
+    [detail, participants],
   );
   const roomState = detail?.state ?? null;
   const isRunning = roomState?.status === 'running';
   const activeParticipant = roomState?.activeParticipantId
     ? participantsById.get(roomState.activeParticipantId)
     : undefined;
+  const settingsParticipant = participants.find((participant) => participant.participantId === settingsParticipantId);
+  // A finished turn always lands a timeline entry, so this doubles as "refresh token usage".
+  const timelineLength = detail?.messages.length ?? 0;
 
   const mentionCandidates = useMemo(
     () => (mention ? filterMentionCandidates(participants.map((p) => p.displayName), mention.query) : []),
     [mention, participants],
   );
+  const isMentionListOpen = Boolean(mention && mentionCandidates.length > 0);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -176,22 +220,64 @@ export function RoomInterface({
     }
   }, []);
 
-  const handleSend = async () => {
-    const content = input.trim();
-    if (!content || sending) return;
-    setSending(true);
+  // Host-side state for the composer: slash commands, `/model` and `/cost`
+  // resolve against the host session, the way they would in its own chat.
+  const hostProvider = useChatProviderState({ selectedSession: hostSession, selectedProject });
+  const hostTokenUsage = useSessionTokenUsage(hostSessionId, timelineLength);
+
+  /**
+   * Where the composer's send goes. Slash commands (and the text a custom
+   * command expands into) run as written in the host session; everything else
+   * is a room message the participants answer in turn.
+   */
+  const submitToRoom = useCallback(async (submission: { content: string; attachments: unknown[]; fromCommand: boolean }) => {
     setActionError(null);
     try {
-      await postMessage(content);
-      setInput('');
+      await postMessage({
+        content: submission.content,
+        attachments: submission.attachments,
+        hostCommand: submission.fromCommand || submission.content.trimStart().startsWith('/'),
+      });
       setMention(null);
       followBottomRef.current = true;
     } catch (error) {
       setActionError(t('rooms.sendFailed', { error: error instanceof Error ? error.message : String(error) }));
-    } finally {
-      setSending(false);
+      throw error;
     }
-  };
+  }, [postMessage, t]);
+
+  // Command output and upload failures the composer would add to a chat
+  // transcript; a room has no local transcript, so they show as the notice.
+  const showComposerMessage = useCallback((message: ChatMessage) => {
+    if (typeof message.content === 'string' && message.content) {
+      setActionError(message.content);
+    }
+  }, []);
+
+  const composer = useChatComposerState({
+    selectedProject,
+    selectedSession: hostSession,
+    currentSessionId: hostSessionId,
+    provider: hostProvider.provider,
+    permissionMode: hostProvider.permissionMode,
+    cyclePermissionMode: noop,
+    resolvePermissionModeForProvider: keepPermissionMode,
+    currentProviderModel: hostProvider.currentProviderModel,
+    currentProviderEffort: hostProvider.currentProviderEffort,
+    // The server queues a message sent mid-turn itself, so the composer never holds one back.
+    isLoading: false,
+    canAbortSession: false,
+    tokenBudget: hostTokenUsage,
+    sendMessage,
+    sendByCtrlEnter,
+    onFileOpen,
+    onShowSettings,
+    scrollToBottom: noop,
+    addMessage: showComposerMessage,
+    setIsUserScrolledUp: noop,
+    setPendingPermissionRequests: ignorePermissionRequests,
+    submitOverride: submitToRoom,
+  });
 
   const updateMentionFromCaret = (text: string, caret: number) => {
     setMention(findMentionQuery(text, caret));
@@ -199,10 +285,10 @@ export function RoomInterface({
   };
 
   const chooseMention = (name: string) => {
-    const textarea = textareaRef.current;
+    const textarea = composer.textareaRef.current;
     if (!mention || !textarea) return;
-    const next = applyMention(input, textarea.selectionStart ?? input.length, mention, name);
-    setInput(next.text);
+    const next = applyMention(composer.input, textarea.selectionStart ?? composer.input.length, mention, name);
+    composer.setInput(next.text);
     setMention(null);
     requestAnimationFrame(() => {
       textarea.focus();
@@ -210,10 +296,21 @@ export function RoomInterface({
     });
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent.isComposing) return;
+  const handleInputChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    composer.handleInputChange(event);
+    updateMentionFromCaret(event.target.value, event.target.selectionStart ?? event.target.value.length);
+  };
 
-    if (mention && mentionCandidates.length > 0) {
+  const handleTextareaClick = (event: MouseEvent<HTMLTextAreaElement>) => {
+    composer.handleTextareaClick(event);
+    const target = event.currentTarget;
+    updateMentionFromCaret(target.value, target.selectionStart ?? target.value.length);
+  };
+
+  // Participant mentions take the keyboard while their list is open; every
+  // other key (send, history, file mentions, commands) is the composer's.
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!event.nativeEvent.isComposing && isMentionListOpen) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
@@ -231,14 +328,7 @@ export function RoomInterface({
         return;
       }
     }
-
-    if (event.key === 'Enter') {
-      const wantsSend = sendByCtrlEnter ? (event.ctrlKey || event.metaKey) : !event.shiftKey;
-      if (wantsSend) {
-        event.preventDefault();
-        void handleSend();
-      }
-    }
+    composer.handleKeyDown(event);
   };
 
   const handleGrantToolPermission = useCallback((suggestion: { entry: string; toolName: string }) => {
@@ -268,6 +358,17 @@ export function RoomInterface({
     applyRoomDetailToIndex(nextDetail);
   };
 
+  const handleLeave = (participantId: string) => {
+    void runAction(async () => {
+      const nextDetail = await removeParticipant(participantId);
+      if (nextDetail) {
+        // The departed session reads as a plain chat in the sidebar again.
+        applyRoomDetailToIndex(nextDetail);
+      }
+      setSettingsParticipantId(null);
+    });
+  };
+
   if (!detail) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -286,7 +387,13 @@ export function RoomInterface({
       return (
         <MessageComponent
           key={message.id}
-          message={{ type: 'user', content: message.text, timestamp: message.createdAt }}
+          message={{
+            type: 'user',
+            content: message.text,
+            images: (message.attachments ?? []).filter(isImageAttachment),
+            files: (message.attachments ?? []).filter((attachment) => !isImageAttachment(attachment)),
+            timestamp: message.createdAt,
+          }}
           prevMessage={null}
           createDiff={createDiff}
           provider="claude"
@@ -299,7 +406,11 @@ export function RoomInterface({
     return (
       <div key={message.id} className="space-y-1">
         <div className="flex items-center gap-2 px-3 sm:px-0">
-          <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
+          <ParticipantBadge
+            participant={participant}
+            hostLabel={t('rooms.host')}
+            leftLabel={formerParticipantIds.has(message.speaker) ? t('rooms.formerParticipant') : undefined}
+          />
           {message.status !== 'complete' && (
             <span className="rounded bg-red-500/10 px-1.5 text-[10px] text-red-600 dark:text-red-400">
               {message.status === 'aborted' ? t('rooms.aborted') : t('rooms.error')}
@@ -331,31 +442,102 @@ export function RoomInterface({
   };
 
   const isFull = participants.length >= ROOM_MAX_PARTICIPANTS;
-  const permissionOptions: Array<{ value: RoomPermissionMode; label: string }> = [
-    { value: 'ask', label: t('rooms.permissionAsk') },
-    { value: 'read', label: t('rooms.permissionRead') },
-    { value: 'full', label: t('rooms.permissionFull') },
-  ];
+  const waitingUserMessage = isRunning && roomState?.pendingUserMessage
+    ? [...detail.messages].reverse().find((message) => message.speaker === 'user')
+    : undefined;
+
+  const composerNotices = (
+    <>
+      {actionError && (
+        <p role="alert" className="mx-auto mb-2 max-w-[54.25rem] px-1 text-xs text-red-600 dark:text-red-400">{actionError}</p>
+      )}
+      {waitingUserMessage && (
+        <div className="mx-auto mb-2 max-w-[54.25rem] rounded-xl border border-dashed border-primary/25 bg-primary/[0.04] px-3 py-2">
+          <div className="flex items-center gap-2.5">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-medium text-primary/70">
+                {t('rooms.pendingTitle')}
+                <span className="font-normal text-muted-foreground/60"> · {t('rooms.pendingHint')}</span>
+              </div>
+              <p className="mt-0.5 line-clamp-2 break-words text-sm text-foreground/90">{waitingUserMessage.text}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 px-2 text-xs"
+              title={t('rooms.interruptNowTitle')}
+              onClick={() => void runAction(interrupt)}
+            >
+              {t('rooms.interruptNow')}
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const mentionList = isMentionListOpen ? (
+    <ul className="absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-border/50 bg-card/95 py-1 shadow-lg backdrop-blur-md" role="listbox">
+      {mentionCandidates.map((name, index) => {
+        const participant = participants.find((candidate) => candidate.displayName === name);
+        return (
+          <li key={name} role="option" aria-selected={index === mentionIndex}>
+            <button
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                chooseMention(name);
+              }}
+              className={cn('flex w-full px-3 py-1.5 text-left', index === mentionIndex && 'bg-accent')}
+            >
+              <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Participant strip and room status */}
       <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
-        {participants.map((participant) => (
-          <button
-            key={participant.participantId}
-            type="button"
-            onClick={() => openParticipantSession(participant.sessionId)}
-            title={t('rooms.openSession')}
-            className={cn(
-              'flex max-w-[14rem] items-center rounded-full border px-2 py-0.5',
-              colorFor(participant).ring,
-              roomState?.activeParticipantId === participant.participantId && 'ring-2 ring-primary/40',
-            )}
-          >
-            <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
-          </button>
-        ))}
+        {participants.map((participant) => {
+          const settingsOpen = settingsParticipantId === participant.participantId;
+          return (
+            <div
+              key={participant.participantId}
+              className={cn(
+                'flex max-w-[16rem] items-center rounded-full border',
+                colorFor(participant).ring,
+                roomState?.activeParticipantId === participant.participantId && 'ring-2 ring-primary/40',
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => openParticipantSession(participant.sessionId)}
+                title={t('rooms.openSession')}
+                className="flex min-w-0 items-center py-0.5 pl-2 pr-1"
+              >
+                <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsParticipantId(settingsOpen ? null : participant.participantId)}
+                aria-expanded={settingsOpen}
+                aria-label={t('rooms.participantSettings', { name: participant.displayName })}
+                title={t('rooms.participantSettings', { name: participant.displayName })}
+                className={cn(
+                  'mr-1 rounded-full p-1 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground',
+                  settingsOpen && 'bg-background/70 text-foreground',
+                )}
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          );
+        })}
         <Button
           variant="ghost"
           size="sm"
@@ -376,16 +558,6 @@ export function RoomInterface({
               : t('rooms.statusIdle')}
           </span>
           <span>{t('rooms.turnCount', { count: roomState?.turnCount ?? 0, max: roomState?.maxAutoTurns ?? detail.room.maxAutoTurns })}</span>
-          <select
-            aria-label={t('rooms.permissionMode')}
-            value={detail.room.permissionMode}
-            onChange={(event) => void runAction(() => updateSettings({ permissionMode: event.target.value as RoomPermissionMode }))}
-            className="rounded border border-border bg-background px-1 py-0.5 text-xs"
-          >
-            {permissionOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
           <select
             aria-label={t('rooms.maxAutoTurns')}
             title={t('rooms.maxAutoTurns')}
@@ -410,6 +582,21 @@ export function RoomInterface({
           )}
         </div>
       </div>
+
+      {settingsParticipant && (
+        <ParticipantSettingsPanel
+          key={settingsParticipant.participantId}
+          participant={settingsParticipant}
+          isSpeaking={isRunning && roomState?.activeParticipantId === settingsParticipant.participantId}
+          refreshKey={timelineLength}
+          onChangePermission={(mode: RoomPermissionMode) => void runAction(
+            () => updateParticipant(settingsParticipant.participantId, { permissionMode: mode }),
+          )}
+          onLeave={() => handleLeave(settingsParticipant.participantId)}
+          onOpenSession={() => openParticipantSession(settingsParticipant.sessionId)}
+          onClose={() => setSettingsParticipantId(null)}
+        />
+      )}
 
       {/* Shared timeline */}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
@@ -493,76 +680,81 @@ export function RoomInterface({
         </div>
       </div>
 
-      {/* Permission prompts, hints and composer */}
-      <div className="flex-shrink-0 border-t border-border/60 px-3 pb-3 pt-2">
-        <div className="mx-auto max-w-4xl">
-          <PermissionRequestsBanner
-            pendingPermissionRequests={pendingPermissions}
-            handlePermissionDecision={answerPermission}
-            handleGrantToolPermission={handleGrantToolPermission}
-          />
-          {isRunning && roomState?.pendingUserMessage && (
-            <p className="mb-1 text-xs text-muted-foreground">{t('rooms.queuedHint')}</p>
-          )}
-          {actionError && (
-            <p role="alert" className="mb-1 text-xs text-red-600 dark:text-red-400">{actionError}</p>
-          )}
-          <div className="relative">
-            {mention && mentionCandidates.length > 0 && (
-              <ul className="absolute bottom-full left-0 mb-1 w-56 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg" role="listbox">
-                {mentionCandidates.map((name, index) => {
-                  const participant = participants.find((p) => p.displayName === name);
-                  return (
-                    <li key={name} role="option" aria-selected={index === mentionIndex}>
-                      <button
-                        type="button"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          chooseMention(name);
-                        }}
-                        className={cn('flex w-full px-2 py-1 text-left', index === mentionIndex && 'bg-accent')}
-                      >
-                        <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <div className="flex items-end gap-2 rounded-xl border border-border bg-card p-2">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                rows={2}
-                onChange={(event) => {
-                  setInput(event.target.value);
-                  updateMentionFromCaret(event.target.value, event.target.selectionStart ?? event.target.value.length);
-                }}
-                onClick={(event) => updateMentionFromCaret(input, event.currentTarget.selectionStart ?? input.length)}
-                onKeyDown={handleKeyDown}
-                placeholder={t('rooms.composerPlaceholder')}
-                className="max-h-48 min-h-10 flex-1 resize-none bg-transparent px-1 text-sm text-foreground focus:outline-none"
-              />
-              <Button
-                size="sm"
-                className="h-8 w-8 flex-shrink-0 p-0"
-                disabled={!input.trim() || sending}
-                onClick={() => void handleSend()}
-                aria-label={t('rooms.send')}
-                title={t('rooms.send')}
-              >
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendIcon className="h-4 w-4" />}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* The same composer a chat uses; permission prompts ride in its banner. */}
+      <ChatComposer
+        pendingPermissionRequests={pendingPermissions}
+        handlePermissionDecision={answerPermission}
+        handleGrantToolPermission={handleGrantToolPermission}
+        activity={null}
+        isLoading={false}
+        onAbortSession={noop}
+        tokenBudget={hostTokenUsage}
+        onShowTokenUsage={composer.showCostModal}
+        isEditingSentMessage={false}
+        onCancelEditMessage={noop}
+        slashCommandsCount={composer.slashCommandsCount}
+        onToggleCommandMenu={composer.handleToggleCommandMenu}
+        hasInput={Boolean(composer.input.trim())}
+        onClearInput={composer.handleClearInput}
+        onSubmit={composer.handleSubmit}
+        isDragActive={composer.isDragActive}
+        queuedDrafts={composer.queuedDrafts}
+        onEditQueuedDraft={composer.editQueuedDraft}
+        onDeleteQueuedDraft={composer.deleteQueuedDraft}
+        attachedFiles={composer.attachedFiles}
+        onRemoveAttachment={(index) =>
+          composer.setAttachedFiles((previous) => previous.filter((_, currentIndex) => currentIndex !== index))
+        }
+        fileErrors={composer.fileErrors}
+        showFileDropdown={composer.showFileDropdown && !isMentionListOpen}
+        filteredFiles={composer.filteredFiles}
+        selectedFileIndex={composer.selectedFileIndex}
+        onSelectFile={composer.selectFile}
+        filteredCommands={composer.filteredCommands}
+        selectedCommandIndex={composer.selectedCommandIndex}
+        onCommandSelect={composer.handleCommandSelect}
+        onCloseCommandMenu={composer.resetCommandMenuState}
+        isCommandMenuOpen={composer.showCommandMenu}
+        frequentCommands={composer.commandQuery ? [] : composer.frequentCommands}
+        getRootProps={composer.getRootProps as (...args: unknown[]) => Record<string, unknown>}
+        getInputProps={composer.getInputProps as (...args: unknown[]) => Record<string, unknown>}
+        openAttachmentPicker={composer.openAttachmentPicker}
+        inputHighlightRef={composer.inputHighlightRef}
+        renderInputWithMentions={composer.renderInputWithMentions}
+        textareaRef={composer.textareaRef}
+        input={composer.input}
+        onVoiceTranscript={composer.handleVoiceTranscript}
+        onInputChange={handleInputChange}
+        onTextareaClick={handleTextareaClick}
+        onTextareaKeyDown={handleKeyDown}
+        onTextareaPaste={composer.handlePaste}
+        onTextareaScrollSync={composer.syncInputOverlayScroll}
+        onTextareaInput={composer.handleTextareaInput}
+        isInputFocused={composer.isInputFocused}
+        onInputFocusChange={composer.handleInputFocusChange}
+        placeholder={t('rooms.composerPlaceholder')}
+        isTextareaExpanded={composer.isTextareaExpanded}
+        sendByCtrlEnter={sendByCtrlEnter}
+        aboveInput={composerNotices}
+        inputPopover={mentionList}
+      />
+
+      <CommandResultModal
+        payload={composer.commandModalPayload}
+        onClose={composer.closeCommandModal}
+        providerModelCatalog={hostProvider.providerModelCatalog}
+        providerModelActions={hostProvider.providerModelActions}
+        activeProvider={hostProvider.provider}
+        activeProviderModel={hostProvider.currentProviderModel}
+        currentSessionId={hostSessionId}
+        onSelectProviderModel={hostProvider.selectProviderModel}
+      />
 
       <InviteParticipantModal
         open={inviteOpen}
         onOpenChange={setInviteOpen}
         target={{ kind: 'add', roomId: detail.room.roomId }}
-        takenNames={participants.map((participant) => participant.displayName)}
+        takenNames={[...participants, ...(detail.formerParticipants ?? [])].map((participant) => participant.displayName)}
         onInvited={handleInvited}
       />
     </div>

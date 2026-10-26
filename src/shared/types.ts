@@ -1345,6 +1345,16 @@ export type RoomParticipant = {
   rolePrompt: string;
   position: number;
   isHost: boolean;
+  /** Permission preset this participant's turns run with; the room's preset unless set per participant. */
+  permissionMode: RoomPermissionMode;
+};
+
+/** One file the user attached to a room message, in the same shape as a chat attachment; it rides along on the participants' turns. */
+export type RoomAttachment = {
+  path: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
 };
 
 /** One persisted entry of a room's shared timeline; `speaker` is `'user'` or the participantId that wrote it, and `sessionId` points at the participant session that produced it. */
@@ -1355,6 +1365,8 @@ export type RoomMessage = {
   text: string;
   status: 'complete' | 'aborted' | 'error';
   sessionId: string | null;
+  /** Files attached to a user message; always empty on participant replies. */
+  attachments: RoomAttachment[];
   createdAt: string;
 };
 
@@ -1382,6 +1394,8 @@ export type RoomDetail = {
     createdAt: string;
   };
   participants: RoomParticipant[];
+  /** Members who left; kept only to name their earlier timeline entries. */
+  formerParticipants: RoomParticipant[];
   messages: RoomMessage[];
   state: RoomRuntimeState;
 };

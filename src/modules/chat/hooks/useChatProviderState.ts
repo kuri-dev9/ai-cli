@@ -132,6 +132,11 @@ const getSessionSelectionKey = (provider: LLMProvider, sessionId: string): strin
   `${provider}:${sessionId}`
 );
 
+/**
+ * Provider, model, effort and permission state for one session. Used by chat's
+ * ChatInterface, and by the rooms module once for the host (slash commands)
+ * and once per participant in its settings panel.
+ */
 export function useChatProviderState({ selectedSession, selectedProject: _selectedProject }: UseChatProviderStateArgs) {
   const enabledProviders = useEnabledProviders();
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');

@@ -96,6 +96,30 @@ router.post(
 );
 
 router.patch(
+  '/:roomId/participants/:participantId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = readBody(req);
+    const detail = roomsService.updateParticipant(
+      readRequiredString(req.params.roomId, 'roomId'),
+      readRequiredString(req.params.participantId, 'participantId'),
+      { permissionMode: body.permissionMode === undefined ? undefined : parseRoomPermissionMode(body.permissionMode) },
+    );
+    res.json(createApiSuccessResponse(detail));
+  }),
+);
+
+router.delete(
+  '/:roomId/participants/:participantId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const detail = roomsService.removeParticipant(
+      readRequiredString(req.params.roomId, 'roomId'),
+      readRequiredString(req.params.participantId, 'participantId'),
+    );
+    res.json(createApiSuccessResponse(detail));
+  }),
+);
+
+router.patch(
   '/:roomId',
   asyncHandler(async (req: Request, res: Response) => {
     const body = readBody(req);
@@ -110,12 +134,26 @@ router.patch(
 router.post(
   '/:roomId/messages',
   asyncHandler(async (req: Request, res: Response) => {
+    const body = readBody(req);
     const result = roomsService.postUserMessage(
       readRequiredString(req.params.roomId, 'roomId'),
-      readRequiredString(readBody(req).content, 'content'),
+      {
+        // 파일만 보낼 수도 있어 비어 있어도 된다. 둘 다 없으면 서비스가 거절한다.
+        content: readOptionalString(body.content)?.trim() ?? '',
+        attachments: body.attachments,
+        hostCommand: body.hostCommand === true,
+      },
       readUserId(req),
     );
     res.status(202).json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/:roomId/interrupt',
+  asyncHandler(async (req: Request, res: Response) => {
+    const state = await roomsService.interrupt(readRequiredString(req.params.roomId, 'roomId'));
+    res.json(createApiSuccessResponse({ state }));
   }),
 );
 
