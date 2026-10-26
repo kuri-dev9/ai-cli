@@ -119,6 +119,9 @@ type ChatComposerProps = {
   onTextareaInput: (event: FormEvent<HTMLTextAreaElement>) => void;
   isInputFocused?: boolean;
   onInputFocusChange?: (focused: boolean) => void;
+  /** Brackets an IME composition so a draft restore cannot land inside one. */
+  onCompositionStart?: () => void;
+  onCompositionEnd?: () => void;
   placeholder: string;
   isTextareaExpanded: boolean;
   sendByCtrlEnter?: boolean;
@@ -194,6 +197,8 @@ export default function ChatComposer({
   onTextareaInput,
   isInputFocused = false,
   onInputFocusChange,
+  onCompositionStart,
+  onCompositionEnd,
   placeholder,
   isTextareaExpanded,
   sendByCtrlEnter,
@@ -455,6 +460,8 @@ export default function ChatComposer({
               onScroll={(event) => onTextareaScrollSync(event.target as HTMLTextAreaElement)}
               onFocus={() => onInputFocusChange?.(true)}
               onBlur={() => onInputFocusChange?.(false)}
+              onCompositionStart={() => onCompositionStart?.()}
+              onCompositionEnd={() => onCompositionEnd?.()}
               onInput={onTextareaInput}
               placeholder={placeholder}
             />

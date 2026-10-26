@@ -289,6 +289,14 @@ export function useChatComposerState({
     ) => Promise<void>) | null
   >(null);
   const inputValueRef = useRef(input);
+  /**
+   * Whether an IME composition is open in the textarea.
+   *
+   * A ref, not state: it is read inside the draft subscription and must never
+   * re-render the composer. Nothing else in the app tracked composition, which
+   * is why an outside restore could tear one apart unnoticed.
+   */
+  const composingRef = useRef(false);
   // Set while a custom command's expanded text is being submitted, so a
   // submitOverride can tell it apart from text the user typed.
   const submittingCommandRef = useRef(false);
@@ -1101,6 +1109,19 @@ export function useChatComposerState({
 
   // Swap in the open scope's draft, and pick up one that arrives from another
   // device with the hydrated drafts.
+  //
+  // The subscription is the delicate half. `subscribeToChatDrafts` has no
+  // scope filter — every draft write in the tab, in any conversation, wakes
+  // every composer — and a restore rewrites the controlled textarea's value.
+  // Doing that to someone who is mid-word puts the box back a keystroke, and
+  // on an IME (한글) it tears the composition apart: the browser keeps
+  // reporting `isComposing`, so `handleKeyDown` swallows every Enter after
+  // that and the message never sends. The box still shows the text, which is
+  // exactly what the bug looked like.
+  //
+  // So an external notification only restores a composer nobody is typing
+  // into. A scope change still restores unconditionally — that is a different
+  // conversation's text and has to be swapped in.
   useEffect(() => {
     if (!draftScope) {
       return;
@@ -1118,7 +1139,17 @@ export function useChatComposerState({
     };
 
     restoreDraft();
-    return subscribeToChatDrafts(restoreDraft);
+
+    return subscribeToChatDrafts(() => {
+      const textarea = textareaRef.current;
+      const isBeingTypedInto =
+        composingRef.current
+        || (textarea !== null && textarea === textarea.ownerDocument.activeElement);
+      if (isBeingTypedInto) {
+        return;
+      }
+      restoreDraft();
+    });
   }, [draftScope]);
 
   // Only persist text that was typed for the scope it is about to be written
@@ -1339,6 +1370,22 @@ export function useChatComposerState({
     [],
   );
 
+  /**
+   * Brackets an IME composition so a draft restore cannot land inside one.
+   *
+   * `compositionend` fires before the `keydown` that committed it, so the flag
+   * is already down by the time an Enter that ends composition reaches
+   * `handleKeyDown` — the Enter that commits a 한글 syllable still only
+   * commits, because that event carries `isComposing` itself.
+   */
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(() => {
+    composingRef.current = false;
+  }, []);
+
   /** Loads an already-sent message back into the composer to be replaced. */
   const beginEditMessage = useCallback((message: ChatMessage) => {
     if (!message.transcriptAnchorId) return;
@@ -1424,6 +1471,8 @@ export function useChatComposerState({
     handlePermissionDecision,
     handleGrantToolPermission,
     handleInputFocusChange,
+    handleCompositionStart,
+    handleCompositionEnd,
     isInputFocused,
     commandModalPayload,
     closeCommandModal,

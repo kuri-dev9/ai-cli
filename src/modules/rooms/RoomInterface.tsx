@@ -994,6 +994,8 @@ export function RoomInterface({
         onTextareaInput={composer.handleTextareaInput}
         isInputFocused={composer.isInputFocused}
         onInputFocusChange={composer.handleInputFocusChange}
+        onCompositionStart={composer.handleCompositionStart}
+        onCompositionEnd={composer.handleCompositionEnd}
         placeholder={t('rooms.composerPlaceholder')}
         isTextareaExpanded={composer.isTextareaExpanded}
         sendByCtrlEnter={sendByCtrlEnter}
