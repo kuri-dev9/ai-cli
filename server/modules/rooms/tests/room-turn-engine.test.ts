@@ -44,7 +44,16 @@ function createRuntime(script: Script, calls: Call[], aborts: string[] = []) {
   } as never;
 }
 
-async function withRoom(maxAutoTurns: number, runTest: () => Promise<void>): Promise<void> {
+/**
+ * 테스트 하나를 새 DB 와 두 참가자 룸에서 돌린다. 분담·의견은 기본으로 꺼 둔다 —
+ * 켜 두면 차례마다 의견 차례가 끼어 순서를 보는 테스트가 흐려진다. 그 둘을 보는
+ * 테스트만 켠다.
+ */
+async function withRoom(
+  maxAutoTurns: number,
+  runTest: () => Promise<void>,
+  collaboration: { splitWork?: boolean; discussion?: boolean } = {},
+): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'room-engine-'));
   closeConnection();
@@ -63,6 +72,10 @@ async function withRoom(maxAutoTurns: number, runTest: () => Promise<void>): Pro
         { participant_id: 'p-rev', session_id: REVIEWER, provider: 'claude', model: 'sonnet', display_name: 'Claude2', role_name: '리뷰어', role_prompt: '깐깐하게 본다', position: 1 },
       ],
     );
+    roomsDb.updateRoomSettings(ROOM_ID, {
+      splitWork: collaboration.splitWork ?? false,
+      discussion: collaboration.discussion ?? false,
+    });
     await runTest();
   } finally {
     roomTurnEngine.close();
@@ -356,4 +369,101 @@ test('a participant can leave, but the host cannot', async () => {
     assert.equal(roomsDb.getParticipantBySession(REVIEWER), null);
     assert.deepEqual(roomsService.listRoomIndex()[0].participants.map((participant) => participant.participantId), ['p-host']);
   });
+});
+
+function kinds(): Array<string | null> {
+  return roomsDb.listMessages(ROOM_ID).map((row) => row.turn_kind);
+}
+
+test('a plan splits the work, the assignees work at the same time, and the lead sums up', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [
+        '이렇게 나눕니다.\n[작업 @Claude2 수정] 로그인 테스트 작성\n[작업 @Claude] 기존 인증 코드 조사',
+        async () => { await gate; return '인증은 세션 토큰을 씁니다'; },
+        '정리: 테스트와 조사 결과를 합쳤습니다\n[DONE]',
+      ],
+      [REVIEWER]: [async () => { await gate; return '테스트 3개를 추가했습니다'; }],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '로그인 기능 손봐줘' }, 1);
+    // 두 사람이 동시에 일한다: 어느 쪽도 끝나기 전에 둘 다 시작했다.
+    await waitFor(() => calls.length === 3, 'both assignees started');
+    const working = roomTurnEngine.getState(ROOM_ID, 6);
+    assert.equal(working.phase, 'working');
+    assert.deepEqual([...working.activeParticipantIds].sort(), ['p-host', 'p-rev']);
+    release();
+    await waitFor(() => isIdle() && speakers().length === 5, 'summary');
+
+    // 첫 차례는 나눌 수 있다는 안내를 받는다.
+    assert.match(calls[0].command, /\[분담\]/);
+    const reviewerTask = calls.find((call) => call.sessionId === REVIEWER)!;
+    const hostTask = calls[1].sessionId === HOST ? calls[1] : calls[2];
+    assert.match(reviewerTask.command, /수정 담당/);
+    assert.match(hostTask.command, /파일 수정: 불가/);
+    // 수정 담당이 아닌 쪽은 쓰기 도구가 막힌다.
+    assert.deepEqual((hostTask.options.toolsSettings as { disallowedTools: string[] }).disallowedTools, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+    assert.equal(reviewerTask.options.toolsSettings, undefined);
+    // 리더가 결과를 받아 정리한다.
+    assert.match(calls[3].command, /\[정리\]/);
+    assert.match(calls[3].command, /테스트 3개를 추가했습니다/);
+
+    assert.deepEqual(kinds(), [null, 'plan', 'task', 'task', 'summary']);
+    const tasks = roomsService.getRoomDetail(ROOM_ID).messages.filter((message) => message.turnKind === 'task');
+    assert.deepEqual(
+      tasks.map((message) => message.task).sort((a, b) => Number(b?.canEdit) - Number(a?.canEdit)),
+      [{ text: '로그인 테스트 작성', canEdit: true }, { text: '기존 인증 코드 조사', canEdit: false }],
+    );
+  }, { splitWork: true });
+});
+
+test('with discussion on, the others weigh in on each reply and a bare [PASS] leaves no trace', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['설계안입니다', '[PASS]'],
+      [REVIEWER]: ['좋아요. 다만 토큰 만료를 같이 봐야 해요', '만료 처리를 넣었습니다 [DONE]'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '설계해줘' }, 1);
+    await waitFor(() => isIdle() && calls.length === 4, 'discussion');
+
+    assert.match(calls[1].command, /\[의견\] 방금 @Claude 의 답/);
+    // 의견 차례는 읽기 전용이다.
+    assert.ok(calls[1].options.toolsSettings);
+    assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev', 'p-rev']);
+    assert.deepEqual(kinds(), [null, 'reply', 'comment', 'reply']);
+  }, { discussion: true });
+});
+
+test('interrupting stops everyone working in parallel', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    const aborts: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['[작업 @Claude2] 조사\n[작업 @Claude] 정리', async () => { await gate; return '정리 중'; }, '알겠습니다 [DONE]'],
+      [REVIEWER]: [async () => { await gate; return '조사 중'; }],
+    }, calls, aborts));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => calls.length === 3, 'parallel started');
+    roomsService.postUserMessage(ROOM_ID, { content: '잠깐, 방향 바꿀게' }, 1);
+
+    const interrupting = roomsService.interrupt(ROOM_ID);
+    release();
+    await interrupting;
+    await waitFor(() => isIdle() && calls.length === 4, 'redirected');
+
+    assert.deepEqual([...aborts].sort(), [HOST, REVIEWER]);
+    const tasks = roomsDb.listMessages(ROOM_ID).filter((row) => row.turn_kind === 'task');
+    assert.deepEqual(tasks.map((row) => row.status), ['aborted', 'aborted']);
+    // 끊긴 뒤에는 정리가 아니라 사용자의 새 글로 넘어간다.
+    assert.match(calls[3].command, /방향 바꿀게/);
+    assert.doesNotMatch(calls[3].command, /\[정리\]/);
+  }, { splitWork: true });
 });

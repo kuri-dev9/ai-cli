@@ -57,8 +57,7 @@ export function useRoom(hostSessionId: string) {
 
   useRoomRealtime({
     roomId,
-    liveSessionId: viewState.live.sessionId,
-    liveLastSeq: viewState.live.lastSeq,
+    lives: viewState.lives,
     dispatch,
     reload: reloadInBackground,
   });
@@ -118,7 +117,7 @@ export function useRoom(hostSessionId: string) {
     return body.data ?? null;
   }, []);
 
-  const updateSettings = useCallback(async (changes: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number }) => {
+  const updateSettings = useCallback(async (changes: { maxAutoTurns?: number; splitWork?: boolean; discussion?: boolean }) => {
     if (!roomIdRef.current) return;
     const response = await api.rooms.update(roomIdRef.current, changes);
     const body = await readApiJson<{ data?: RoomDetail }>(response);
@@ -151,8 +150,7 @@ export function useRoom(hostSessionId: string) {
 
   return {
     detail: viewState.detail,
-    liveFrames: viewState.live.frames,
-    liveSessionId: viewState.live.sessionId,
+    lives: viewState.lives,
     pendingPermissions: viewState.pendingPermissions,
     loadError,
     postMessage,

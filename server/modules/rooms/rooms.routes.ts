@@ -126,6 +126,8 @@ router.patch(
     const detail = roomsService.updateSettings(readRequiredString(req.params.roomId, 'roomId'), {
       permissionMode: body.permissionMode === undefined ? undefined : parseRoomPermissionMode(body.permissionMode),
       maxAutoTurns: body.maxAutoTurns === undefined ? undefined : Number(body.maxAutoTurns),
+      splitWork: typeof body.splitWork === 'boolean' ? body.splitWork : undefined,
+      discussion: typeof body.discussion === 'boolean' ? body.discussion : undefined,
     });
     res.json(createApiSuccessResponse(detail));
   }),

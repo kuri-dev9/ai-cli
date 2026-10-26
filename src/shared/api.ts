@@ -439,7 +439,7 @@ export const api = {
     create: (input: CreateRoomInput) => post('/api/rooms', input),
     addParticipant: (roomId: string, participant: RoomParticipantInput) =>
       post(`/api/rooms/${encodeURIComponent(roomId)}/participants`, participant),
-    update: (roomId: string, changes: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number }) =>
+    update: (roomId: string, changes: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number; splitWork?: boolean; discussion?: boolean }) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}`, changes),
     // `hostCommand` runs the text as written in the host session instead of starting a round.
     postMessage: (roomId: string, message: { content: string; attachments?: unknown[]; hostCommand?: boolean }) =>

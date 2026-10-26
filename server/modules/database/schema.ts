@@ -293,6 +293,10 @@ CREATE TABLE IF NOT EXISTS rooms (
     permission_mode TEXT NOT NULL DEFAULT 'ask',
     -- 사용자 메시지 하나에 참가자끼리 자동으로 주고받는 최대 턴 수.
     max_auto_turns INTEGER NOT NULL DEFAULT 6,
+    -- 1 이면 리더가 일을 나눠 맡기고, 맡은 참가자들이 동시에 일한다.
+    split_work INTEGER NOT NULL DEFAULT 1,
+    -- 1 이면 한 참가자의 답마다 나머지가 짧게 의견을 낸다.
+    discussion INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (host_session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -340,6 +344,10 @@ CREATE TABLE IF NOT EXISTS room_messages (
     final_text TEXT,
     -- 답이 남긴 넘김 표시: done | pass | mention:<participant_id>. 없으면 NULL.
     handoff TEXT,
+    -- 답의 종류: reply | plan | task | comment | summary. 사용자 글과 예전 행은 NULL.
+    turn_kind TEXT,
+    -- 맡은 일({"text","canEdit"} JSON). task 답에만 있다.
+    task TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
 );

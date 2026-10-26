@@ -3,48 +3,50 @@ import type { Dispatch } from 'react';
 
 import { useWebSocket } from '@/shared/context/WebSocketContext';
 import type { RoomMessage, RoomRuntimeState, ServerEvent } from '@/shared/types';
-import type { RoomViewAction } from '@/modules/rooms/utils/roomTimelineReducer';
+import type { RoomLiveBuffer, RoomViewAction } from '@/modules/rooms/utils/roomTimelineReducer';
 
 type UseRoomRealtimeArgs = {
   roomId: string | null;
-  /** Session of the participant currently running, whose stream is attached. */
-  liveSessionId: string | null;
-  /** Highest live `seq` already applied, sent as `lastSeq` on (re)subscribe. */
-  liveLastSeq: number;
+  /** Streams of the participants running now, whose sessions get attached. */
+  lives: RoomLiveBuffer[];
   dispatch: Dispatch<RoomViewAction>;
   reload: () => void;
 };
 
+/** `chat.subscribe` entries for these streams, each resuming after the last `seq` it applied. */
+const toSubscriptions = (lives: RoomLiveBuffer[]) =>
+  lives.map((buffer) => ({ sessionId: buffer.sessionId, lastSeq: buffer.lastSeq }));
+
 /**
  * Feeds the room view from the shared chat websocket: room frames filtered by
- * roomId, plus the running participant's normal session frames, which this
- * hook attaches with `chat.subscribe` whenever the speaker changes.
+ * roomId, plus the running participants' normal session frames, which this
+ * hook attaches with `chat.subscribe` whenever a participant starts running.
  */
-export function useRoomRealtime({ roomId, liveSessionId, liveLastSeq, dispatch, reload }: UseRoomRealtimeArgs) {
+export function useRoomRealtime({ roomId, lives, dispatch, reload }: UseRoomRealtimeArgs) {
   const { subscribe, sendMessage } = useWebSocket();
   // Read inside the socket listener and the reconnect path without
   // re-registering the listener on every streamed frame.
-  const liveLastSeqRef = useRef(liveLastSeq);
-  const liveSessionIdRef = useRef(liveSessionId);
+  const livesRef = useRef(lives);
   const reloadRef = useRef(reload);
+  // Sessions already attached, so a streamed frame does not resubscribe them.
+  const subscribedRef = useRef(new Set<string>());
   // Declared before the subscribe effect so the refs are current when it runs.
   useLayoutEffect(() => {
-    liveLastSeqRef.current = liveLastSeq;
-    liveSessionIdRef.current = liveSessionId;
+    livesRef.current = lives;
     reloadRef.current = reload;
   });
 
-  // Attach to the new speaker's run. Its events only reach this socket once
-  // subscribed; the ack also replays anything already emitted this turn.
+  // Attach to each newly running session. Its events only reach this socket
+  // once subscribed; the ack also replays anything already emitted this turn.
+  const liveSessionKey = lives.map((buffer) => buffer.sessionId).join('\n');
   useEffect(() => {
-    if (!liveSessionId) {
-      return;
+    const running = livesRef.current;
+    const fresh = running.filter((buffer) => !subscribedRef.current.has(buffer.sessionId));
+    subscribedRef.current = new Set(running.map((buffer) => buffer.sessionId));
+    if (fresh.length > 0) {
+      sendMessage({ type: 'chat.subscribe', sessions: toSubscriptions(fresh) });
     }
-    sendMessage({
-      type: 'chat.subscribe',
-      sessions: [{ sessionId: liveSessionId, lastSeq: liveLastSeqRef.current }],
-    });
-  }, [liveSessionId, sendMessage]);
+  }, [liveSessionKey, sendMessage]);
 
   useEffect(() => {
     if (!roomId) {
@@ -70,12 +72,8 @@ export function useRoomRealtime({ roomId, liveSessionId, liveLastSeq, dispatch, 
           return;
         case 'websocket_reconnected': {
           reloadRef.current();
-          const sessionId = liveSessionIdRef.current;
-          if (sessionId) {
-            sendMessage({
-              type: 'chat.subscribe',
-              sessions: [{ sessionId, lastSeq: liveLastSeqRef.current }],
-            });
+          if (livesRef.current.length > 0) {
+            sendMessage({ type: 'chat.subscribe', sessions: toSubscriptions(livesRef.current) });
           }
           return;
         }
@@ -83,7 +81,7 @@ export function useRoomRealtime({ roomId, liveSessionId, liveLastSeq, dispatch, 
           break;
       }
 
-      // The reducer keeps only frames of the live session; filtering there
+      // The reducer keeps only frames of the live sessions; filtering there
       // (not against a ref here) means no frame is lost in the gap between a
       // speaker change being dispatched and React committing it.
       if (event.sessionId) {

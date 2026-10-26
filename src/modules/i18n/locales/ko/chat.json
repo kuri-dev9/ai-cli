@@ -464,6 +464,23 @@
     "handoffDone": "완료 · 사용자 확인 필요",
     "handoffPass": "덧붙일 말 없음",
     "showWorkProcess": "작업 과정 보기",
-    "hideWorkProcess": "작업 과정 접기"
+    "hideWorkProcess": "작업 과정 접기",
+    "collaboration": "협업 방식",
+    "splitWork": "분담",
+    "splitWorkTitle": "리더가 일을 나눠 맡기고, 맡은 참가자들이 동시에 일합니다",
+    "discussion": "의견",
+    "discussionTitle": "한 참가자의 답마다 나머지가 짧게 의견을 냅니다",
+    "statusSplitWorking": "{{count}}명 분담 작업 중",
+    "statusDiscussing": "의견 듣는 중",
+    "statusSummarizing": "{{name}} 정리 중",
+    "phaseWorking": "동시에 작업 중",
+    "phaseDiscussing": "의견 내는 중",
+    "phaseSummarizing": "정리하는 중",
+    "kindPlan": "작업 분담",
+    "kindTask": "맡은 일",
+    "kindComment": "의견",
+    "kindSummary": "정리",
+    "taskCanEdit": "수정 담당",
+    "taskReadOnly": "읽기 전용"
   }
 }

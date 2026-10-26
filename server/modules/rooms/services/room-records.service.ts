@@ -1,6 +1,16 @@
 import type { RoomMessageRow, RoomParticipantRow, RoomRow } from '@/modules/database/index.js';
 import { normalizeAttachmentDescriptors } from '@/shared/image-attachments.js';
-import type { RoomAttachment, RoomMessage, RoomMessageHandoff, RoomParticipant, RoomPermissionMode } from '@/shared/types.js';
+import type {
+  RoomAttachment,
+  RoomMessage,
+  RoomMessageHandoff,
+  RoomParticipant,
+  RoomPermissionMode,
+  RoomTask,
+  RoomTurnKind,
+} from '@/shared/types.js';
+
+const ROOM_TURN_KINDS: RoomTurnKind[] = ['reply', 'plan', 'task', 'comment', 'summary'];
 
 /**
  * 저장된 행을 화면·턴 엔진이 쓰는 모양으로 바꾼다. 룸 서비스와 턴 엔진이 같이
@@ -56,6 +66,16 @@ function parseStoredHandoff(value: string | null): RoomMessageHandoff | null {
   return null;
 }
 
+function parseStoredTask(value: string | null): RoomTask | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<RoomTask>;
+    return typeof parsed.text === 'string' ? { text: parsed.text, canEdit: parsed.canEdit === true } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function toRoomMessage(row: RoomMessageRow): RoomMessage {
   const status = row.status === 'aborted' || row.status === 'error' ? row.status : 'complete';
   return {
@@ -68,6 +88,8 @@ export function toRoomMessage(row: RoomMessageRow): RoomMessage {
     attachments: parseStoredAttachments(row.attachments),
     finalText: row.final_text ?? null,
     handoff: parseStoredHandoff(row.handoff ?? null),
+    turnKind: ROOM_TURN_KINDS.includes(row.turn_kind as RoomTurnKind) ? row.turn_kind as RoomTurnKind : null,
+    task: parseStoredTask(row.task ?? null),
     createdAt: row.created_at,
   };
 }

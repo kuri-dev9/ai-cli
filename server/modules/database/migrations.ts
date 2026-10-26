@@ -481,7 +481,7 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
-/** 참가자별 권한·퇴장, 메시지 첨부·결론·넘김 표시. 처음 나온 룸 표에는 없던 칸이다. */
+/** 협업 방식, 참가자별 권한·퇴장, 메시지 첨부·결론·넘김·종류. 처음 나온 룸 표에는 없던 칸이다. */
 const addRoomSettingsColumns = (db: Database): void => {
   const participantColumns = getTableInfo(db, 'room_participants').map((column) => column.name);
   addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'permission_mode', 'TEXT');
@@ -490,6 +490,11 @@ const addRoomSettingsColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'attachments', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'final_text', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'handoff', 'TEXT');
+  addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'turn_kind', 'TEXT');
+  addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'task', 'TEXT');
+  const roomColumns = getTableInfo(db, 'rooms').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'split_work', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'discussion', 'INTEGER NOT NULL DEFAULT 1');
 };
 
 export const runMigrations = (db: Database) => {

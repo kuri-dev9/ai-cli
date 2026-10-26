@@ -123,7 +123,7 @@ export function RoomInterface({
   const { sendMessage } = useWebSocket();
   const {
     detail,
-    liveFrames,
+    lives,
     pendingPermissions,
     loadError,
     postMessage,
@@ -137,7 +137,11 @@ export function RoomInterface({
   } = useRoom(hostSessionId);
 
   const createDiff = useMemo(() => createCachedDiffCalculator(), []);
-  const liveMessages = useMemo(() => normalizedToChatMessages(liveFrames), [liveFrames]);
+  // Each running session's stream as transcript rows, in the server's order.
+  const liveTurns = useMemo(
+    () => lives.map((buffer) => ({ sessionId: buffer.sessionId, messages: normalizedToChatMessages(buffer.frames) })),
+    [lives],
+  );
 
   // The conversation the host had before it became a room, folded away at the
   // top of the timeline so turning a chat into a room does not hide it.
@@ -179,9 +183,13 @@ export function RoomInterface({
   );
   const roomState = detail?.state ?? null;
   const isRunning = roomState?.status === 'running';
-  const activeParticipant = roomState?.activeParticipantId
-    ? participantsById.get(roomState.activeParticipantId)
-    : undefined;
+  // Everyone working now; several while split work or opinions run in parallel.
+  const activeParticipants = (roomState?.activeParticipantIds ?? (roomState?.activeParticipantId ? [roomState.activeParticipantId] : []))
+    .map((participantId) => participantsById.get(participantId))
+    .filter((participant): participant is RoomParticipant => Boolean(participant));
+  const activeParticipant = activeParticipants[0];
+  const participantBySession = (sessionId: string) => participants.find((participant) => participant.sessionId === sessionId);
+  const isParticipantActive = (participantId: string) => activeParticipants.some((participant) => participant.participantId === participantId);
   const settingsParticipant = participants.find((participant) => participant.participantId === settingsParticipantId);
   // A finished turn always lands a timeline entry, so this doubles as "refresh token usage".
   const timelineLength = detail?.messages.length ?? 0;
@@ -197,7 +205,7 @@ export function RoomInterface({
     if (container && followBottomRef.current) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [detail?.messages.length, liveMessages]);
+  }, [detail?.messages.length, liveTurns]);
 
   const handleScroll = () => {
     const container = scrollRef.current;
@@ -417,6 +425,13 @@ export function RoomInterface({
       />
     );
     const handoffTarget = message.handoff?.kind === 'mention' ? participantsById.get(message.handoff.participantId) : undefined;
+    const kindLabel = message.turnKind === 'plan'
+      ? t('rooms.kindPlan')
+      : message.turnKind === 'task'
+        ? t('rooms.kindTask')
+        : message.turnKind === 'comment'
+          ? t('rooms.kindComment')
+          : message.turnKind === 'summary' ? t('rooms.kindSummary') : null;
 
     return (
       <RoomTurnCard
@@ -429,6 +444,12 @@ export function RoomInterface({
               hostLabel={t('rooms.host')}
               leftLabel={formerParticipantIds.has(message.speaker) ? t('rooms.formerParticipant') : undefined}
             />
+            {kindLabel && <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{kindLabel}</span>}
+            {message.task && (
+              <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+                {message.task.canEdit ? t('rooms.taskCanEdit') : t('rooms.taskReadOnly')}
+              </span>
+            )}
             {message.status !== 'complete' && (
               <span className="rounded bg-red-500/10 px-1.5 text-[10px] text-red-600 dark:text-red-400">
                 {message.status === 'aborted' ? t('rooms.aborted') : t('rooms.error')}
@@ -463,6 +484,11 @@ export function RoomInterface({
           )
         ) : undefined}
       >
+        {message.task && (
+          <p className="mx-2 whitespace-pre-wrap rounded-md bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+            {message.task.text}
+          </p>
+        )}
         {process && (
           <div className="px-2">
             <button
@@ -487,13 +513,35 @@ export function RoomInterface({
     ? [...detail.messages].reverse().find((message) => message.speaker === 'user')
     : undefined;
 
+  const phase = roomState?.phase ?? (isRunning ? 'turn' : 'idle');
+  const statusLabel = phase === 'working'
+    ? t('rooms.statusSplitWorking', { count: activeParticipants.length })
+    : phase === 'discussing'
+      ? t('rooms.statusDiscussing')
+      : phase === 'summarizing'
+        ? t('rooms.statusSummarizing', { name: activeParticipant?.displayName ?? '…' })
+        : t('rooms.statusWorking', { name: activeParticipant?.displayName ?? '…' });
+  const phaseLabel = phase === 'working'
+    ? t('rooms.phaseWorking')
+    : phase === 'discussing'
+      ? t('rooms.phaseDiscussing')
+      : phase === 'summarizing' ? t('rooms.phaseSummarizing') : t('rooms.answering');
+  // The chip on each live card; a plain turn needs none.
+  const phaseChip = phase === 'working'
+    ? t('rooms.kindTask')
+    : phase === 'discussing'
+      ? t('rooms.kindComment')
+      : phase === 'summarizing' ? t('rooms.kindSummary') : null;
+
   const composerNotices = (
     <>
-      {isRunning && activeParticipant && (
-        <div className="mx-auto mb-2 flex max-w-[54.25rem] items-center gap-2 rounded-xl border border-border/50 bg-card/80 px-3 py-1.5 text-xs">
+      {isRunning && activeParticipants.length > 0 && (
+        <div className="mx-auto mb-2 flex max-w-[54.25rem] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-border/50 bg-card/80 px-3 py-1.5 text-xs">
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-          <ParticipantBadge participant={activeParticipant} hostLabel={t('rooms.host')} />
-          <span className="text-muted-foreground">{t('rooms.answering')}</span>
+          {activeParticipants.map((participant) => (
+            <ParticipantBadge key={participant.participantId} participant={participant} hostLabel={t('rooms.host')} />
+          ))}
+          <span className="text-muted-foreground">{phaseLabel}</span>
           <button
             type="button"
             onClick={() => liveCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
@@ -567,7 +615,7 @@ export function RoomInterface({
               className={cn(
                 'flex max-w-[16rem] items-center rounded-full border',
                 participantColor(participant).ring,
-                roomState?.activeParticipantId === participant.participantId && 'ring-2 ring-primary/40',
+                isParticipantActive(participant.participantId) && 'ring-2 ring-primary/40',
               )}
             >
               <button
@@ -609,10 +657,28 @@ export function RoomInterface({
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1" role="status">
             {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
-            {isRunning
-              ? t('rooms.statusWorking', { name: activeParticipant?.displayName ?? '…' })
-              : t('rooms.statusIdle')}
+            {isRunning ? statusLabel : t('rooms.statusIdle')}
           </span>
+          <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label={t('rooms.collaboration')}>
+            {([
+              { key: 'splitWork', label: t('rooms.splitWork'), title: t('rooms.splitWorkTitle'), on: detail.room.splitWork },
+              { key: 'discussion', label: t('rooms.discussion'), title: t('rooms.discussionTitle'), on: detail.room.discussion },
+            ] as const).map((toggle) => (
+              <button
+                key={toggle.key}
+                type="button"
+                aria-pressed={toggle.on}
+                title={toggle.title}
+                onClick={() => void runAction(() => updateSettings({ [toggle.key]: !toggle.on }))}
+                className={cn(
+                  'px-2 py-0.5 transition-colors',
+                  toggle.on ? 'bg-primary/15 font-medium text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                )}
+              >
+                {toggle.label}
+              </button>
+            ))}
+          </div>
           <span>{t('rooms.turnCount', { count: roomState?.turnCount ?? 0, max: roomState?.maxAutoTurns ?? detail.room.maxAutoTurns })}</span>
           <select
             aria-label={t('rooms.maxAutoTurns')}
@@ -643,7 +709,7 @@ export function RoomInterface({
         <ParticipantSettingsPanel
           key={settingsParticipant.participantId}
           participant={settingsParticipant}
-          isSpeaking={isRunning && roomState?.activeParticipantId === settingsParticipant.participantId}
+          isSpeaking={isRunning && isParticipantActive(settingsParticipant.participantId)}
           refreshKey={timelineLength}
           onChangePermission={(mode: RoomPermissionMode) => void runAction(
             () => updateParticipant(settingsParticipant.participantId, { permissionMode: mode }),
@@ -707,44 +773,48 @@ export function RoomInterface({
             )}
           </div>
 
-          {detail.messages.length === 0 && liveMessages.length === 0 && (
+          {detail.messages.length === 0 && liveTurns.length === 0 && (
             <p className="px-3 text-center text-sm text-muted-foreground">{t('rooms.emptyTimeline')}</p>
           )}
           {detail.messages.map(renderRoomMessage)}
 
-          {(liveMessages.length > 0 || (isRunning && activeParticipant)) && (
-            <div ref={liveCardRef} aria-live="polite">
-            <RoomTurnCard
-              participant={activeParticipant}
-              live={isRunning}
-              header={(
-                <>
-                  <ParticipantBadge participant={activeParticipant} hostLabel={t('rooms.host')} />
-                  {isRunning && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      {t('rooms.answering')}
-                    </span>
+          {liveTurns.map((turn, turnIndex) => {
+            const participant = participantBySession(turn.sessionId);
+            return (
+              <div key={turn.sessionId} ref={turnIndex === liveTurns.length - 1 ? liveCardRef : undefined} aria-live="polite">
+                <RoomTurnCard
+                  participant={participant}
+                  live={isRunning}
+                  header={(
+                    <>
+                      <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
+                      {phaseChip && <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{phaseChip}</span>}
+                      {isRunning && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          {t('rooms.answering')}
+                        </span>
+                      )}
+                    </>
                   )}
-                </>
-              )}
-            >
-              {liveMessages.map((message, index) => (
-                <MessageComponent
-                  key={`${String(message.toolId ?? '')}-${index}`}
-                  message={message}
-                  prevMessage={index === 0 ? GROUPED_ASSISTANT_ANCHOR : liveMessages[index - 1]}
-                  createDiff={createDiff}
-                  provider={activeParticipant?.provider ?? 'claude'}
-                  selectedProject={selectedProject}
-                  onFileOpen={onFileOpen}
-                  showRawParameters={showRawParameters}
-                  showThinking={showThinking}
-                />
-              ))}
-            </RoomTurnCard>
-            </div>
-          )}
+                >
+                  {turn.messages.map((message, index) => (
+                    <MessageComponent
+                      key={`${String(message.toolId ?? '')}-${index}`}
+                      message={message}
+                      prevMessage={index === 0 ? GROUPED_ASSISTANT_ANCHOR : turn.messages[index - 1]}
+                      createDiff={createDiff}
+                      provider={participant?.provider ?? 'claude'}
+                      selectedProject={selectedProject}
+                      onFileOpen={onFileOpen}
+                      showRawParameters={showRawParameters}
+                      showThinking={showThinking}
+                    />
+                  ))}
+                </RoomTurnCard>
+              </div>
+            );
+          })}
         </div>
       </div>
 

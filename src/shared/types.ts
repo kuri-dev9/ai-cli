@@ -1371,7 +1371,20 @@ export type RoomMessage = {
   finalText: string | null;
   /** Where the reply handed the turn, shown at its foot as "→ @name" or "done". */
   handoff: RoomMessageHandoff | null;
+  /** What kind of reply this is; null on user messages and older replies. */
+  turnKind: RoomTurnKind | null;
+  /** The job the lead handed out, on a `task` reply only. */
+  task: RoomTask | null;
   createdAt: string;
+};
+
+/** Kind of participant reply: a normal turn, a plan that splits the work, a task done alongside others, a short comment on someone's reply, or the lead's summary of the tasks. */
+export type RoomTurnKind = 'reply' | 'plan' | 'task' | 'comment' | 'summary';
+
+/** One job the lead handed a participant; while several work at once only the `canEdit` one may change files. */
+export type RoomTask = {
+  text: string;
+  canEdit: boolean;
 };
 
 /** The next turn a participant reply pointed at with its last line; null on the message when it had none. */
@@ -1383,12 +1396,21 @@ export type RoomMessageHandoff =
 /** The server's live view of a room's turn loop: who is speaking now and how many automatic turns have run, broadcast as `room_state` frames. */
 export type RoomRuntimeState = {
   status: 'idle' | 'running';
+  /** First of the participants working now; the full lists follow. */
   activeParticipantId: string | null;
   activeSessionId: string | null;
+  /** Everyone working now; several when the lead split the work. */
+  activeParticipantIds: string[];
+  activeSessionIds: string[];
+  /** What the room is doing, shown as "working in parallel", "hearing opinions" and so on. */
+  phase: RoomPhase;
   turnCount: number;
   maxAutoTurns: number;
   pendingUserMessage: boolean;
 };
+
+/** What a room is doing: resting, one participant's turn, split work in parallel, gathering opinions, or the lead summarising. */
+export type RoomPhase = 'idle' | 'turn' | 'working' | 'discussing' | 'summarizing';
 
 /** Permission preset a room applies to every participant run: ask before tools, read-only, or full access. */
 export type RoomPermissionMode = 'ask' | 'read' | 'full';
@@ -1401,6 +1423,10 @@ export type RoomDetail = {
     projectPath: string;
     permissionMode: RoomPermissionMode;
     maxAutoTurns: number;
+    /** Whether the lead splits the work and the assignees work at the same time. */
+    splitWork: boolean;
+    /** Whether the other participants add a short opinion after each reply. */
+    discussion: boolean;
     createdAt: string;
   };
   participants: RoomParticipant[];

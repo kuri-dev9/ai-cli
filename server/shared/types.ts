@@ -1547,7 +1547,27 @@ export type RoomMessage = {
   finalText: string | null;
   /** 답이 남긴 넘김 표시. 화면이 답 끝에 "→ @이름" 이나 "완료"로 보여준다. */
   handoff: RoomMessageHandoff | null;
+  /** 답의 종류. 사용자 글과 예전 답은 null 이다. */
+  turnKind: RoomTurnKind | null;
+  /** 맡은 일. 리더가 나눠 준 일을 한 답(`task`)에만 있다. */
+  task: RoomTask | null;
   createdAt: string;
+};
+
+/**
+ * 참가자 답의 종류.
+ * - `reply`: 차례가 와서 한 보통의 답
+ * - `plan`: 일을 나눠 맡긴 답(`[작업 @이름]` 줄이 있다)
+ * - `task`: 맡은 일을 다른 참가자와 동시에 한 답
+ * - `comment`: 다른 참가자의 답에 덧붙인 짧은 의견
+ * - `summary`: 맡긴 일의 결과를 모아 정리한 리더의 답
+ */
+export type RoomTurnKind = 'reply' | 'plan' | 'task' | 'comment' | 'summary';
+
+/** 리더가 한 참가자에게 맡긴 일. 동시에 일하는 동안 파일을 고칠 수 있는 건 `canEdit` 인 한 명뿐이다. */
+export type RoomTask = {
+  text: string;
+  canEdit: boolean;
 };
 
 /** 참가자 답의 마지막 줄이 가리킨 다음 차례. 표시가 없으면 메시지에 null 로 남는다. */
@@ -1563,12 +1583,21 @@ export type RoomMessageHandoff =
  */
 export type RoomRuntimeState = {
   status: 'idle' | 'running';
+  /** 지금 일하는 참가자들 중 첫째. 한 명씩 일하던 때의 칸으로, 목록은 아래에 있다. */
   activeParticipantId: string | null;
   activeSessionId: string | null;
+  /** 지금 일하는 참가자 전부. 일을 나눠 맡으면 여럿이 동시에 일한다. */
+  activeParticipantIds: string[];
+  activeSessionIds: string[];
+  /** 지금 무엇을 하는 중인지. 화면이 "분담 작업 중", "의견 듣는 중"으로 보여준다. */
+  phase: RoomPhase;
   turnCount: number;
   maxAutoTurns: number;
   pendingUserMessage: boolean;
 };
+
+/** 룸이 지금 하는 일: 쉼, 한 참가자의 차례, 동시 분담 작업, 의견 듣기, 리더의 정리. */
+export type RoomPhase = 'idle' | 'turn' | 'working' | 'discussing' | 'summarizing';
 
 /** 룸 하나를 화면에 그리는 데 필요한 전부. REST 응답 그대로다. */
 export type RoomDetail = {
@@ -1578,6 +1607,10 @@ export type RoomDetail = {
     projectPath: string;
     permissionMode: RoomPermissionMode;
     maxAutoTurns: number;
+    /** 리더가 일을 나눠 맡기고 맡은 참가자들이 동시에 일하는지. */
+    splitWork: boolean;
+    /** 답마다 나머지 참가자가 짧게 의견을 내는지. */
+    discussion: boolean;
     createdAt: string;
   };
   participants: RoomParticipant[];

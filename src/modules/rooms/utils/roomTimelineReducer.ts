@@ -9,12 +9,12 @@ import type {
 } from '@/shared/types';
 
 /**
- * The running participant's turn as it streams in. Only one participant runs
- * at a time, so one buffer is enough; it is keyed by session so frames from
- * any other session are ignored.
+ * One running participant's turn as it streams in. Several run at once when
+ * the lead splits the work or the others weigh in, so there is one buffer per
+ * running session; frames from any other session are ignored.
  */
 export type RoomLiveBuffer = {
-  sessionId: string | null;
+  sessionId: string;
   frames: NormalizedMessage[];
   /** Highest `seq` applied, so a replay after `chat.subscribe` is not drawn twice. */
   lastSeq: number;
@@ -22,8 +22,9 @@ export type RoomLiveBuffer = {
 
 export type RoomViewState = {
   detail: RoomDetail | null;
-  live: RoomLiveBuffer;
-  /** Permission prompts raised by the running participant, answered from the room view. */
+  /** The running sessions' streams, in the order the server lists them as active. */
+  lives: RoomLiveBuffer[];
+  /** Permission prompts raised by the running participants, answered from the room view. */
   pendingPermissions: PendingPermissionRequest[];
 };
 
@@ -34,13 +35,30 @@ export type RoomViewAction =
   | { type: 'live_frame'; event: ServerEvent }
   | { type: 'permissions_answered'; requestIds: string[] };
 
-const EMPTY_LIVE: RoomLiveBuffer = { sessionId: null, frames: [], lastSeq: 0 };
-
 export const INITIAL_ROOM_VIEW_STATE: RoomViewState = {
   detail: null,
-  live: EMPTY_LIVE,
+  lives: [],
   pendingPermissions: [],
 };
+
+/**
+ * One buffer per active session: a session that keeps running keeps its
+ * stream, a newly active one starts empty (its `seq` restarts at 1), and one
+ * that stopped is dropped. The server takes a participant off the active list
+ * only after its reply is persisted, so nothing visible is lost.
+ */
+const syncLiveBuffers = (lives: RoomLiveBuffer[], activeSessionIds: string[]): RoomLiveBuffer[] => {
+  const next = activeSessionIds.map((sessionId) => (
+    lives.find((buffer) => buffer.sessionId === sessionId) ?? { sessionId, frames: [], lastSeq: 0 }
+  ));
+  const unchanged = next.length === lives.length && next.every((buffer, index) => buffer === lives[index]);
+  return unchanged ? lives : next;
+};
+
+/** Active sessions from a state, falling back to the single field older servers send. */
+const activeSessionsOf = (state: RoomRuntimeState): string[] => (
+  state.activeSessionIds ?? (state.activeSessionId ? [state.activeSessionId] : [])
+);
 
 // Frames that become visible transcript rows. Control frames (status,
 // complete, permission_*) drive state instead.
@@ -73,10 +91,11 @@ const finalizeStreamingFrame = (frames: NormalizedMessage[]): NormalizedMessage[
     : frame));
 
 const applyLiveFrame = (state: RoomViewState, event: ServerEvent): RoomViewState => {
-  const { live } = state;
-  if (!live.sessionId || event.sessionId !== live.sessionId || !event.kind) {
+  const bufferIndex = state.lives.findIndex((buffer) => buffer.sessionId === event.sessionId);
+  if (bufferIndex < 0 || !event.kind) {
     return state;
   }
+  const live = state.lives[bufferIndex];
 
   let lastSeq = live.lastSeq;
   if (typeof event.seq === 'number') {
@@ -91,15 +110,24 @@ const applyLiveFrame = (state: RoomViewState, event: ServerEvent): RoomViewState
   const withSeq = (frames: NormalizedMessage[]): RoomViewState => (
     frames === live.frames && lastSeq === live.lastSeq
       ? state
-      : { ...state, live: { ...live, frames, lastSeq } }
+      : { ...state, lives: state.lives.map((buffer, index) => (index === bufferIndex ? { ...live, frames, lastSeq } : buffer)) }
   );
 
   switch (event.kind) {
     case 'chat_subscribed': {
-      const pending = Array.isArray(event.pendingPermissions)
-        ? (event.pendingPermissions as PendingPermissionRequest[])
-        : state.pendingPermissions;
-      return { ...state, pendingPermissions: pending };
+      if (!Array.isArray(event.pendingPermissions)) {
+        return state;
+      }
+      // The ack lists this session's open prompts; the other sessions keep theirs.
+      const pending = (event.pendingPermissions as PendingPermissionRequest[])
+        .map((request) => ({ ...request, sessionId: request.sessionId ?? live.sessionId }));
+      return {
+        ...state,
+        pendingPermissions: [
+          ...state.pendingPermissions.filter((request) => request.sessionId !== live.sessionId),
+          ...pending,
+        ],
+      };
     }
 
     case 'permission_request': {
@@ -152,7 +180,7 @@ const applyLiveFrame = (state: RoomViewState, event: ServerEvent): RoomViewState
     case 'complete':
       return {
         ...withSeq(finalizeStreamingFrame(live.frames)),
-        pendingPermissions: [],
+        pendingPermissions: state.pendingPermissions.filter((request) => request.sessionId !== live.sessionId),
       };
 
     default:
@@ -171,24 +199,26 @@ const applyLiveFrame = (state: RoomViewState, event: ServerEvent): RoomViewState
   return withSeq([...frames, event as unknown as NormalizedMessage]);
 };
 
+/** Drops prompts whose session is no longer running; nobody is left to answer them. */
+const keepActivePermissions = (requests: PendingPermissionRequest[], lives: RoomLiveBuffer[]): PendingPermissionRequest[] => {
+  const kept = requests.filter((request) => lives.some((buffer) => buffer.sessionId === request.sessionId));
+  return kept.length === requests.length ? requests : kept;
+};
+
 /**
  * Merges everything the room view hears — REST snapshots, `room_message`,
- * `room_state` and the active participant's live frames — into one state.
+ * `room_state` and the active participants' live frames — into one state.
  */
 export function roomViewReducer(state: RoomViewState, action: RoomViewAction): RoomViewState {
   switch (action.type) {
     case 'detail_loaded': {
-      const activeSessionId = action.detail.state.activeSessionId;
-      // Keep a live buffer that still belongs to the running turn; a refetch
-      // must not wipe the stream the user is watching.
-      const live = activeSessionId && state.live.sessionId === activeSessionId
-        ? state.live
-        : { ...EMPTY_LIVE, sessionId: activeSessionId };
+      // Streams of turns still running survive a refetch; the user is watching them.
+      const lives = syncLiveBuffers(state.lives, activeSessionsOf(action.detail.state));
       return {
         ...state,
         detail: action.detail,
-        live,
-        pendingPermissions: live === state.live ? state.pendingPermissions : [],
+        lives,
+        pendingPermissions: keepActivePermissions(state.pendingPermissions, lives),
       };
     }
 
@@ -198,14 +228,15 @@ export function roomViewReducer(state: RoomViewState, action: RoomViewAction): R
       }
       const message = action.message;
       // The persisted reply replaces the live stream that produced it.
-      const finishesLiveTurn = message.speaker !== 'user'
-        && message.sessionId !== null
-        && message.sessionId === state.live.sessionId;
+      const finishedSessionId = message.speaker !== 'user' ? message.sessionId : null;
+      const lives = finishedSessionId
+        ? state.lives.filter((buffer) => buffer.sessionId !== finishedSessionId)
+        : state.lives;
       return {
         ...state,
         detail: { ...state.detail, messages: insertRoomMessage(state.detail.messages, message) },
-        live: finishesLiveTurn ? EMPTY_LIVE : state.live,
-        pendingPermissions: finishesLiveTurn ? [] : state.pendingPermissions,
+        lives: lives.length === state.lives.length ? state.lives : lives,
+        pendingPermissions: keepActivePermissions(state.pendingPermissions, lives),
       };
     }
 
@@ -213,15 +244,12 @@ export function roomViewReducer(state: RoomViewState, action: RoomViewAction): R
       if (!state.detail) {
         return state;
       }
-      const nextActive = action.state.activeSessionId;
-      // A new speaker starts a fresh buffer (its `seq` restarts at 1). When the
-      // room goes idle the buffer stays until the persisted reply lands.
-      const startsNewTurn = nextActive !== null && nextActive !== state.live.sessionId;
+      const lives = syncLiveBuffers(state.lives, activeSessionsOf(action.state));
       return {
         ...state,
         detail: { ...state.detail, state: action.state },
-        live: startsNewTurn ? { ...EMPTY_LIVE, sessionId: nextActive } : state.live,
-        pendingPermissions: startsNewTurn || nextActive === null ? [] : state.pendingPermissions,
+        lives,
+        pendingPermissions: keepActivePermissions(state.pendingPermissions, lives),
       };
     }
 

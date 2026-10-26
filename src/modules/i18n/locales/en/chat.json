@@ -465,6 +465,23 @@
     "handoffDone": "Done · needs your review",
     "handoffPass": "Nothing to add",
     "showWorkProcess": "Show work in progress",
-    "hideWorkProcess": "Hide work in progress"
+    "hideWorkProcess": "Hide work in progress",
+    "collaboration": "Collaboration",
+    "splitWork": "Split",
+    "splitWorkTitle": "The lead splits the work and the assignees work at the same time",
+    "discussion": "Opinions",
+    "discussionTitle": "After each reply, the others add a short opinion",
+    "statusSplitWorking": "{{count}} working in parallel",
+    "statusDiscussing": "Hearing opinions",
+    "statusSummarizing": "{{name}} is summing up",
+    "phaseWorking": "working in parallel",
+    "phaseDiscussing": "weighing in",
+    "phaseSummarizing": "summing up",
+    "kindPlan": "Plan",
+    "kindTask": "Task",
+    "kindComment": "Opinion",
+    "kindSummary": "Summary",
+    "taskCanEdit": "Can edit",
+    "taskReadOnly": "Read-only"
   }
 }

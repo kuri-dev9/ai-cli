@@ -13,6 +13,10 @@ export type RoomRow = {
   project_path: string;
   permission_mode: string;
   max_auto_turns: number;
+  /** 1 이면 리더가 일을 나눠 맡기고 맡은 참가자들이 동시에 일한다. */
+  split_work: number;
+  /** 1 이면 답마다 나머지 참가자가 짧게 의견을 낸다. */
+  discussion: number;
   created_at: string;
   updated_at: string;
 };
@@ -51,6 +55,10 @@ export type RoomMessageRow = {
   final_text: string | null;
   /** `done` | `pass` | `mention:<participant_id>`. 없으면 NULL. */
   handoff: string | null;
+  /** reply | plan | task | comment | summary. 사용자 글과 예전 행은 NULL. */
+  turn_kind: string | null;
+  /** 맡은 일의 JSON(`{"text","canEdit"}`). task 답에만 있다. */
+  task: string | null;
   created_at: string;
 };
 
@@ -176,8 +184,17 @@ export const roomsDb = {
     this.touchRoom(roomId);
   },
 
-  updateRoomSettings(roomId: string, settings: { permissionMode?: string; maxAutoTurns?: number }): void {
+  updateRoomSettings(
+    roomId: string,
+    settings: { permissionMode?: string; maxAutoTurns?: number; splitWork?: boolean; discussion?: boolean },
+  ): void {
     const db = getConnection();
+    if (settings.splitWork !== undefined) {
+      db.prepare('UPDATE rooms SET split_work = ? WHERE room_id = ?').run(settings.splitWork ? 1 : 0, roomId);
+    }
+    if (settings.discussion !== undefined) {
+      db.prepare('UPDATE rooms SET discussion = ? WHERE room_id = ?').run(settings.discussion ? 1 : 0, roomId);
+    }
     if (settings.permissionMode !== undefined) {
       db.prepare('UPDATE rooms SET permission_mode = ? WHERE room_id = ?').run(settings.permissionMode, roomId);
     }
@@ -212,12 +229,15 @@ export const roomsDb = {
     attachments?: string | null;
     finalText?: string | null;
     handoff?: string | null;
+    turnKind?: string | null;
+    task?: string | null;
   }): RoomMessageRow {
     const db = getConnection();
     const result = db
       .prepare(
-        `INSERT INTO room_messages (room_id, speaker, text, status, session_id, attachments, final_text, handoff)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO room_messages
+           (room_id, speaker, text, status, session_id, attachments, final_text, handoff, turn_kind, task)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.roomId,
@@ -228,6 +248,8 @@ export const roomsDb = {
         message.attachments ?? null,
         message.finalText ?? null,
         message.handoff ?? null,
+        message.turnKind ?? null,
+        message.task ?? null,
       );
     this.touchRoom(message.roomId);
     return db

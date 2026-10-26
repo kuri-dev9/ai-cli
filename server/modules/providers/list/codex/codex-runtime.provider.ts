@@ -267,7 +267,7 @@ function transformCodexEvent(event: AnyRecord): AnyRecord {
 
 /**
  * Map permission mode to Codex SDK options
- * @param {string} permissionMode - 'default', 'acceptEdits', or 'bypassPermissions'
+ * @param {string} permissionMode - 'default', 'acceptEdits', 'bypassPermissions', or 'readOnly'
  * @returns {object} - { sandboxMode, approvalPolicy }
  */
 function mapPermissionModeToCodexOptions(permissionMode: string): Pick<ThreadOptions, 'sandboxMode' | 'approvalPolicy'> {
@@ -280,6 +280,13 @@ function mapPermissionModeToCodexOptions(permissionMode: string): Pick<ThreadOpt
     case 'bypassPermissions':
       return {
         sandboxMode: 'danger-full-access',
+        approvalPolicy: 'never'
+      };
+    // A team-room participant working alongside others: it may read and run
+    // commands but must not change the shared folder.
+    case 'readOnly':
+      return {
+        sandboxMode: 'read-only',
         approvalPolicy: 'never'
       };
     case 'default':

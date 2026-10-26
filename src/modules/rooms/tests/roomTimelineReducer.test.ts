@@ -12,6 +12,9 @@ const idleState: RoomRuntimeState = {
   status: 'idle',
   activeParticipantId: null,
   activeSessionId: null,
+  activeParticipantIds: [],
+  activeSessionIds: [],
+  phase: 'idle',
   turnCount: 0,
   maxAutoTurns: 6,
   pendingUserMessage: false,
@@ -22,6 +25,9 @@ const runningState = (sessionId: string, participantId: string): RoomRuntimeStat
   status: 'running',
   activeParticipantId: participantId,
   activeSessionId: sessionId,
+  activeParticipantIds: [participantId],
+  activeSessionIds: [sessionId],
+  phase: 'turn',
   turnCount: 1,
 });
 
@@ -32,6 +38,8 @@ const detail: RoomDetail = {
     projectPath: '/tmp/project',
     permissionMode: 'ask',
     maxAutoTurns: 6,
+    splitWork: true,
+    discussion: true,
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [],
@@ -50,6 +58,8 @@ const message = (overrides: Partial<RoomMessage>): RoomMessage => ({
   attachments: [],
   finalText: null,
   handoff: null,
+  turnKind: null,
+  task: null,
   createdAt: '2026-10-25T00:00:01.000Z',
   ...overrides,
 });
@@ -80,7 +90,7 @@ describe('roomViewReducer', () => {
     const state = running();
 
     expect(state.detail?.state.activeParticipantId).toBe('p-reviewer');
-    expect(state.live).toEqual({ sessionId: 'reviewer-session', frames: [], lastSeq: 0 });
+    expect(state.lives).toEqual([{ sessionId: 'reviewer-session', frames: [], lastSeq: 0 }]);
   });
 
   it('drops the synthetic local_ prompt frame and frames from other sessions', () => {
@@ -94,8 +104,8 @@ describe('roomViewReducer', () => {
       event: frame({ kind: 'text', role: 'assistant', id: 'x', content: 'other', sessionId: 'someone-else' }),
     });
 
-    expect(state.live.frames).toEqual([]);
-    expect(state.live.lastSeq).toBe(1);
+    expect(state.lives[0].frames).toEqual([]);
+    expect(state.lives[0].lastSeq).toBe(1);
   });
 
   it('accumulates stream deltas and replaces them with the finished assistant text', () => {
@@ -103,16 +113,16 @@ describe('roomViewReducer', () => {
     state = roomViewReducer(state, { type: 'live_frame', event: frame({ kind: 'stream_delta', content: 'Hel', seq: 2 }) });
     state = roomViewReducer(state, { type: 'live_frame', event: frame({ kind: 'stream_delta', content: 'lo', seq: 3 }) });
 
-    expect(state.live.frames).toHaveLength(1);
-    expect(state.live.frames[0]).toMatchObject({ kind: 'stream_delta', content: 'Hello' });
+    expect(state.lives[0].frames).toHaveLength(1);
+    expect(state.lives[0].frames[0]).toMatchObject({ kind: 'stream_delta', content: 'Hello' });
 
     state = roomViewReducer(state, {
       type: 'live_frame',
       event: frame({ kind: 'text', role: 'assistant', id: 'a1', content: 'Hello!', seq: 4 }),
     });
 
-    expect(state.live.frames).toHaveLength(1);
-    expect(state.live.frames[0]).toMatchObject({ kind: 'text', content: 'Hello!' });
+    expect(state.lives[0].frames).toHaveLength(1);
+    expect(state.lives[0].frames[0]).toMatchObject({ kind: 'text', content: 'Hello!' });
   });
 
   it('ignores replayed frames whose seq was already applied', () => {
@@ -123,7 +133,7 @@ describe('roomViewReducer', () => {
     state = roomViewReducer(state, { type: 'live_frame', event: toolUse });
 
     expect(state).toBe(afterFirst);
-    expect(state.live.frames).toHaveLength(1);
+    expect(state.lives[0].frames).toHaveLength(1);
   });
 
   it('tracks permission prompts for the live session and clears them when answered', () => {
@@ -151,7 +161,7 @@ describe('roomViewReducer', () => {
       message: message({ id: 9, speaker: 'p-reviewer', sessionId: 'reviewer-session', text: 'LGTM' }),
     });
 
-    expect(state.live).toEqual({ sessionId: null, frames: [], lastSeq: 0 });
+    expect(state.lives).toEqual([]);
     expect(state.detail?.messages.at(-1)?.text).toBe('LGTM');
   });
 
@@ -163,7 +173,7 @@ describe('roomViewReducer', () => {
     });
     state = roomViewReducer(state, { type: 'room_message', message: message({ id: 10, text: '@설계자 잠깐' }) });
 
-    expect(state.live.frames).toHaveLength(1);
+    expect(state.lives[0].frames).toHaveLength(1);
   });
 
   it('keeps the live buffer across a refetch of the same running turn', () => {
@@ -177,7 +187,58 @@ describe('roomViewReducer', () => {
       detail: { ...detail, state: runningState('reviewer-session', 'p-reviewer') },
     });
 
-    expect(state.live.frames).toHaveLength(1);
+    expect(state.lives[0].frames).toHaveLength(1);
+  });
+});
+
+describe('roomViewReducer with several participants running at once', () => {
+  const parallelState: RoomRuntimeState = {
+    ...idleState,
+    status: 'running',
+    activeParticipantId: 'p-host',
+    activeSessionId: 'host-session',
+    activeParticipantIds: ['p-host', 'p-reviewer'],
+    activeSessionIds: ['host-session', 'reviewer-session'],
+    phase: 'working',
+  };
+
+  it('keeps one stream per running session and routes frames to the right one', () => {
+    let state = roomViewReducer(loaded(), { type: 'room_state', state: parallelState });
+    state = roomViewReducer(state, {
+      type: 'live_frame',
+      event: frame({ kind: 'text', role: 'assistant', id: 'h1', content: 'host work', sessionId: 'host-session', seq: 1 }),
+    });
+    state = roomViewReducer(state, {
+      type: 'live_frame',
+      event: frame({ kind: 'text', role: 'assistant', id: 'r1', content: 'reviewer work', seq: 1 }),
+    });
+
+    expect(state.lives.map((buffer) => buffer.sessionId)).toEqual(['host-session', 'reviewer-session']);
+    expect(state.lives.map((buffer) => buffer.frames.map((entry) => entry.content))).toEqual([['host work'], ['reviewer work']]);
+  });
+
+  it('closes only the stream whose reply landed, and its prompts with it', () => {
+    let state = roomViewReducer(loaded(), { type: 'room_state', state: parallelState });
+    state = roomViewReducer(state, {
+      type: 'live_frame',
+      event: frame({ kind: 'permission_request', requestId: 'req-h', toolName: 'Bash', sessionId: 'host-session', seq: 1 }),
+    });
+    state = roomViewReducer(state, {
+      type: 'live_frame',
+      event: frame({ kind: 'permission_request', requestId: 'req-r', toolName: 'Bash', seq: 1 }),
+    });
+    state = roomViewReducer(state, {
+      type: 'room_message',
+      message: message({ id: 9, speaker: 'p-reviewer', sessionId: 'reviewer-session', text: 'done' }),
+    });
+
+    expect(state.lives.map((buffer) => buffer.sessionId)).toEqual(['host-session']);
+    expect(state.pendingPermissions.map((request) => request.requestId)).toEqual(['req-h']);
+
+    // A participant that leaves the active list without a reply (an opinion it passed on) is dropped too.
+    state = roomViewReducer(state, { type: 'room_state', state: { ...parallelState, activeParticipantIds: [], activeSessionIds: [] } });
+    expect(state.lives).toEqual([]);
+    expect(state.pendingPermissions).toEqual([]);
   });
 });
 

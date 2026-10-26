@@ -77,6 +77,8 @@ function buildDetail(room: RoomRow): RoomDetail {
       projectPath: room.project_path,
       permissionMode: parseRoomPermissionMode(room.permission_mode),
       maxAutoTurns: room.max_auto_turns,
+      splitWork: room.split_work !== 0,
+      discussion: room.discussion !== 0,
       createdAt: room.created_at,
     },
     participants: roomsDb.listParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
@@ -300,7 +302,10 @@ export const roomsService = {
     return this.getRoomDetail(roomId);
   },
 
-  updateSettings(roomId: string, settings: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number }): RoomDetail {
+  updateSettings(
+    roomId: string,
+    settings: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number; splitWork?: boolean; discussion?: boolean },
+  ): RoomDetail {
     requireRoom(roomId);
     if (settings.maxAutoTurns !== undefined
       && (!Number.isInteger(settings.maxAutoTurns) || settings.maxAutoTurns < 1 || settings.maxAutoTurns > MAX_AUTO_TURNS_LIMIT)) {

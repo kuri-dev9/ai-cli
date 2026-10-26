@@ -1,4 +1,4 @@
-import type { RoomMessage, RoomParticipant } from '@/shared/types.js';
+import type { RoomMessage, RoomParticipant, RoomTask } from '@/shared/types.js';
 
 /**
  * 룸 턴에 보낼 프롬프트를 만들고, 돌아온 답에서 "다음은 누구"를 읽는다.
@@ -17,6 +17,9 @@ const MAX_MESSAGE_CHARS = 4000;
 
 export const ROOM_DONE_MARKER = '[DONE]';
 export const ROOM_PASS_MARKER = '[PASS]';
+
+/** 의견 한 번의 길이. 의견은 일이 아니라 덧붙임이라 짧아야 다음 차례를 늦추지 않는다. */
+const COMMENT_MAX_LINES = 5;
 
 /** `@이름` 으로 부를 수 있는 이름인지. 공백·`@`·대괄호는 멘션을 깨뜨린다. */
 export function isValidRoomDisplayName(name: string): boolean {
@@ -55,7 +58,7 @@ export function buildRoleBrief(me: RoomParticipant, participants: RoomParticipan
     '',
     '규칙:',
     '- 당신의 역할 범위에서 일하세요. 다른 참가자의 일을 대신하지 말고, 필요하면 그 참가자에게 요청하세요.',
-    '- 같은 폴더에서 차례로 작업합니다. 다른 참가자가 고친 파일은 다시 읽고 이어서 작업하세요.',
+    '- 같은 폴더를 씁니다. 여럿이 동시에 일할 때 파일을 고칠 수 있는 건 맡은 일에 "수정"이 붙은 한 명뿐입니다. 다른 참가자가 고친 파일은 다시 읽고 이어서 작업하세요.',
     '- 답은 다른 참가자가 읽고 이어받기 쉽게, 한 일과 결론을 요약해 쓰세요.',
     '- 사용자의 지시가 다른 참가자의 의견보다 우선합니다.',
     `- 답의 마지막 줄에는 반드시 다음 중 하나만 쓰세요: "@이름"(그 참가자에게 넘김), "${ROOM_PASS_MARKER}"(덧붙일 말 없음), "${ROOM_DONE_MARKER}"(작업이 끝나 사용자 확인이 필요함).`,
@@ -64,6 +67,82 @@ export function buildRoleBrief(me: RoomParticipant, participants: RoomParticipan
 
 function buildReminder(me: RoomParticipant): string {
   return `[팀 룸] 당신은 "@${me.displayName}"(${me.roleName}) 입니다. 마지막 줄에 "@이름", "${ROOM_PASS_MARKER}", "${ROOM_DONE_MARKER}" 중 하나를 쓰세요.`;
+}
+
+/**
+ * 이번 차례에 무엇을 하는지. 보통의 차례(`turn`) 외에, 일을 나눌 수 있는 첫
+ * 차례(`plan`), 맡은 일(`task`), 남의 답에 대한 의견(`comment`), 맡긴 일의
+ * 결과를 모으는 정리(`summary`)가 있다.
+ */
+export type RoomTurnMode =
+  | { kind: 'turn' }
+  | { kind: 'plan' }
+  | { kind: 'task'; task: RoomTask; leadName: string }
+  | { kind: 'comment'; onName: string }
+  | { kind: 'summary' };
+
+function buildModeInstructions(mode: RoomTurnMode, others: RoomParticipant[]): string | null {
+  switch (mode.kind) {
+    case 'plan':
+      return [
+        '[분담] 이 요청을 참가자들과 나눠서 할 수 있습니다. 혼자 하는 편이 빠른 작은 일이면 나누지 말고 바로 하세요.',
+        '나눌 때는 답에 한 줄씩 적습니다:',
+        '[작업 @이름] 할 일',
+        '파일을 고쳐야 하는 일은 "[작업 @이름 수정] 할 일" 로 적습니다. 수정은 한 명에게만 맡기세요. 나머지는 읽기·조사만 합니다.',
+        `맡길 수 있는 참가자: ${others.map((participant) => `@${participant.displayName}(${participant.roleName})`).join(', ') || '(없음)'}, 그리고 당신 자신.`,
+        '맡긴 일은 동시에 진행되고, 모두 끝나면 결과를 모아 당신에게 다시 차례가 옵니다. 일을 나눴다면 마지막 줄의 넘김 표시는 쓰지 않아도 됩니다.',
+      ].join('\n');
+    case 'task':
+      return [
+        `[맡은 일] @${mode.leadName} 가 맡긴 일입니다: ${mode.task.text}`,
+        mode.task.canEdit
+          ? '파일 수정: 당신이 이번 분담의 수정 담당입니다. 필요한 파일을 고쳐도 됩니다.'
+          : '파일 수정: 불가. 읽기·조사만 하세요. 고칠 게 보이면 무엇을 어떻게 고칠지 제안만 하세요.',
+        '다른 참가자도 지금 동시에 자기 일을 하고 있습니다. 맡은 일만 하고, 한 일과 결과를 요약해 보고하세요. 넘김 표시는 쓰지 마세요.',
+      ].join('\n');
+    case 'comment':
+      return [
+        `[의견] 방금 @${mode.onName} 의 답이 올라왔습니다. 당신의 역할에서 보탤 의견, 우려, 다른 방법이 있으면 ${COMMENT_MAX_LINES}줄 이내로 쓰세요.`,
+        `보탤 말이 없으면 "${ROOM_PASS_MARKER}" 한 줄만 쓰세요. 이번에는 파일을 고치거나 긴 작업을 하지 마세요.`,
+      ].join('\n');
+    case 'summary':
+      return [
+        '[정리] 맡긴 일의 결과가 모두 모였습니다. 결과를 모아 정리하세요.',
+        '더 나눌 일이 있으면 다시 "[작업 @이름] 할 일" 줄로 맡기고, 끝났으면 마지막 줄에 넘김 표시를 쓰세요.',
+      ].join('\n');
+    default:
+      return null;
+  }
+}
+
+/**
+ * 답에서 일을 나눠 맡긴 줄을 읽는다. `[작업 @이름] 할 일`, 고칠 일은
+ * `[작업 @이름 수정] 할 일` 이다(영문 `[TASK @name edit]` 도 받는다).
+ *
+ * 한 참가자에게 여러 줄이면 하나로 합친다. 수정 담당은 처음 나온 한 명만
+ * 인정한다 — 같은 폴더를 둘이 동시에 고치면 서로 덮어쓴다.
+ */
+export function parseAssignments(text: string, participants: RoomParticipant[]): Array<{ participantId: string; task: RoomTask }> {
+  const byParticipant = new Map<string, RoomTask>();
+  let editorId: string | null = null;
+  for (const line of text.split('\n')) {
+    const match = /^\s*(?:[-*]\s*|\d+[.)]\s*)?\[(?:작업|task)\s+(@[^\]]+?)\s*\]\s*(.+)$/iu.exec(line);
+    if (!match) continue;
+    const head = match[1];
+    const participant = findFirstMention(head, participants);
+    if (!participant) continue;
+    const rest = head.slice(1 + participant.displayName.length).trim().toLowerCase();
+    const wantsEdit = rest === '수정' || rest === 'edit';
+    const taskText = match[2].trim();
+    const existing = byParticipant.get(participant.participantId);
+    const canEdit = wantsEdit && (editorId === null || editorId === participant.participantId);
+    if (canEdit) editorId = participant.participantId;
+    byParticipant.set(participant.participantId, {
+      text: existing ? `${existing.text}\n${taskText}` : taskText,
+      canEdit: Boolean(existing?.canEdit) || canEdit,
+    });
+  }
+  return [...byParticipant.entries()].map(([participantId, task]) => ({ participantId, task }));
 }
 
 /**
@@ -81,8 +160,10 @@ export function buildTurnPrompt(input: {
   delta: RoomMessage[];
   isFirstTurn: boolean;
   priorContext?: string | null;
+  mode?: RoomTurnMode;
 }): string {
   const { me, participants, isFirstTurn } = input;
+  const mode = input.mode ?? { kind: 'turn' };
   const delta = input.delta.slice(-MAX_DELTA_MESSAGES);
   const omitted = input.delta.length - delta.length;
 
@@ -99,6 +180,10 @@ export function buildTurnPrompt(input: {
   sections.push(
     `${header}${omitted > 0 ? ` (앞의 ${omitted}개 생략)` : ''}\n\n${lines.length ? lines.join('\n\n') : '(새 메시지 없음)'}`,
   );
+  const instructions = buildModeInstructions(mode, participants.filter((participant) => participant.participantId !== me.participantId));
+  if (instructions) {
+    sections.push(instructions);
+  }
   sections.push(`이제 @${me.displayName} 의 차례입니다.`);
 
   return sections.join('\n\n---\n\n');

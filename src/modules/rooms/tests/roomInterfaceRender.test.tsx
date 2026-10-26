@@ -29,6 +29,8 @@ const roomDetail: RoomDetail = {
     projectPath: '/tmp/project',
     permissionMode: 'ask',
     maxAutoTurns: 6,
+    splitWork: true,
+    discussion: true,
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [
@@ -37,14 +39,15 @@ const roomDetail: RoomDetail = {
   ],
   formerParticipants: [],
   messages: [
-    { id: 1, roomId: 'room-1', speaker: 'user', text: '로그인 화면 설계해줘', status: 'complete', sessionId: null, attachments: [], finalText: null, handoff: null, createdAt: '2026-10-25T00:00:01.000Z' },
+    { id: 1, roomId: 'room-1', speaker: 'user', text: '로그인 화면 설계해줘', status: 'complete', sessionId: null, attachments: [], finalText: null, handoff: null, turnKind: null, task: null, createdAt: '2026-10-25T00:00:01.000Z' },
     {
       id: 2, roomId: 'room-1', speaker: 'p-host', text: '화면 구조를 살펴보는 중이에요\n\n설계안입니다\n@리뷰어', status: 'complete', sessionId: 'host-session',
-      attachments: [], finalText: '설계안입니다\n@리뷰어', handoff: { kind: 'mention', participantId: 'p-rev' }, createdAt: '2026-10-25T00:00:02.000Z',
+      attachments: [], finalText: '설계안입니다\n@리뷰어', handoff: { kind: 'mention', participantId: 'p-rev' }, turnKind: 'reply', task: null, createdAt: '2026-10-25T00:00:02.000Z',
     },
   ],
   state: {
-    status: 'idle', activeParticipantId: null, activeSessionId: null, turnCount: 1, maxAutoTurns: 6, pendingUserMessage: false,
+    status: 'idle', activeParticipantId: null, activeSessionId: null, activeParticipantIds: [], activeSessionIds: [], phase: 'idle',
+    turnCount: 1, maxAutoTurns: 6, pendingUserMessage: false,
   },
 };
 
@@ -75,6 +78,10 @@ vi.mock('@/shared/api', async (importOriginal) => {
         interrupt: (...args: unknown[]) => {
           roomCalls.push({ name: 'interrupt', args });
           return ok({});
+        },
+        update: (...args: unknown[]) => {
+          roomCalls.push({ name: 'update', args });
+          return ok(roomDetail);
         },
       },
     },
@@ -132,7 +139,7 @@ describe('RoomInterface', () => {
     emit({
       kind: 'room_state',
       roomId: 'room-1',
-      state: { ...roomDetail.state, status: 'running', activeParticipantId: 'p-rev', activeSessionId: 'rev-session', turnCount: 2 },
+      state: { ...roomDetail.state, status: 'running', activeParticipantId: 'p-rev', activeSessionId: 'rev-session', activeParticipantIds: ['p-rev'], activeSessionIds: ['rev-session'], phase: 'turn', turnCount: 2 },
     });
 
     expect(screen.getByText('리뷰어 작업 중')).toBeTruthy();
@@ -207,7 +214,7 @@ describe('RoomInterface', () => {
     emit({
       kind: 'room_state',
       roomId: 'room-1',
-      state: { ...roomDetail.state, status: 'running', activeParticipantId: 'p-rev', activeSessionId: 'rev-session', pendingUserMessage: true },
+      state: { ...roomDetail.state, status: 'running', activeParticipantId: 'p-rev', activeSessionId: 'rev-session', activeParticipantIds: ['p-rev'], activeSessionIds: ['rev-session'], phase: 'turn', pendingUserMessage: true },
     });
 
     fireEvent.click(screen.getByRole('button', { name: '지금 끼어들기' }));
@@ -223,5 +230,38 @@ describe('RoomInterface', () => {
     expect(screen.queryByText('화면 구조를 살펴보는 중이에요')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '작업 과정 보기' }));
     expect(screen.getByText('화면 구조를 살펴보는 중이에요')).toBeTruthy();
+  });
+  it('shows everyone working in parallel with their own live card, and toggles how the room collaborates', async () => {
+    roomCalls.length = 0;
+    sentFrames.length = 0;
+    await renderRoom();
+
+    emit({
+      kind: 'room_state',
+      roomId: 'room-1',
+      state: {
+        ...roomDetail.state,
+        status: 'running',
+        activeParticipantId: 'p-host',
+        activeSessionId: 'host-session',
+        activeParticipantIds: ['p-host', 'p-rev'],
+        activeSessionIds: ['host-session', 'rev-session'],
+        phase: 'working',
+      },
+    });
+
+    expect(screen.getByText('2명 분담 작업 중')).toBeTruthy();
+    // Both sessions are attached in one subscribe.
+    expect(sentFrames).toContainEqual({
+      type: 'chat.subscribe',
+      sessions: [{ sessionId: 'host-session', lastSeq: 0 }, { sessionId: 'rev-session', lastSeq: 0 }],
+    });
+    emit({ kind: 'text', role: 'assistant', id: 'h1', sessionId: 'host-session', content: '인증 코드를 읽는 중', seq: 1, timestamp: '2026-10-25T00:00:05.000Z' });
+    emit({ kind: 'text', role: 'assistant', id: 'r1', sessionId: 'rev-session', content: '테스트를 쓰는 중', seq: 1, timestamp: '2026-10-25T00:00:05.000Z' });
+    expect(screen.getByText('인증 코드를 읽는 중')).toBeTruthy();
+    expect(screen.getByText('테스트를 쓰는 중')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '의견' }));
+    await waitFor(() => expect(roomCalls.find((call) => call.name === 'update')?.args).toEqual(['room-1', { discussion: false }]));
   });
 });
