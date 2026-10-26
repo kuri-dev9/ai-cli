@@ -9,6 +9,7 @@ import {
 } from '@/modules/providers/index.js';
 import { broadcastRoomFrame } from '@/modules/rooms/services/room-broadcast.service.js';
 import { isValidRoomDisplayName } from '@/modules/rooms/services/room-prompt.service.js';
+import { createParticipantSession } from '@/modules/rooms/services/room-roster.service.js';
 import {
   parseRoomPermissionMode,
   toRoomMessage,
@@ -16,11 +17,25 @@ import {
 } from '@/modules/rooms/services/room-records.service.js';
 import { roomTurnEngine } from '@/modules/rooms/services/room-turn-engine.service.js';
 import { filterAttachmentsToUploadStore } from '@/modules/websocket/index.js';
-import type { LLMProvider, RoomDetail, RoomMessage, RoomPermissionMode, RoomRuntimeState } from '@/shared/types.js';
+import type {
+  LLMProvider,
+  RoomDetail,
+  RoomMessage,
+  RoomParticipant,
+  RoomPermissionMode,
+  RoomRuntimeState,
+} from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
-/** 한 룸에 들어갈 수 있는 참가자 수. 원래 대화를 포함한다. */
-const MAX_ROOM_PARTICIPANTS = 3;
+/**
+ * 한 룸에 둘 수 있는 참가자 수. 원래 대화와 명단에서 기다리는 멤버를 모두
+ * 포함한다.
+ *
+ * 명단 멤버는 불릴 때까지 세션도 토큰도 쓰지 않으므로 상주 시절보다 넉넉하다.
+ * 그래도 상한을 두는 건 한 차례에 실리는 참가자 목록이 끝없이 길어지지 않게
+ * 하려는 것이다.
+ */
+const MAX_ROOM_PARTICIPANTS = 10;
 
 const DEFAULT_MAX_AUTO_TURNS = 6;
 const MAX_AUTO_TURNS_LIMIT = 20;
@@ -39,12 +54,19 @@ type ParticipantInput = {
   displayName: string;
   roleName: string;
   rolePrompt?: string | null;
+  persona?: string | null;
+  /**
+   * `standby` 면 명단에만 담긴다. 세션도 그때 만들지 않고, `@이름` 으로 불릴
+   * 때 들어온다. `active` 는 예전처럼 바로 들어와 매 차례를 함께 돈다.
+   */
+  status?: 'active' | 'standby' | null;
 };
 
 type HostInput = {
   displayName?: string | null;
   roleName?: string | null;
   rolePrompt?: string | null;
+  persona?: string | null;
 };
 
 /** 룸 하나의 요약. 사이드바가 어떤 세션이 룸인지 표시하는 데 쓴다. */
@@ -53,7 +75,8 @@ type RoomIndexEntry = {
   hostSessionId: string;
   participants: Array<{
     participantId: string;
-    sessionId: string;
+    /** 아직 불린 적 없는 명단 멤버는 null 이다. */
+    sessionId: string | null;
     provider: string;
     displayName: string;
     roleName: string;
@@ -153,19 +176,6 @@ async function assertProviderUsable(provider: string): Promise<LLMProvider> {
   return provider as LLMProvider;
 }
 
-/**
- * 초대한 참가자를 위한 세션을 만든다. 이름만 보고도 어느 룸의 누구인지 알 수
- * 있게 붙여 두고, 모델을 골랐다면 세션에 적어 둔다 — 그 세션을 따로 열었을
- * 때도 같은 모델로 이어진다.
- */
-function createParticipantSession(provider: LLMProvider, projectPath: string, displayName: string, roleName: string, model: string | null): string {
-  const { sessionId } = sessionsService.createAppSession(provider, projectPath, `${displayName} · ${roleName}`);
-  sessionsService.renameSessionById(sessionId, `[룸] ${displayName} · ${roleName}`);
-  if (model) {
-    providerModelsService.setSessionModel(provider, sessionId, model);
-  }
-  return sessionId;
-}
 
 /** Rooms 라우트가 쓰는 룸 서비스. */
 export const roomsService = {
@@ -181,7 +191,7 @@ export const roomsService = {
         provider: row.provider,
         displayName: row.display_name,
         roleName: row.role_name,
-        isHost: row.session_id === hostByRoom.get(row.room_id),
+        isHost: row.session_id !== null && row.session_id === hostByRoom.get(row.room_id),
       });
       participantsByRoom.set(row.room_id, list);
     }
@@ -249,6 +259,8 @@ export const roomsService = {
           display_name: hostName,
           role_name: hostRole,
           role_prompt: input.host?.rolePrompt?.trim() ?? '',
+          persona: input.host?.persona?.trim() ?? '',
+          status: 'active',
           position: 0,
         },
         {
@@ -259,6 +271,8 @@ export const roomsService = {
           display_name: inviteeName,
           role_name: inviteeRole,
           role_prompt: input.participant.rolePrompt?.trim() ?? '',
+          persona: input.participant.persona?.trim() ?? '',
+          status: 'active',
           position: 1,
         },
       ],
@@ -268,11 +282,16 @@ export const roomsService = {
     return this.getRoomDetail(roomId);
   },
 
+  /**
+   * 참가자를 들인다. 기본은 명단(`standby`)이라, 세션도 토큰도 그때는 들지
+   * 않고 `@이름` 으로 불릴 때 들어온다. `active` 로 주면 예전처럼 바로 들어와
+   * 매 차례를 함께 돈다.
+   */
   async addParticipant(roomId: string, input: ParticipantInput): Promise<RoomDetail> {
     const room = requireRoom(roomId);
     const existing = roomsDb.listParticipants(roomId);
     if (existing.length >= MAX_ROOM_PARTICIPANTS) {
-      throw new AppError(`한 룸에는 최대 ${MAX_ROOM_PARTICIPANTS}명까지 참가할 수 있습니다.`, {
+      throw new AppError(`한 룸에는 명단을 더해 최대 ${MAX_ROOM_PARTICIPANTS}명까지 둘 수 있습니다.`, {
         code: 'ROOM_FULL',
         statusCode: 409,
       });
@@ -284,7 +303,12 @@ export const roomsService = {
     const displayName = resolveDisplayName(input.displayName, provider, takenNames);
     const roleName = requireRoleName(input.roleName);
     const model = input.model?.trim() || null;
-    const sessionId = createParticipantSession(provider, room.project_path, displayName, roleName, model);
+    const status = input.status === 'active' ? 'active' : 'standby';
+    // 명단에만 담는 멤버는 세션을 만들지 않는다. 한 번도 불리지 않으면 아무
+    // 비용도 들지 않아야 명단을 넉넉히 둘 수 있다.
+    const sessionId = status === 'active'
+      ? createParticipantSession(provider, room.project_path, displayName, roleName, model)
+      : null;
 
     roomsDb.addParticipant({
       participant_id: randomUUID(),
@@ -295,6 +319,8 @@ export const roomsService = {
       display_name: displayName,
       role_name: roleName,
       role_prompt: input.rolePrompt?.trim() ?? '',
+      persona: input.persona?.trim() ?? '',
+      status,
       position: Math.max(...existing.map((row) => row.position), -1) + 1,
     });
 
@@ -304,7 +330,12 @@ export const roomsService = {
 
   updateSettings(
     roomId: string,
-    settings: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number; splitWork?: boolean; discussion?: boolean },
+    settings: {
+      permissionMode?: RoomPermissionMode;
+      maxAutoTurns?: number;
+      splitWork?: boolean;
+      discussion?: boolean;
+    },
   ): RoomDetail {
     requireRoom(roomId);
     if (settings.maxAutoTurns !== undefined
@@ -315,40 +346,121 @@ export const roomsService = {
       });
     }
     roomsDb.updateRoomSettings(roomId, settings);
-    broadcastRoomFrame({ kind: 'room_updated', roomId });
-    return this.getRoomDetail(roomId);
-  },
-
-  /** 참가자 한 명의 권한. 모델과 추론 강도는 그 참가자 세션에 적으므로 여기서 다루지 않는다. */
-  updateParticipant(roomId: string, participantId: string, settings: { permissionMode?: RoomPermissionMode }): RoomDetail {
-    requireRoom(roomId);
-    requireParticipant(roomId, participantId);
     if (settings.permissionMode !== undefined) {
-      roomsDb.updateParticipantPermission(participantId, settings.permissionMode);
+      // 룸 권한은 한 번에 바꾸는 것이다. 참가자별로 따로 둔 값이 남아 있으면
+      // 그 사람만 예전 권한으로 돌아, 바꾼 줄 알았던 것이 안 바뀐다.
+      roomsDb.clearParticipantPermissions(roomId);
     }
-    roomsDb.touchRoom(roomId);
     broadcastRoomFrame({ kind: 'room_updated', roomId });
     return this.getRoomDetail(roomId);
   },
 
   /**
-   * 참가자를 내보낸다. 그 세션은 지워지지 않고 평범한 대화로 남는다. 호스트는
-   * 룸 자체이므로 나갈 수 없고, 지금 차례를 쥔 참가자는 끝나거나 정지한 뒤에만
-   * 내보낼 수 있다.
+   * 참가자 한 명의 권한과 역할. 모델과 추론 강도는 그 참가자 세션에 적으므로
+   * 여기서 다루지 않는다.
+   *
+   * 역할에 해당하는 칸이 달라지면 `role_dirty` 를 세워, 그 참가자가 다음 차례에
+   * 바뀐 역할 안내를 다시 받게 한다. 이름이 바뀌었을 때는 룸 전체에 세운다 —
+   * 다른 참가자들이 기억하는 `@이름` 이 더는 맞지 않기 때문이다.
+   */
+  updateParticipant(
+    roomId: string,
+    participantId: string,
+    settings: {
+      permissionMode?: RoomPermissionMode;
+      displayName?: string;
+      roleName?: string;
+      rolePrompt?: string;
+      persona?: string;
+    },
+  ): RoomDetail {
+    const room = requireRoom(roomId);
+    const current = requireParticipant(roomId, participantId);
+    if (settings.permissionMode !== undefined) {
+      roomsDb.updateParticipantPermission(participantId, settings.permissionMode);
+    }
+
+    const profile: { displayName?: string; roleName?: string; rolePrompt?: string; persona?: string } = {};
+    if (settings.displayName !== undefined) {
+      if (!settings.displayName.trim()) {
+        throw new AppError('참가자 이름은 비울 수 없습니다.', { code: 'INVALID_DISPLAY_NAME', statusCode: 400 });
+      }
+      // 자기 이름은 겹침 검사에서 빼야 역할만 고치면서 이름을 그대로 둘 수 있다.
+      const takenNames = [...roomsDb.listParticipants(roomId), ...roomsDb.listFormerParticipants(roomId)]
+        .filter((row) => row.participant_id !== participantId)
+        .map((row) => row.display_name);
+      profile.displayName = resolveDisplayName(settings.displayName, current.provider, takenNames);
+    }
+    if (settings.roleName !== undefined) {
+      profile.roleName = requireRoleName(settings.roleName);
+    }
+    if (settings.rolePrompt !== undefined) {
+      profile.rolePrompt = settings.rolePrompt.trim();
+    }
+    if (settings.persona !== undefined) {
+      profile.persona = settings.persona.trim();
+    }
+
+    const nameChanged = profile.displayName !== undefined && profile.displayName !== current.display_name;
+    const roleChanged = nameChanged
+      || (profile.roleName !== undefined && profile.roleName !== current.role_name)
+      || (profile.rolePrompt !== undefined && profile.rolePrompt !== current.role_prompt)
+      || (profile.persona !== undefined && profile.persona !== current.persona);
+
+    roomsDb.updateParticipantProfile(participantId, profile, roleChanged);
+    // 아직 불린 적 없는 명단 멤버는 세션이 없어 바꿀 이름도 없다.
+    if ((nameChanged || profile.roleName !== undefined) && current.session_id) {
+      // 세션 목록에 보이는 이름도 따라가야 어떤 대화가 누구인지 알아볼 수 있다.
+      const name = profile.displayName ?? current.display_name;
+      const role = profile.roleName ?? current.role_name;
+      sessionsService.renameSessionById(current.session_id, `[룸] ${name} · ${role}`);
+    }
+    if (nameChanged) {
+      for (const row of roomsDb.listParticipants(roomId)) {
+        if (row.participant_id !== participantId) {
+          roomsDb.updateParticipantProfile(row.participant_id, {}, true);
+        }
+      }
+    }
+
+    roomsDb.touchRoom(room.room_id);
+    broadcastRoomFrame({ kind: 'room_updated', roomId });
+    return this.getRoomDetail(roomId);
+  },
+
+  /**
+   * 참가자를 차례에서 뺀다.
+   *
+   * 일한 적 있는 참가자는 **룸 안에 그대로 두고** 대기로만 돌린다. 세션을 룸
+   * 밖으로 내보내면 그 대화가 프로젝트 목록에 평범한 세션으로 튀어나와, 룸을
+   * 쓸수록 목록이 지저분해진다. 대기로 두면 사이드바에서는 여전히 룸 밑에
+   * 접혀 있고, 차례만 돌아오지 않는다. `@이름` 으로 다시 부르면 그 세션이
+   * 하던 이야기를 그대로 기억한 채 돌아온다.
+   *
+   * 한 번도 불린 적 없는 명단 멤버는 세션도 발언도 없으므로 아주 뺀다. 지울
+   * 것이 이름뿐이라 그 이름을 바로 다시 쓸 수 있다.
+   *
+   * 호스트는 룸 자체여서 뺄 수 없고, 지금 차례를 쥔 참가자는 끝나거나 정지한
+   * 뒤에만 뺄 수 있다.
    */
   removeParticipant(roomId: string, participantId: string): RoomDetail {
     const room = requireRoom(roomId);
     const participant = requireParticipant(roomId, participantId);
     if (participant.session_id === room.host_session_id) {
-      throw new AppError('호스트는 룸에서 나갈 수 없습니다.', { code: 'HOST_CANNOT_LEAVE', statusCode: 400 });
+      throw new AppError('호스트는 룸에서 뺄 수 없습니다.', { code: 'HOST_CANNOT_LEAVE', statusCode: 400 });
     }
     if (roomTurnEngine.isSpeaking(roomId, participantId)) {
-      throw new AppError('지금 답하고 있는 참가자입니다. 끝나거나 정지한 뒤 내보내 주세요.', {
+      throw new AppError('지금 답하고 있는 참가자입니다. 끝나거나 정지한 뒤 빼 주세요.', {
         code: 'PARTICIPANT_SPEAKING',
         statusCode: 409,
       });
     }
-    roomsDb.markParticipantLeft(roomId, participantId);
+    if (participant.session_id) {
+      roomsDb.setParticipantStatus(participantId, 'standby');
+      roomsDb.touchRoom(roomId);
+    } else {
+      roomsDb.deleteParticipant(roomId, participantId);
+    }
     broadcastRoomFrame({ kind: 'room_updated', roomId });
     return this.getRoomDetail(roomId);
   },
@@ -371,6 +483,26 @@ export const roomsService = {
       attachments,
       hostCommand: input.hostCommand,
     });
+  },
+
+  /**
+   * 참가자 세션들의 대화를 줄여 토큰을 되돌린다. `participantId` 를 주면 그
+   * 한 명만, 주지 않으면 세션이 있는 전원이다.
+   *
+   * 명단에서 기다리기만 한 멤버는 세션이 없어 줄일 것도 없으므로 빠진다.
+   */
+  async compact(roomId: string, participantId?: string): Promise<RoomRuntimeState> {
+    const room = requireRoom(roomId);
+    const rows = participantId
+      ? [requireParticipant(roomId, participantId)]
+      : roomsDb.listParticipants(roomId);
+    const targets = rows
+      .map((row) => toRoomParticipant(row, room))
+      .filter((participant): participant is RoomParticipant & { sessionId: string } => Boolean(participant.sessionId));
+    if (targets.length === 0) {
+      throw new AppError('대화를 줄일 세션이 없습니다.', { code: 'NO_COMPACTABLE_SESSION', statusCode: 400 });
+    }
+    return roomTurnEngine.compact(room, targets);
   },
 
   async interrupt(roomId: string): Promise<RoomRuntimeState> {

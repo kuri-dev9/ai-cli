@@ -36,6 +36,9 @@ function readParticipant(value: unknown) {
     displayName: readOptionalString(record.displayName) ?? '',
     roleName: readRequiredString(record.roleName, 'participant.roleName'),
     rolePrompt: readOptionalString(record.rolePrompt),
+    persona: readOptionalString(record.persona),
+    // 주지 않으면 명단에 담긴다. 불릴 때 들어온다.
+    status: record.status === 'active' ? 'active' as const : 'standby' as const,
   };
 }
 
@@ -77,6 +80,7 @@ router.post(
         displayName: readOptionalString(host.displayName),
         roleName: readOptionalString(host.roleName),
         rolePrompt: readOptionalString(host.rolePrompt),
+        persona: readOptionalString(host.persona),
       },
       participant: readParticipant(body.participant),
     });
@@ -102,7 +106,13 @@ router.patch(
     const detail = roomsService.updateParticipant(
       readRequiredString(req.params.roomId, 'roomId'),
       readRequiredString(req.params.participantId, 'participantId'),
-      { permissionMode: body.permissionMode === undefined ? undefined : parseRoomPermissionMode(body.permissionMode) },
+      {
+        permissionMode: body.permissionMode === undefined ? undefined : parseRoomPermissionMode(body.permissionMode),
+        displayName: readOptionalString(body.displayName) ?? undefined,
+        roleName: readOptionalString(body.roleName) ?? undefined,
+        rolePrompt: readOptionalString(body.rolePrompt) ?? undefined,
+        persona: readOptionalString(body.persona) ?? undefined,
+      },
     );
     res.json(createApiSuccessResponse(detail));
   }),
@@ -148,6 +158,18 @@ router.post(
       readUserId(req),
     );
     res.status(202).json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/:roomId/compact',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = readBody(req);
+    const state = await roomsService.compact(
+      readRequiredString(req.params.roomId, 'roomId'),
+      readOptionalString(body.participantId) ?? undefined,
+    );
+    res.json(createApiSuccessResponse({ state }));
   }),
 );
 

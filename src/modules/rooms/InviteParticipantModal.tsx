@@ -61,10 +61,14 @@ export default function InviteParticipantModal({
   const [displayName, setDisplayName] = useState('');
   const [roleName, setRoleName] = useState('');
   const [rolePrompt, setRolePrompt] = useState('');
+  const [persona, setPersona] = useState('');
+  // 명단에 담을지(불러야 옴) 바로 들일지(매 차례 함께 돎).
+  const [joinNow, setJoinNow] = useState(false);
   // Optional host identity, only sent with the first invite.
   const [hostDisplayName, setHostDisplayName] = useState('');
   const [hostRoleName, setHostRoleName] = useState('');
   const [hostRolePrompt, setHostRolePrompt] = useState('');
+  const [hostPersona, setHostPersona] = useState('');
   // 초대 폼과 프리셋 관리 화면 중 무엇을 보여줄지.
   const [view, setView] = useState<'invite' | 'presets'>('invite');
   // 마지막으로 고른 프리셋. 칩을 강조하는 데만 쓴다.
@@ -109,6 +113,7 @@ export default function InviteParticipantModal({
     setHostDisplayName(preset?.displayName ?? '');
     setHostRoleName(preset?.roleName ?? '');
     setHostRolePrompt(preset?.rolePrompt ?? '');
+    setHostPersona(preset?.persona ?? '');
   };
 
   // 처음 룸을 만들 때는 호스트를 설계자로 미리 채워 둔다. 창을 열 때 한 번만.
@@ -145,6 +150,7 @@ export default function InviteParticipantModal({
     setDisplayName(pickAvailableDisplayName(preset.displayName, allTakenNames));
     setRoleName(preset.roleName);
     setRolePrompt(preset.rolePrompt);
+    setPersona(preset.persona);
     // 추천 프로바이더는 쓸 수 있을 때만 따른다. 없으면 지금 고른 것을 둔다.
     if (preset.provider && providers.includes(preset.provider)) {
       selectProvider(preset.provider);
@@ -156,6 +162,7 @@ export default function InviteParticipantModal({
       displayName: displayName.trim(),
       roleName: roleName.trim(),
       rolePrompt: rolePrompt.trim(),
+      persona: persona.trim(),
       provider: provider === 'claude' || provider === 'codex' ? provider : null,
     });
     if (saved) {
@@ -181,16 +188,20 @@ export default function InviteParticipantModal({
       displayName: trimmedName,
       roleName: roleName.trim(),
       rolePrompt: rolePrompt.trim() || undefined,
+      persona: persona.trim() || undefined,
+      // 룸을 처음 만들 때의 첫 참가자는 늘 상주다. 부를 호스트가 아직 말하기 전이다.
+      status: (target.kind === 'create' || joinNow ? 'active' : 'standby') as 'active' | 'standby',
     };
     try {
       const response = target.kind === 'create'
         ? await api.rooms.create({
           hostSessionId: target.hostSessionId,
-          host: hostDisplayName.trim() || hostRoleName.trim() || hostRolePrompt.trim()
+          host: hostDisplayName.trim() || hostRoleName.trim() || hostRolePrompt.trim() || hostPersona.trim()
             ? {
               displayName: hostDisplayName.trim() || undefined,
               roleName: hostRoleName.trim() || undefined,
               rolePrompt: hostRolePrompt.trim() || undefined,
+              persona: hostPersona.trim() || undefined,
             }
             : undefined,
           participant,
@@ -203,6 +214,7 @@ export default function InviteParticipantModal({
       setDisplayName('');
       setRoleName('');
       setRolePrompt('');
+      setPersona('');
       setSelectedPresetId(null);
       handleOpenChange(false);
     } catch (error) {
@@ -334,6 +346,42 @@ export default function InviteParticipantModal({
               className={FIELD_CLASS}
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">{t('rooms.persona')}</span>
+            <textarea
+              value={persona}
+              onChange={(event) => setPersona(event.target.value)}
+              placeholder={t('rooms.personaPlaceholder')}
+              rows={2}
+              className={FIELD_CLASS}
+            />
+          </label>
+          {target.kind === 'add' && (
+            <div className="rounded-md border border-border/60 px-3 py-2">
+              <div className="inline-flex overflow-hidden rounded-md border border-border text-xs" role="group" aria-label={t('rooms.joinMode')}>
+                {([false, true] as const).map((value) => (
+                  <button
+                    key={String(value)}
+                    type="button"
+                    aria-pressed={joinNow === value}
+                    onClick={() => setJoinNow(value)}
+                    className={cn(
+                      'px-2.5 py-1 transition-colors',
+                      joinNow === value
+                        ? 'bg-primary/15 font-medium text-foreground'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                    )}
+                  >
+                    {value ? t('rooms.joinNow') : t('rooms.joinOnCall')}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {joinNow ? t('rooms.joinNowHint') : t('rooms.joinOnCallHint')}
+              </p>
+            </div>
+          )}
+
           <div className="-mt-1 flex justify-end">
             <button
               type="button"

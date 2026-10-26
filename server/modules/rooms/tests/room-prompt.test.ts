@@ -22,6 +22,8 @@ function participant(id: string, displayName: string, position: number, extra: P
     displayName,
     roleName: `role-${id}`,
     rolePrompt: '',
+    persona: '',
+    status: 'active',
     position,
     isHost: position === 0,
     permissionMode: 'ask',
@@ -93,8 +95,39 @@ test('the first turn carries the role brief; later turns only a reminder and the
   assert.match(first, /예전 이야기/);
 
   const later = buildTurnPrompt({ me: reviewer, participants: everyone, delta: [], isFirstTurn: false });
-  assert.doesNotMatch(later, /함께 일하는 참가자/);
+  assert.doesNotMatch(later, /지금 룸에 있는 참가자/);
   assert.match(later, /새 메시지 없음/);
+});
+
+test('a changed role is briefed again on the next turn, flagged as a change', () => {
+  const changed = participant('b', '체커', 1, {
+    roleName: '리뷰어',
+    rolePrompt: '버그만 번호로 짚는다',
+    persona: '깐깐하고 의심이 많다',
+  });
+  const after = buildTurnPrompt({
+    me: changed,
+    participants: [host, changed, coder],
+    delta: [],
+    isFirstTurn: false,
+    roleChanged: true,
+  });
+  // 첫 차례가 아닌데도 역할 안내가 통째로 다시 나가고, 바뀌었다는 표시가 붙는다.
+  assert.match(after, /\[바뀜\]/);
+  assert.match(after, /"@체커" 입니다\. 역할: 리뷰어/);
+  assert.match(after, /역할 설명: 버그만 번호로 짚는다/);
+  assert.match(after, /성향: 깐깐하고 의심이 많다/);
+  assert.match(after, /지금 룸에 있는 참가자/);
+
+  // 첫 차례에는 바뀜 표시 없이 같은 안내가 나간다.
+  const first = buildTurnPrompt({ me: changed, participants: [host, changed, coder], delta: [], isFirstTurn: true });
+  assert.doesNotMatch(first, /\[바뀜\]/);
+  assert.match(first, /성향: 깐깐하고 의심이 많다/);
+
+  // 바뀐 게 없으면 예전처럼 짧은 알림만 나간다.
+  const quiet = buildTurnPrompt({ me: changed, participants: [host, changed, coder], delta: [], isFirstTurn: false });
+  assert.doesNotMatch(quiet, /지금 룸에 있는 참가자/);
+  assert.doesNotMatch(quiet, /성향:/);
 });
 
 test('display names reject spaces, @ and brackets', () => {

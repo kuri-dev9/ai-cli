@@ -32,6 +32,8 @@ lower(hex(randomblob(6)))
 type TableInfoRow = {
   name: string;
   pk: number;
+  /** 1 이면 NOT NULL 이다. */
+  notnull: number;
 };
 
 const addColumnToTableIfNotExists = (
@@ -481,17 +483,80 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
-/** 협업 방식, 참가자별 권한·퇴장, 메시지 첨부·결론·넘김·종류. 처음 나온 룸 표에는 없던 칸이다. */
+/**
+ * 명단에만 담긴 멤버는 세션이 없다. 처음 `@이름` 으로 불릴 때 세션이 생기므로
+ * `session_id` 가 NULL 일 수 있어야 한다.
+ *
+ * SQLite 는 칸의 NOT NULL 을 떼지 못해 표를 다시 만든다. 이미 떼어 두었으면
+ * 아무것도 하지 않는다.
+ */
+const allowRosterParticipantsWithoutSession = (db: Database): void => {
+  const sessionColumn = getTableInfo(db, 'room_participants').find((column) => column.name === 'session_id');
+  if (!sessionColumn || sessionColumn.notnull !== 1) {
+    return;
+  }
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN TRANSACTION');
+  try {
+    db.exec(`
+      CREATE TABLE room_participants__new (
+          participant_id TEXT PRIMARY KEY,
+          room_id TEXT NOT NULL,
+          session_id TEXT,
+          provider TEXT NOT NULL,
+          model TEXT,
+          display_name TEXT NOT NULL,
+          role_name TEXT NOT NULL,
+          role_prompt TEXT NOT NULL DEFAULT '',
+          persona TEXT NOT NULL DEFAULT '',
+          role_dirty INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'active',
+          position INTEGER NOT NULL,
+          last_seen_message_id INTEGER NOT NULL DEFAULT 0,
+          permission_mode TEXT,
+          joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          left_at DATETIME,
+          UNIQUE (room_id, display_name),
+          FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE,
+          FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+      )
+    `);
+    db.exec(`
+      INSERT INTO room_participants__new
+        (participant_id, room_id, session_id, provider, model, display_name, role_name, role_prompt,
+         persona, role_dirty, status, position, last_seen_message_id, permission_mode, joined_at, left_at)
+      SELECT participant_id, room_id, session_id, provider, model, display_name, role_name, role_prompt,
+             persona, role_dirty, status, position, last_seen_message_id, permission_mode, joined_at, left_at
+      FROM room_participants
+    `);
+    db.exec('DROP TABLE room_participants');
+    db.exec('ALTER TABLE room_participants__new RENAME TO room_participants');
+    db.exec('COMMIT');
+  } catch (migrationError) {
+    db.exec('ROLLBACK');
+    throw migrationError;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+};
+
+/** 협업 방식, 참가자별 권한·성향·퇴장, 메시지 첨부·결론·넘김·종류. 처음 나온 룸 표에는 없던 칸이다. */
 const addRoomSettingsColumns = (db: Database): void => {
   const participantColumns = getTableInfo(db, 'room_participants').map((column) => column.name);
   addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'permission_mode', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'left_at', 'DATETIME');
+  addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'persona', "TEXT NOT NULL DEFAULT ''");
+  addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'role_dirty', 'INTEGER NOT NULL DEFAULT 0');
+  // 기존 참가자는 모두 활동 중이다. 지금 돌아가는 룸의 동작이 달라지지 않는다.
+  addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'status', "TEXT NOT NULL DEFAULT 'active'");
   const messageColumns = getTableInfo(db, 'room_messages').map((column) => column.name);
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'attachments', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'final_text', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'handoff', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'turn_kind', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'task', 'TEXT');
+  allowRosterParticipantsWithoutSession(db);
   const roomColumns = getTableInfo(db, 'rooms').map((column) => column.name);
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'split_work', 'INTEGER NOT NULL DEFAULT 1');
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'discussion', 'INTEGER NOT NULL DEFAULT 1');

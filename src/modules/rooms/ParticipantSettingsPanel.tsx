@@ -1,11 +1,14 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, LogOut, X } from 'lucide-react';
+import { ExternalLink, LogOut, Minimize2, Pencil, X } from 'lucide-react';
 
 import { ComposerModelMenu, TokenUsageSummary } from '@/modules/chat';
 import type { RoomParticipant, RoomPermissionMode } from '@/shared/types';
 import { Button } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 import { useParticipantSession } from '@/modules/rooms/hooks/useParticipantSession';
+import { isValidRoomDisplayName } from '@/modules/rooms/utils/roomRolePresets';
+import { ROOM_PERMISSION_LABEL_KEYS, ROOM_PERMISSION_MODES } from '@/modules/rooms/utils/roomPermissions';
 
 type ParticipantSettingsPanelProps = {
   participant: RoomParticipant;
@@ -14,18 +17,16 @@ type ParticipantSettingsPanelProps = {
   /** Bumped whenever a timeline entry lands, so the token usage refreshes after each turn. */
   refreshKey: number;
   onChangePermission: (mode: RoomPermissionMode) => void;
+  /** 이름·역할·역할 지시·성향을 고친다. 고치면 참가자가 다음 차례에 다시 안내받는다. */
+  onChangeProfile: (profile: { displayName: string; roleName: string; rolePrompt: string; persona: string }) => void;
+  /** 이 참가자 세션의 맥락만 줄인다. 쌓인 토큰을 되돌리는 데 쓴다. */
+  onCompact: () => void;
   onLeave: () => void;
   onOpenSession: () => void;
   onClose: () => void;
 };
 
-const PERMISSION_MODES: RoomPermissionMode[] = ['ask', 'read', 'full'];
-
-const PERMISSION_LABEL_KEYS: Record<RoomPermissionMode, string> = {
-  ask: 'rooms.permissionAsk',
-  read: 'rooms.permissionRead',
-  full: 'rooms.permissionFull',
-};
+const FIELD_CLASS = 'w-full rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground focus:border-primary focus:outline-none';
 
 /**
  * The settings strip that opens under the participant chips: one participant
@@ -37,12 +38,16 @@ export default function ParticipantSettingsPanel({
   isSpeaking,
   refreshKey,
   onChangePermission,
+  onChangeProfile,
+  onCompact,
   onLeave,
   onOpenSession,
   onClose,
 }: ParticipantSettingsPanelProps) {
   const { t } = useTranslation('chat');
   const session = useParticipantSession(participant.provider, participant.sessionId, refreshKey);
+  // 역할 편집 폼이 열려 있으면 고치는 중인 값. 닫혀 있으면 null.
+  const [draft, setDraft] = useState<{ displayName: string; roleName: string; rolePrompt: string; persona: string } | null>(null);
 
   const selectModel = (model: string) => {
     void session.selectModel(model).catch((error: unknown) => {
@@ -58,12 +63,23 @@ export default function ParticipantSettingsPanel({
   // The host is the room itself, so it has no leave button at all.
   const leaveBlockedReason = isSpeaking ? t('rooms.leaveWhileSpeaking') : null;
 
+  const openEditor = () => setDraft({
+    displayName: participant.displayName,
+    roleName: participant.roleName,
+    rolePrompt: participant.rolePrompt,
+    persona: participant.persona,
+  });
+
+  const draftNameValid = draft ? isValidRoomDisplayName(draft.displayName.trim()) : false;
+  const canSaveDraft = Boolean(draft) && draftNameValid && Boolean(draft?.roleName.trim());
+
   return (
     <div
       role="region"
       aria-label={t('rooms.participantSettings', { name: participant.displayName })}
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border/60 bg-muted/20 px-3 py-2 text-xs"
+      className="border-b border-border/60 bg-muted/20 px-3 py-2 text-xs"
     >
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <span className="font-semibold text-foreground">
         {t('rooms.participantSettings', { name: participant.displayName })}
       </span>
@@ -84,7 +100,7 @@ export default function ParticipantSettingsPanel({
       <div className="inline-flex items-center gap-1.5 text-muted-foreground" role="group" aria-label={t('rooms.permissionMode')}>
         {t('rooms.permissionMode')}
         <div className="inline-flex overflow-hidden rounded-md border border-border">
-          {PERMISSION_MODES.map((mode) => (
+          {ROOM_PERMISSION_MODES.map((mode) => (
             <button
               key={mode}
               type="button"
@@ -99,7 +115,7 @@ export default function ParticipantSettingsPanel({
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
-              {t(PERMISSION_LABEL_KEYS[mode])}
+              {t(ROOM_PERMISSION_LABEL_KEYS[mode])}
             </button>
           ))}
         </div>
@@ -111,6 +127,27 @@ export default function ParticipantSettingsPanel({
       </span>
 
       <div className="ml-auto flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2 text-xs"
+          aria-expanded={draft !== null}
+          onClick={() => (draft ? setDraft(null) : openEditor())}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          {t('rooms.editRole')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2 text-xs"
+          disabled={isSpeaking || !participant.sessionId}
+          title={isSpeaking ? t('rooms.compactWhileRunning') : t('rooms.compactOneTitle')}
+          onClick={onCompact}
+        >
+          <Minimize2 className="h-3.5 w-3.5" />
+          {t('rooms.compactOne')}
+        </Button>
         <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={onOpenSession}>
           <ExternalLink className="h-3.5 w-3.5" />
           {t('rooms.openSession')}
@@ -123,11 +160,14 @@ export default function ParticipantSettingsPanel({
             disabled={Boolean(leaveBlockedReason)}
             title={leaveBlockedReason ?? undefined}
             onClick={() => {
-              if (window.confirm(t('rooms.leaveConfirm', { name: participant.displayName }))) onLeave();
+              // 한 번도 부른 적 없는 멤버는 지울 대화가 없어 명단에서 아주 뺀다.
+              // 일한 적 있는 참가자는 룸에 남고 차례만 오지 않는다.
+              const confirmKey = participant.sessionId ? 'rooms.leaveConfirm' : 'rooms.leaveRosterConfirm';
+              if (window.confirm(t(confirmKey, { name: participant.displayName }))) onLeave();
             }}
           >
             <LogOut className="h-3.5 w-3.5" />
-            {t('rooms.leave')}
+            {t(participant.sessionId ? 'rooms.leave' : 'rooms.leaveRoster')}
           </Button>
         )}
         <Button
@@ -141,6 +181,72 @@ export default function ParticipantSettingsPanel({
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>
+    </div>
+
+    {draft && (
+      <div className="mt-2 space-y-2 rounded-md border border-primary/40 bg-primary/5 p-2">
+        <p className="text-[11px] text-muted-foreground">{t('rooms.editRoleHint')}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            value={draft.displayName}
+            onChange={(event) => setDraft({ ...draft, displayName: event.target.value })}
+            placeholder={t('rooms.displayName')}
+            aria-label={t('rooms.displayName')}
+            className={FIELD_CLASS}
+            autoComplete="off"
+          />
+          <input
+            value={draft.roleName}
+            onChange={(event) => setDraft({ ...draft, roleName: event.target.value })}
+            placeholder={t('rooms.roleName')}
+            aria-label={t('rooms.roleName')}
+            className={FIELD_CLASS}
+            autoComplete="off"
+          />
+        </div>
+        {draft.displayName.trim().length > 0 && !draftNameValid && (
+          <p className="text-[11px] text-red-600 dark:text-red-400">{t('rooms.displayNameInvalid')}</p>
+        )}
+        <textarea
+          value={draft.rolePrompt}
+          onChange={(event) => setDraft({ ...draft, rolePrompt: event.target.value })}
+          placeholder={t('rooms.rolePromptPlaceholder')}
+          aria-label={t('rooms.rolePrompt')}
+          rows={3}
+          className={FIELD_CLASS}
+        />
+        <textarea
+          value={draft.persona}
+          onChange={(event) => setDraft({ ...draft, persona: event.target.value })}
+          placeholder={t('rooms.personaPlaceholder')}
+          aria-label={t('rooms.persona')}
+          rows={2}
+          className={FIELD_CLASS}
+        />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setDraft(null)}>
+            {t('rooms.cancel')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={!canSaveDraft}
+            onClick={() => {
+              onChangeProfile({
+                displayName: draft.displayName.trim(),
+                roleName: draft.roleName.trim(),
+                rolePrompt: draft.rolePrompt.trim(),
+                persona: draft.persona.trim(),
+              });
+              setDraft(null);
+            }}
+          >
+            {t('rooms.presetSave')}
+          </Button>
+        </div>
+      </div>
+    )}
     </div>
   );
 }

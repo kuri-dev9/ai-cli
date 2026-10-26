@@ -19,10 +19,16 @@ import {
 } from '@/modules/rooms/services/room-prompt.service.js';
 import type { RoomHandoff, RoomTurnMode } from '@/modules/rooms/services/room-prompt.service.js';
 import {
+  listActiveParticipants,
+  listRoster,
+  listStandbyMembers,
+  returnSummonedToStandby,
+  summonParticipant,
+} from '@/modules/rooms/services/room-roster.service.js';
+import {
   parseRoomPermissionMode,
   serializeHandoff,
   toRoomMessage,
-  toRoomParticipant,
 } from '@/modules/rooms/services/room-records.service.js';
 import type {
   AnyRecord,
@@ -103,8 +109,21 @@ let runtime: ProviderRuntimeGateway | null = null;
 const PRIOR_CONTEXT_MESSAGES = 12;
 const PRIOR_CONTEXT_MESSAGE_CHARS = 800;
 
+/** 지난 대화를 요약해 맥락을 줄이는 명령. Claude 와 Codex 가 같은 이름을 쓴다. */
+const COMPACT_COMMAND = '/compact';
+
 /** 읽기 전용 차례에서 막는 Claude 도구. 같은 폴더를 동시에 고치지 않게 한다. */
 const CLAUDE_WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+
+/**
+ * 읽기 전용 차례에서도 "전체 허용" 참가자에게는 열어 두는 도구.
+ *
+ * 조사는 셸 없이 되지 않는다 — 테스트를 돌려 보고, 로그를 읽고, 파일을 세는
+ * 일이 전부 여기로 간다. 셸로 파일을 고칠 수도 있지만 그건 쓰기 도구를 막는
+ * 것과 같은 성격의 약속이고, 차례마다 승인 창을 띄워 라운드를 멈추는 것보다
+ * 낫다. 승인을 받고 싶으면 그 참가자를 "매번 묻기" 로 두면 된다.
+ */
+const READ_ONLY_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'Task', 'TodoRead'];
 
 function getLoop(roomId: string): RoomLoopState {
   let loop = loops.get(roomId);
@@ -145,8 +164,12 @@ function broadcastState(room: RoomRow): void {
   broadcastRoomFrame({ kind: 'room_state', roomId: room.room_id, state: readState(room.room_id, room.max_auto_turns) });
 }
 
+/**
+ * 지금 차례가 돌아오는 참가자. 명단에서 기다리는 멤버는 빠진다 — 그들은
+ * `@이름` 으로 불려야 들어온다.
+ */
 function loadParticipants(room: RoomRow): RoomParticipant[] {
-  return roomsDb.listParticipants(room.room_id).map((row) => toRoomParticipant(row, room));
+  return listActiveParticipants(room);
 }
 
 /**
@@ -197,42 +220,81 @@ async function readPriorContext(room: RoomRow): Promise<string | null> {
 }
 
 /**
- * 이 차례에 쓰는 권한. 읽기 전용 차례는 참가자 설정과 상관없이 파일을 고치지
- * 못한다 — Claude 는 쓰기 도구를 막고, Codex 는 읽기 전용 샌드박스로 돈다.
- * 다른 프로바이더는 막을 수단이 없어 읽기 프리셋과 안내문에 맡긴다.
+ * 차례를 도는 참가자. 명단에서 기다리는 멤버와 달리 세션이 반드시 있다 —
+ * `runParticipantTurn` 이 불러오면서 없으면 그 자리에서 만든다.
+ */
+type SpeakingParticipant = RoomParticipant & { sessionId: string };
+
+/**
+ * 이 차례에 쓰는 권한.
+ *
+ * 보통의 차례는 참가자 설정을 그대로 쓴다. 분담 중 수정을 맡지 않은 차례는
+ * 거기에 더해 파일을 고치지 못한다 — 같은 폴더를 둘이 동시에 고치면 서로
+ * 덮어쓰기 때문이다.
+ *
+ * 그 "고치지 못한다" 가 **물어본다** 가 되어서는 안 된다. 라운드는 사람이
+ * 보고 있지 않아도 끝까지 돌아야 하는데, 조사하러 간 참가자가 `Bash` 하나에
+ * 막혀 승인 창을 띄우면 거기서 멈춘 채 사람을 기다린다. 그래서 "전체 허용"
+ * 을 고른 참가자는 읽기 전용 차례에서도 묻지 않고, 쓰기 도구만 거절당한다.
+ *
+ * Claude 쪽에서 `bypassPermissions` 를 쓰지 않는 이유가 있다. 그 모드는
+ * 승인 콜백을 통째로 건너뛰어 `disallowedTools` 가 무시된다(런타임의
+ * `canUseTool` 주석 참고). 쓰기를 막으려면 허용 목록을 직접 짜야 한다.
  */
 function resolveTurnPermissions(me: RoomParticipant, readOnly: boolean): AnyRecord {
+  const mode = parseRoomPermissionMode(me.permissionMode);
   if (!readOnly) {
-    return resolveTelegramRunPermissions(parseRoomPermissionMode(me.permissionMode));
+    return resolveTelegramRunPermissions(mode);
   }
+  // Codex 는 읽기 전용 샌드박스가 있어 OS 가 막는다. 묻지 않고 거절한다.
   if (me.provider === 'codex') {
     return { permissionMode: 'readOnly' };
   }
+  const allowedTools = [...TELEGRAM_READ_ONLY_TOOLS];
+  if (mode === 'full') {
+    // 읽기만 하는 차례에도 조사에는 셸이 필요하다. 이것이 없어서 매번 물었다.
+    allowedTools.push(...READ_ONLY_SHELL_TOOLS);
+  }
   return {
     toolsSettings: {
-      allowedTools: [...TELEGRAM_READ_ONLY_TOOLS],
+      allowedTools,
       disallowedTools: me.provider === 'claude' ? [...CLAUDE_WRITE_TOOLS] : [],
       skipPermissions: false,
     },
   };
 }
 
-async function runParticipantTurn(room: RoomRow, me: RoomParticipant, loop: RoomLoopState, options: TurnOptions): Promise<TurnResult> {
+async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, loop: RoomLoopState, options: TurnOptions): Promise<TurnResult> {
   if (!runtime) {
     throw new Error('Room engine is not initialized.');
   }
 
+  // 명단에서 기다리던 멤버라면 여기서 들어온다. 세션이 없으면 그 자리에서 생긴다.
+  const summoned = summonParticipant(room, participant);
+  if (!summoned.sessionId) {
+    throw new Error(`Room participant "${summoned.displayName}" has no session.`);
+  }
+  const me: SpeakingParticipant = { ...summoned, sessionId: summoned.sessionId };
+
   const participants = loadParticipants(room);
+  const standby = listStandbyMembers(room);
   const meRow = roomsDb.listParticipants(room.room_id).find((row) => row.participant_id === me.participantId);
   const lastSeen = meRow?.last_seen_message_id ?? 0;
   const unread = roomsDb.listMessagesAfter(room.room_id, lastSeen).map(toRoomMessage);
   // 자기 답은 이미 자기 세션에 있다.
   const delta = unread.filter((message) => message.speaker !== me.participantId);
   const isFirstTurn = lastSeen === 0 && !unread.some((message) => message.speaker === me.participantId);
+  // 사용자가 참가자 설정을 고친 뒤 아직 알리지 않았으면 이번 차례에 다시 안내한다.
+  const roleChanged = !isFirstTurn && Boolean(meRow?.role_dirty);
   const priorContext = isFirstTurn && !me.isHost ? await readPriorContext(room) : null;
   const readThroughId = unread.at(-1)?.id ?? lastSeen;
 
-  const prompt = buildTurnPrompt({ me, participants, delta, isFirstTurn, priorContext, mode: options.mode });
+  const prompt = buildTurnPrompt({ me, participants, standby, delta, isFirstTurn, roleChanged, priorContext, mode: options.mode });
+  if (isFirstTurn || roleChanged) {
+    // 안내가 프롬프트에 실렸으므로 표시를 내린다. 차례가 실패해도 다시 보내지는
+    // 않지만, 그 경우 사용자가 다시 고치거나 다음 안내 때 따라온다.
+    roomsDb.clearParticipantRoleDirty(me.participantId);
+  }
   // 사용자가 그동안 붙인 파일. 참가자마다 자기가 아직 못 본 글의 것만 받는다.
   const attachments = delta.filter((message) => message.speaker === 'user').flatMap((message) => message.attachments);
 
@@ -257,7 +319,7 @@ async function runParticipantTurn(room: RoomRow, me: RoomParticipant, loop: Room
  * 목록에서 빠지는 것을 보고 실시간 출력을 닫으므로, 답보다 먼저 빠지면 그 사이
  * 출력이 사라졌다가 답이 뒤늦게 나타난다.
  */
-function finishActiveTurn(room: RoomRow, me: RoomParticipant, loop: RoomLoopState): void {
+function finishActiveTurn(room: RoomRow, me: SpeakingParticipant, loop: RoomLoopState): void {
   loop.active.delete(me.participantId);
   broadcastState(room);
 }
@@ -269,7 +331,7 @@ function finishActiveTurn(room: RoomRow, me: RoomParticipant, loop: RoomLoopStat
  */
 async function runTurnInSession(
   room: RoomRow,
-  me: RoomParticipant,
+  me: SpeakingParticipant,
   loop: RoomLoopState,
   content: string,
   attachments: RoomAttachment[],
@@ -310,7 +372,7 @@ function isOnlyPass(text: string): boolean {
 /** 끝난 차례의 답을 타임라인에 올린다. 의견 차례의 `[PASS]` 는 올리지 않는다. */
 function recordTurnReply(
   room: RoomRow,
-  me: RoomParticipant,
+  me: SpeakingParticipant,
   loop: RoomLoopState,
   result: { started: boolean; error: string | null },
   options: Pick<TurnOptions, 'turnKind' | 'readAssignments' | 'dropPass'> & { task?: RoomTask },
@@ -329,13 +391,14 @@ function recordTurnReply(
     text = '(응답 없음)';
   }
 
-  const participants = loadParticipants(room);
+  // 넘김과 맡긴 일은 명단 멤버도 가리킬 수 있다. 그것이 "부르기" 다.
+  const roster = listRoster(room);
   // 넘김 표시와 맡긴 일은 끝까지 해낸 답에서만 읽는다. 끊기거나 실패한 답은 뜻이 없다.
   const handoff: RoomHandoff = status === 'complete'
-    ? parseHandoff(texts.last, participants, me.participantId)
+    ? parseHandoff(texts.last, roster, me.participantId)
     : { kind: 'none' };
   const assignments = status === 'complete' && options.readAssignments
-    ? parseAssignments(texts.all, participants)
+    ? parseAssignments(texts.all, roster)
     : [];
 
   // 의견 차례는 보탤 말이 없거나 실패했으면 흔적을 남기지 않는다. 의견은 덧붙임이라
@@ -386,10 +449,10 @@ async function runAssignments(
   assignments: TurnResult['assignments'],
   loop: RoomLoopState,
 ): Promise<void> {
-  const participants = loadParticipants(room);
+  const roster = listRoster(room);
   loop.phase = 'working';
   await Promise.all(assignments.map(async ({ participantId, task }) => {
-    const assignee = participants.find((participant) => participant.participantId === participantId);
+    const assignee = roster.find((participant) => participant.participantId === participantId);
     if (!assignee) return;
     // 혼자 맡은 일이면 막을 이유가 없다. 여럿이 동시에 돌 때만 수정을 한 명으로 줄인다.
     const readOnly = assignments.length > 1 && !task.canEdit;
@@ -422,6 +485,9 @@ async function runCommentRound(room: RoomRow, speaker: RoomParticipant, loop: Ro
  * 분담이 켜져 있으면 답이 맡긴 일을 동시에 돌리고 맡긴 참가자가 정리하며,
  * 의견이 켜져 있으면 답마다 나머지가 의견을 낸다.
  *
+ * 넘기는 상대는 명단에서 기다리는 멤버일 수도 있다. 그러면 그 자리에서 들어와
+ * 답하고, 라운드가 끝나면 다시 대기로 돌아간다.
+ *
  * 끝나는 경우: `[DONE]`, 다른 참가자 모두가 연달아 `[PASS]`, 자동 턴 한도,
  * 정지, 실행 실패. 실패에서 멈추는 이유는 다음 참가자가 실패한 답을 받아
  * 엉뚱하게 이어가기 쉬워서다 — 사용자가 보고 다시 시키는 편이 낫다.
@@ -449,7 +515,8 @@ async function runLoop(roomId: string): Promise<void> {
         loop.pendingUserMessage = false;
         loop.turnCount = 0;
         consecutivePasses = 0;
-        next = pickSpeakerForUserMessage(latestUserMessageText(roomId), participants);
+        // 사용자가 명단 멤버를 바로 부를 수 있다. 그러면 그 멤버가 들어와 답한다.
+        next = pickSpeakerForUserMessage(latestUserMessageText(roomId), listRoster(room));
         nextKind = 'opening';
       }
 
@@ -457,7 +524,8 @@ async function runLoop(roomId: string): Promise<void> {
         break;
       }
 
-      const speaker: RoomParticipant | undefined = participants.find((participant) => participant.participantId === next!.participantId);
+      const speaker: RoomParticipant | undefined = listRoster(room)
+        .find((participant) => participant.participantId === next!.participantId);
       if (!speaker) {
         break;
       }
@@ -524,7 +592,8 @@ async function runLoop(roomId: string): Promise<void> {
       }
       if (handoff.kind === 'mention') {
         consecutivePasses = 0;
-        next = participants.find((participant) => participant.participantId === handoff.participantId) ?? null;
+        // 명단에서 기다리던 멤버를 불렀을 수 있다.
+        next = listRoster(room).find((participant) => participant.participantId === handoff.participantId) ?? null;
         continue;
       }
       if (handoff.kind === 'pass') {
@@ -544,6 +613,8 @@ async function runLoop(roomId: string): Promise<void> {
     loop.running = false;
     loop.active.clear();
     loop.phase = 'idle';
+    // 불려 와 일하던 멤버는 라운드가 어떻게 끝났든 대기로 돌아간다.
+    returnSummonedToStandby(roomId);
     const room = roomsDb.getRoom(roomId);
     if (room) {
       broadcastState(room);
@@ -581,10 +652,12 @@ async function runHostCommand(roomId: string, commandMessageId: number, content:
   loop.phase = 'turn';
   try {
     const room = roomsDb.getRoom(roomId);
-    const host = room ? loadParticipants(room).find((participant) => participant.isHost) : undefined;
-    if (!room || !host) {
+    const found = room ? loadParticipants(room).find((participant) => participant.isHost) : undefined;
+    // 호스트는 룸이 되기 전의 원래 대화라 세션이 반드시 있다.
+    if (!room || !found?.sessionId) {
       return;
     }
+    const host: SpeakingParticipant = { ...found, sessionId: found.sessionId };
     const lastSeenBefore = roomsDb.listParticipants(roomId).find((row) => row.participant_id === host.participantId)?.last_seen_message_id ?? 0;
     // 명령 앞에 호스트가 아직 못 본 다른 글이 없으면, 명령과 그 답까지 읽은 것으로 친다.
     // 남아 있으면 그대로 두어 다음 차례에 함께 받게 한다.
@@ -609,6 +682,51 @@ async function runHostCommand(roomId: string, commandMessageId: number, content:
     // 명령이 도는 동안 보낸 글은 여기서 이어받는다.
     if (loop.pendingUserMessage && !loop.halted && room) {
       void runLoop(roomId);
+    }
+  }
+}
+
+/**
+ * 참가자 세션들의 대화를 각자 줄인다.
+ *
+ * 룸은 한 요청에 여러 세션이 함께 답하므로 토큰이 사람 수만큼 빨리 쌓인다.
+ * 각 세션에 `/compact` 를 그대로 보내면 프로바이더가 자기 방식으로 지난
+ * 대화를 요약해 맥락을 줄인다 — 룸 타임라인은 DB 에 그대로 있으므로 오간
+ * 말이 사라지지는 않는다.
+ *
+ * 답은 타임라인에 올리지 않는다. 압축 결과는 그 세션의 살림이지 룸에서 오간
+ * 이야기가 아니다.
+ */
+async function runCompaction(roomId: string, participants: SpeakingParticipant[]): Promise<void> {
+  const loop = getLoop(roomId);
+  loop.running = true;
+  loop.phase = 'working';
+  try {
+    const room = roomsDb.getRoom(roomId);
+    if (!room) {
+      return;
+    }
+    broadcastState(room);
+    await Promise.all(participants.map(async (participant) => {
+      try {
+        await runTurnInSession(room, participant, loop, COMPACT_COMMAND, [], false);
+      } catch (error) {
+        // 한 세션이 줄이지 못해도 나머지는 줄인다.
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[Rooms] Compaction failed', { roomId, participant: participant.displayName, error: message });
+      } finally {
+        finishActiveTurn(room, participant, loop);
+      }
+    }));
+  } finally {
+    loop.running = false;
+    loop.active.clear();
+    loop.phase = 'idle';
+    const room = roomsDb.getRoom(roomId);
+    if (room) {
+      broadcastState(room);
+      // 토큰 표시가 줄어든 값으로 다시 읽히게 한다.
+      broadcastRoomFrame({ kind: 'room_updated', roomId });
     }
   }
 }
@@ -679,6 +797,22 @@ export const roomTurnEngine = {
    * 기다리던 사용자 글이 있을 때 지금 일하는 참가자들을 끊고 그 글로 넘어간다.
    * 정지와 달리 루프는 멈추지 않고, 끊긴 답은 중단으로 남는다.
    */
+  /**
+   * 참가자 세션들의 맥락을 줄인다. 차례가 도는 중에는 받지 않는다 — 답하는
+   * 중인 세션에 명령을 밀어 넣으면 그 답이 엉킨다.
+   */
+  async compact(room: RoomRow, participants: SpeakingParticipant[]): Promise<RoomRuntimeState> {
+    const loop = getLoop(room.room_id);
+    if (loop.running) {
+      throw new AppError('참가자가 일하는 중에는 대화를 줄일 수 없습니다. 끝나거나 정지한 뒤 다시 눌러 주세요.', {
+        code: 'ROOM_BUSY',
+        statusCode: 409,
+      });
+    }
+    await runCompaction(room.room_id, participants);
+    return readState(room.room_id, room.max_auto_turns);
+  },
+
   async interrupt(room: RoomRow): Promise<RoomRuntimeState> {
     const loop = getLoop(room.room_id);
     if (loop.running && loop.pendingUserMessage && loop.active.size > 0) {

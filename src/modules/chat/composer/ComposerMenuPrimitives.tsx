@@ -29,7 +29,8 @@ export function ComposerMenuSurface({
       className="fixed z-[100] min-w-48 overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl"
       style={{
         right: anchor.right,
-        bottom: anchor.bottom,
+        // Only one of the two is set: the anchor decides which edge the menu grows from.
+        ...(anchor.top === undefined ? { bottom: anchor.bottom } : { top: anchor.top }),
         maxHeight: anchor.maxHeight,
         maxWidth: anchor.maxWidth,
       }}

@@ -15,7 +15,7 @@ type SessionSelection = { model: string | null; effort: string | null };
  * Talks to the session endpoints directly rather than through chat's provider
  * state, which also switches the app-wide selected provider as a side effect.
  */
-export function useParticipantSession(provider: string, sessionId: string, refreshKey: number) {
+export function useParticipantSession(provider: string, sessionId: string | null, refreshKey: number) {
   // The provider's model list, which also says which efforts each model takes.
   const [catalog, setCatalog] = useState<ProviderModelsDefinition | null>(null);
   // What the session itself records; null fields fall back to the catalog default.
@@ -23,6 +23,10 @@ export function useParticipantSession(provider: string, sessionId: string, refre
   const tokenUsage = useSessionTokenUsage(sessionId, refreshKey);
 
   useEffect(() => {
+    // A roster member waiting to be called has no session to read settings from.
+    if (!sessionId) {
+      return undefined;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -60,12 +64,14 @@ export function useParticipantSession(provider: string, sessionId: string, refre
     : DEFAULT_EFFORT_VALUE;
 
   const selectModel = useCallback(async (nextModel: string) => {
+    if (!sessionId) return;
     const response = await api.providers.setSessionActiveModel(provider, sessionId, nextModel);
     const body = await readApiJson<{ data?: { model?: string } }>(response);
     setSelection((current) => ({ ...current, model: body.data?.model?.trim() || nextModel }));
   }, [provider, sessionId]);
 
   const selectEffort = useCallback(async (nextEffort: string) => {
+    if (!sessionId) return;
     const response = await api.providers.setSessionActiveEffort(provider, sessionId, nextEffort);
     const body = await readApiJson<{ data?: { effort?: string } }>(response);
     setSelection((current) => ({ ...current, effort: body.data?.effort?.trim() || nextEffort }));

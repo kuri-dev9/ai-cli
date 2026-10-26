@@ -19,7 +19,7 @@ const ICON_BUTTON_CLASS = 'rounded p-1 text-muted-foreground hover:bg-accent hov
 
 type PresetDraft = Omit<RoomRolePreset, 'id'>;
 
-const EMPTY_DRAFT: PresetDraft = { displayName: '', roleName: '', rolePrompt: '', provider: null };
+const EMPTY_DRAFT: PresetDraft = { displayName: '', roleName: '', rolePrompt: '', persona: '', provider: null };
 
 type PresetFormProps = {
   initial: PresetDraft;
@@ -72,6 +72,14 @@ function PresetForm({ initial, onSave, onCancel }: PresetFormProps) {
         placeholder={t('rooms.rolePromptPlaceholder')}
         aria-label={t('rooms.rolePrompt')}
         rows={3}
+        className={FIELD_CLASS}
+      />
+      <textarea
+        value={draft.persona}
+        onChange={(event) => setDraft({ ...draft, persona: event.target.value })}
+        placeholder={t('rooms.personaPlaceholder')}
+        aria-label={t('rooms.persona')}
+        rows={2}
         className={FIELD_CLASS}
       />
       <div className="flex justify-end gap-2">
@@ -133,6 +141,9 @@ export default function RoomPresetManager({ onBack }: RoomPresetManagerProps) {
                   </div>
                   {preset.rolePrompt && (
                     <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{preset.rolePrompt}</p>
+                  )}
+                  {preset.persona && (
+                    <p className="mt-0.5 line-clamp-1 text-xs italic text-muted-foreground/80">{preset.persona}</p>
                   )}
                 </div>
                 <div className="flex shrink-0 items-center">

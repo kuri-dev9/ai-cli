@@ -23,9 +23,14 @@ type SidebarRoomGroupProps = Omit<SessionItemProps, 'isProcessing' | 'needsAtten
  * host row opens the room, and the participants' own sessions fold under it the
  * way sessions fold under a project. Every member is listed there, the host
  * included: the room row stands for the room, and the host's own row opens its
- * session as a plain chat. The row's leading room mark toggles the fold, and the
- * room row carries the members' running and attention state while they are
- * folded away.
+ * session as a plain chat. The room row carries the members' running and
+ * attention state while they are folded away.
+ *
+ * The fold never moves on its own. Opening a room used to unfold it, which put
+ * four rows where one was and pushed the rest of the project list out of view
+ * every time the room was touched. Now it starts folded and only the user moves
+ * it: through the leading room mark, or by clicking the room row again once it
+ * is already the open one.
  */
 export default function SidebarRoomGroup({
   group,
@@ -41,18 +46,8 @@ export default function SidebarRoomGroup({
   const navigate = useNavigate();
   const plainChatView = useIsPlainChatView();
   const memberIds = group.members.map((member) => member.participant.sessionId);
-  // Open while the room or one of its members is the open session, folded otherwise.
-  const isRoomOpen = selectedSession?.id === session.id || memberIds.some((id) => id === selectedSession?.id);
-  // A fold set by hand through the room mark. It holds until the room is opened
-  // or left, which hands the fold back to the automatic rule.
-  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
-  // Adjusted during render rather than in an effect, so the row never paints the stale fold first.
-  const [seenRoomOpen, setSeenRoomOpen] = useState(isRoomOpen);
-  if (isRoomOpen !== seenRoomOpen) {
-    setSeenRoomOpen(isRoomOpen);
-    setManualExpanded(null);
-  }
-  const expanded = manualExpanded ?? isRoomOpen;
+  // Folded until the user says otherwise, and it stays wherever they left it.
+  const [expanded, setExpanded] = useState(false);
 
   const rowState = (id: string) => ({
     isProcessing: activeSessions.has(id),
@@ -75,6 +70,18 @@ export default function SidebarRoomGroup({
     rowProps.onSessionSelect(target, projectId);
     navigate(sessionPath(target.id, 'chat'), { replace: true });
   };
+  /**
+   * The room row opens the room. Clicking it again, once the room is already
+   * open, folds the members in and out instead — the second click has nothing
+   * left to open, so it is free to mean "show me who is in here".
+   */
+  const selectRoom: SessionItemProps['onSessionSelect'] = (target, projectId) => {
+    if (isHostOpen && !plainChatView) {
+      setExpanded((current) => !current);
+      return;
+    }
+    rowProps.onSessionSelect(target, projectId);
+  };
   const folded = !expanded;
   const toggleLabel = expanded
     ? t('rooms.collapseRoom', { defaultValue: 'Hide room participants' })
@@ -87,13 +94,14 @@ export default function SidebarRoomGroup({
         {...hostState}
         session={session}
         selectedSession={isHostOpen && plainChatView ? null : selectedSession}
+        onSessionSelect={selectRoom}
         isProcessing={hostState.isProcessing || (folded && memberIds.some((id) => activeSessions.has(id)))}
         needsAttention={hostState.needsAttention || (folded && memberIds.some((id) => attentionSessionIds.has(id)))}
         leading={{
           content: <RoomMembersMark participants={group.room.participants} />,
           label: toggleLabel,
           expanded,
-          onClick: () => setManualExpanded(!expanded),
+          onClick: () => setExpanded((current) => !current),
         }}
         t={t}
       />

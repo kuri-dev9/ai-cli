@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, KeyboardEvent, MouseEvent, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDown, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Loader2, Settings2, Square, UserPlus } from 'lucide-react';
+import { ArrowDown, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Loader2, Minimize2, Settings2, Square, UserPlus } from 'lucide-react';
 
 import {
   ChatComposer,
@@ -35,12 +35,15 @@ import { useRoom } from '@/modules/rooms/hooks/useRoom';
 import { useSessionTokenUsage } from '@/modules/rooms/hooks/useSessionTokenUsage';
 import InviteParticipantModal from '@/modules/rooms/InviteParticipantModal';
 import { ParticipantBadge, participantColor } from '@/modules/rooms/ParticipantBadge';
+import { ROOM_PERMISSION_LABEL_KEYS, ROOM_PERMISSION_MODES } from '@/modules/rooms/utils/roomPermissions';
+import { foldLiveTurn } from '@/modules/rooms/utils/roomLiveTurn';
 import ParticipantSettingsPanel from '@/modules/rooms/ParticipantSettingsPanel';
 import RoomTurnCard from '@/modules/rooms/RoomTurnCard';
 import {
   applyMention,
   filterMentionCandidates,
   findMentionQuery,
+  splitByMentions,
 } from '@/modules/rooms/utils/roomMentions';
 import type { MentionQuery } from '@/modules/rooms/utils/roomMentions';
 
@@ -129,6 +132,7 @@ export function RoomInterface({
     postMessage,
     interrupt,
     stop,
+    compact,
     updateSettings,
     updateParticipant,
     removeParticipant,
@@ -162,6 +166,8 @@ export function RoomInterface({
   const [inviteOpen, setInviteOpen] = useState(false);
   // Replies whose folded "work in progress" part the user opened.
   const [openProcessIds, setOpenProcessIds] = useState<Set<number>>(() => new Set());
+  // 진행 중인 차례에서 지난 도구 호출까지 펼쳐 둔 세션. 비어 있으면 최근 것만 보인다.
+  const [expandedLiveTurns, setExpandedLiveTurns] = useState<Set<string>>(() => new Set());
   // The participant whose settings strip is open under the chips; one at a time.
   const [settingsParticipantId, setSettingsParticipantId] = useState<string | null>(null);
 
@@ -351,8 +357,42 @@ export function RoomInterface({
   };
 
   // The host's own session opens as the room, so its "open session" asks for the plain chat.
-  const openParticipantSession = (sessionId: string) => {
+  // A roster member waiting to be called has no session to open yet.
+  const openParticipantSession = (sessionId: string | null) => {
+    if (!sessionId) return;
     onNavigateToSession?.(sessionId, sessionId === hostSessionId ? { view: 'chat' } : undefined);
+  };
+
+  /**
+   * 입력창 뒤에 깔리는 겹글. 입력한 `@이름` 을 그 참가자 색으로 칠해, 누구를
+   * 부르는 글인지 보내기 전에 보이게 한다. 글자는 textarea 가 그리므로 여기서는
+   * 자리를 똑같이 차지하는 투명한 글자에 배경만 입힌다.
+   *
+   * 멘션이 아닌 부분은 채팅의 파일 멘션 겹글에 그대로 넘긴다 — 룸에서도 파일을
+   * 붙여 말할 수 있어야 한다.
+   */
+  const renderRoomInput = (text: string) => {
+    const segments = splitByMentions(text, participants.map((participant) => participant.displayName));
+    if (segments.length === 0) {
+      return composer.renderInputWithMentions(text);
+    }
+    return segments.map((segment, index) => {
+      if (!segment.mentionedName) {
+        return <span key={`text-${index}`}>{composer.renderInputWithMentions(segment.text)}</span>;
+      }
+      const participant = participants.find((candidate) => candidate.displayName === segment.mentionedName);
+      return (
+        <span
+          key={`mention-${index}`}
+          className={cn(
+            '-ml-0.5 box-decoration-clone rounded-md px-0.5 text-transparent',
+            participantColor(participant).mention,
+          )}
+        >
+          {segment.text}
+        </span>
+      );
+    });
   };
 
   const handleInvited = (nextDetail: RoomDetail) => {
@@ -364,7 +404,7 @@ export function RoomInterface({
     void runAction(async () => {
       const nextDetail = await removeParticipant(participantId);
       if (nextDetail) {
-        // The departed session reads as a plain chat in the sidebar again.
+        // 그 참가자는 룸에 남은 채 대기로 내려간다. 사이드바도 룸 밑에 그대로 둔다.
         applyRoomDetailToIndex(nextDetail);
       }
       setSettingsParticipantId(null);
@@ -605,26 +645,42 @@ export function RoomInterface({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Participant strip and room status */}
-      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+      {/*
+        Participant strip and room status, kept to one line. The strip scrolls
+        sideways once the room has more members than fit: wrapping onto a second
+        line pushed the timeline down and moved the controls every time someone
+        joined.
+      */}
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
         {participants.map((participant) => {
           const settingsOpen = settingsParticipantId === participant.participantId;
           return (
             <div
               key={participant.participantId}
               className={cn(
-                'flex max-w-[16rem] items-center rounded-full border',
+                'flex max-w-[12rem] flex-shrink-0 items-center rounded-full border',
                 participantColor(participant).ring,
+                // 명단에서 기다리는 멤버는 흐리게. 아직 한 번도 불린 적 없으면
+                // 점선까지 둘러 "아직 들어오지 않았다" 를 더 분명히 한다.
+                participant.status === 'standby' && (participant.sessionId ? 'opacity-75' : 'border-dashed opacity-60'),
                 isParticipantActive(participant.participantId) && 'ring-2 ring-primary/40',
               )}
             >
               <button
                 type="button"
+                disabled={!participant.sessionId}
                 onClick={() => openParticipantSession(participant.sessionId)}
-                title={t('rooms.openSession')}
-                className="flex min-w-0 items-center py-0.5 pl-2 pr-1"
+                // 칩에서 뺀 역할·호스트 표시는 여기에 남겨 둔다.
+                title={`${participant.displayName} · ${participant.roleName}${participant.isHost ? ` (${t('rooms.host')})` : ''}`}
+                className="flex min-w-0 items-center py-0.5 pl-2 pr-1 disabled:cursor-default"
               >
-                <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
+                <ParticipantBadge
+                  participant={participant}
+                  hostLabel={t('rooms.host')}
+                  standbyLabel={t('rooms.standby')}
+                  compact
+                />
               </button>
               <button
                 type="button"
@@ -645,7 +701,7 @@ export function RoomInterface({
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 rounded-full px-2 text-xs"
+          className="h-7 flex-shrink-0 gap-1 rounded-full px-2 text-xs"
           disabled={isFull}
           onClick={() => setInviteOpen(true)}
           title={isFull ? t('rooms.roomFull', { max: ROOM_MAX_PARTICIPANTS }) : t('rooms.inviteTitle')}
@@ -653,8 +709,9 @@ export function RoomInterface({
           <UserPlus className="h-3.5 w-3.5" />
           {t('rooms.inviteButton')}
         </Button>
+      </div>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-shrink-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1" role="status">
             {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
             {isRunning ? statusLabel : t('rooms.statusIdle')}
@@ -679,6 +736,33 @@ export function RoomInterface({
               </button>
             ))}
           </div>
+          {/*
+            룸 권한을 한 번에 바꾼다. 참가자별로 따로 둔 권한은 서버가 함께
+            지우므로, 한 명만 예전 권한으로 남는 일이 없다.
+          */}
+          <div className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label={t('rooms.permissionModeAll')}>
+            {ROOM_PERMISSION_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={detail.room.permissionMode === mode}
+                title={t('rooms.permissionModeAllTitle')}
+                onClick={() => {
+                  if (detail.room.permissionMode !== mode) {
+                    void runAction(() => updateSettings({ permissionMode: mode }));
+                  }
+                }}
+                className={cn(
+                  'px-2 py-0.5 transition-colors',
+                  detail.room.permissionMode === mode
+                    ? 'bg-primary/15 font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                )}
+              >
+                {t(ROOM_PERMISSION_LABEL_KEYS[mode])}
+              </button>
+            ))}
+          </div>
           <span>{t('rooms.turnCount', { count: roomState?.turnCount ?? 0, max: roomState?.maxAutoTurns ?? detail.room.maxAutoTurns })}</span>
           <select
             aria-label={t('rooms.maxAutoTurns')}
@@ -691,14 +775,29 @@ export function RoomInterface({
               <option key={value} value={value}>{value}</option>
             ))}
           </select>
+          {/*
+            참가자마다 자기 세션에 맥락이 쌓인다. 룸은 한 요청에 여럿이 답하므로
+            사람 수만큼 빨리 찬다. 이 단추가 모두의 맥락을 한 번에 줄인다.
+          */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 flex-shrink-0 gap-1 px-2 text-xs"
+            disabled={isRunning}
+            title={isRunning ? t('rooms.compactWhileRunning') : t('rooms.compactAllTitle')}
+            onClick={() => void runAction(() => compact())}
+          >
+            <Minimize2 className="h-3.5 w-3.5" />
+            {t('rooms.compactAll')}
+          </Button>
           {isRunning && (
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1 px-2 text-xs"
+              className="h-7 flex-shrink-0 gap-1 border-red-500/40 px-2 text-xs text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
               onClick={() => void runAction(stop)}
             >
-              <Square className="h-3 w-3" />
+              <Square className="h-3 w-3 fill-current" />
               {t('rooms.stop')}
             </Button>
           )}
@@ -714,6 +813,10 @@ export function RoomInterface({
           onChangePermission={(mode: RoomPermissionMode) => void runAction(
             () => updateParticipant(settingsParticipant.participantId, { permissionMode: mode }),
           )}
+          onChangeProfile={(profile) => void runAction(
+            () => updateParticipant(settingsParticipant.participantId, profile),
+          )}
+          onCompact={() => void runAction(() => compact(settingsParticipant.participantId))}
           onLeave={() => handleLeave(settingsParticipant.participantId)}
           onOpenSession={() => openParticipantSession(settingsParticipant.sessionId)}
           onClose={() => setSettingsParticipantId(null)}
@@ -798,19 +901,40 @@ export function RoomInterface({
                     </>
                   )}
                 >
-                  {turn.messages.map((message, index) => (
-                    <MessageComponent
-                      key={`${String(message.toolId ?? '')}-${index}`}
-                      message={message}
-                      prevMessage={index === 0 ? GROUPED_ASSISTANT_ANCHOR : turn.messages[index - 1]}
-                      createDiff={createDiff}
-                      provider={participant?.provider ?? 'claude'}
-                      selectedProject={selectedProject}
-                      onFileOpen={onFileOpen}
-                      showRawParameters={showRawParameters}
-                      showThinking={showThinking}
-                    />
-                  ))}
+                  {(() => {
+                    // 조사하는 동안 쌓인 지난 도구 호출은 한 줄로 묶는다. 전부 그리면
+                    // 참가자 하나가 화면을 통째로 먹고, 지금 무엇을 하는지가 묻힌다.
+                    const folded = foldLiveTurn(turn.messages, expandedLiveTurns.has(turn.sessionId));
+                    const foldLine = (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedLiveTurns((previous) => {
+                          const next = new Set(previous);
+                          next.add(turn.sessionId);
+                          return next;
+                        })}
+                        className="mx-2 flex items-center gap-1.5 rounded px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                        {t('rooms.foldedSteps', { count: folded.hiddenCount })}
+                      </button>
+                    );
+                    return folded.rows.map((message, index) => (
+                      <Fragment key={`${String(message.toolId ?? '')}-${index}`}>
+                        {index === folded.foldAtIndex && foldLine}
+                        <MessageComponent
+                          message={message}
+                          prevMessage={index === 0 ? GROUPED_ASSISTANT_ANCHOR : folded.rows[index - 1]}
+                          createDiff={createDiff}
+                          provider={participant?.provider ?? 'claude'}
+                          selectedProject={selectedProject}
+                          onFileOpen={onFileOpen}
+                          showRawParameters={showRawParameters}
+                          showThinking={showThinking}
+                        />
+                      </Fragment>
+                    ));
+                  })()}
                 </RoomTurnCard>
               </div>
             );
@@ -858,7 +982,7 @@ export function RoomInterface({
         getInputProps={composer.getInputProps as (...args: unknown[]) => Record<string, unknown>}
         openAttachmentPicker={composer.openAttachmentPicker}
         inputHighlightRef={composer.inputHighlightRef}
-        renderInputWithMentions={composer.renderInputWithMentions}
+        renderInputWithMentions={renderRoomInput}
         textareaRef={composer.textareaRef}
         input={composer.input}
         onVoiceTranscript={composer.handleVoiceTranscript}

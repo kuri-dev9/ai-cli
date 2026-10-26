@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -34,8 +34,8 @@ const roomDetail: RoomDetail = {
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [
-    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, displayName: '설계자', roleName: '설계', rolePrompt: '', position: 0, isHost: true, permissionMode: 'ask' },
-    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', position: 1, isHost: false, permissionMode: 'ask' },
+    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, displayName: '설계자', roleName: '설계', rolePrompt: '', persona: '', status: 'active', position: 0, isHost: true, permissionMode: 'ask' },
+    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', persona: '', status: 'active', position: 1, isHost: false, permissionMode: 'ask' },
   ],
   formerParticipants: [],
   messages: [
@@ -163,7 +163,9 @@ describe('RoomInterface', () => {
     const textarea = screen.getByPlaceholderText('메시지를 입력하세요 (@이름으로 지정)') as HTMLTextAreaElement;
     // The same footer a chat has: attach button and token usage.
     expect(screen.getByLabelText(i18n.t('chat:input.attachFiles'))).toBeTruthy();
-    // The room-wide permission picker moved into each participant's settings.
+    // The header carries the room-wide permission; a participant's own override
+    // lives in its settings strip, which is closed here.
+    expect(screen.getByLabelText('룸 권한')).toBeTruthy();
     expect(screen.queryByLabelText('권한')).toBeNull();
 
     fireEvent.change(textarea, { target: { value: '로그인도 봐줘' } });
@@ -184,7 +186,7 @@ describe('RoomInterface', () => {
     ]);
   });
 
-  it('opens one participant\'s settings under the chips to change its permission or remove it', async () => {
+  it('opens one participant\'s settings under the chips to change its permission or send it to standby', async () => {
     roomCalls.length = 0;
     await renderRoom();
 
@@ -192,19 +194,21 @@ describe('RoomInterface', () => {
     const region = screen.getByRole('region', { name: '리뷰어 설정' });
     expect(region).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '전체 허용' }));
+    // 머리말에도 같은 이름의 단추가 있으므로 이 참가자의 것만 누른다.
+    fireEvent.click(within(region).getByRole('button', { name: '전체 허용' }));
     await waitFor(() => expect(roomCalls.find((call) => call.name === 'updateParticipant')?.args)
       .toEqual(['room-1', 'p-rev', { permissionMode: 'full' }]));
 
+    // 내보내는 것이 아니라 대기로 돌린다. 세션은 룸 밑에 그대로 남는다.
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: '퇴장' }));
+    fireEvent.click(screen.getByRole('button', { name: '대기로' }));
     await waitFor(() => expect(roomCalls.find((call) => call.name === 'removeParticipant')?.args)
       .toEqual(['room-1', 'p-rev']));
     confirm.mockRestore();
 
     // The host is the room itself and has no remove button.
     fireEvent.click(screen.getByRole('button', { name: '설계자 설정' }));
-    expect(screen.queryByRole('button', { name: '퇴장' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '대기로' })).toBeNull();
   });
 
   it('shows a waiting message mid-turn with a button to interrupt the current speaker', async () => {

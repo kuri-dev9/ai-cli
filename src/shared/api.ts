@@ -439,15 +439,35 @@ export const api = {
     create: (input: CreateRoomInput) => post('/api/rooms', input),
     addParticipant: (roomId: string, participant: RoomParticipantInput) =>
       post(`/api/rooms/${encodeURIComponent(roomId)}/participants`, participant),
-    update: (roomId: string, changes: { permissionMode?: RoomPermissionMode; maxAutoTurns?: number; splitWork?: boolean; discussion?: boolean }) =>
+    update: (roomId: string, changes: {
+      permissionMode?: RoomPermissionMode;
+      maxAutoTurns?: number;
+      splitWork?: boolean;
+      discussion?: boolean;
+    }) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}`, changes),
     // `hostCommand` runs the text as written in the host session instead of starting a round.
     postMessage: (roomId: string, message: { content: string; attachments?: unknown[]; hostCommand?: boolean }) =>
       post(`/api/rooms/${encodeURIComponent(roomId)}/messages`, message),
-    updateParticipant: (roomId: string, participantId: string, changes: { permissionMode?: RoomPermissionMode }) =>
+    // `displayName` 등 역할에 해당하는 칸을 고치면 그 참가자가 다음 차례에 바뀐
+    // 역할 안내를 다시 받는다.
+    updateParticipant: (
+      roomId: string,
+      participantId: string,
+      changes: {
+        permissionMode?: RoomPermissionMode;
+        displayName?: string;
+        roleName?: string;
+        rolePrompt?: string;
+        persona?: string;
+      },
+    ) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`, changes),
     removeParticipant: (roomId: string, participantId: string) =>
       del(`/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`),
+    /** Shrinks one participant's context, or every participant's when no id is given. */
+    compact: (roomId: string, participantId?: string) =>
+      post(`/api/rooms/${encodeURIComponent(roomId)}/compact`, participantId ? { participantId } : {}),
     interrupt: (roomId: string) => post(`/api/rooms/${encodeURIComponent(roomId)}/interrupt`),
     stop: (roomId: string) => post(`/api/rooms/${encodeURIComponent(roomId)}/stop`),
   },

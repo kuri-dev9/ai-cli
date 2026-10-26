@@ -7,7 +7,7 @@ import test from 'node:test';
 import { closeConnection, initializeDatabase, roomsDb, sessionsDb } from '@/modules/database/index.js';
 import { roomsService } from '@/modules/rooms/services/rooms.service.js';
 import { roomTurnEngine } from '@/modules/rooms/services/room-turn-engine.service.js';
-import { chatRunRegistry } from '@/modules/websocket/index.js';
+import { chatRunRegistry, connectedClients } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeWriter } from '@/shared/types.js';
 import { createNormalizedMessage } from '@/shared/utils.js';
 
@@ -68,8 +68,8 @@ async function withRoom(
     roomsDb.createRoom(
       { roomId: ROOM_ID, hostSessionId: HOST, projectPath: tempDirectory, permissionMode: 'ask', maxAutoTurns },
       [
-        { participant_id: 'p-host', session_id: HOST, provider: 'claude', model: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', position: 0 },
-        { participant_id: 'p-rev', session_id: REVIEWER, provider: 'claude', model: 'sonnet', display_name: 'Claude2', role_name: '리뷰어', role_prompt: '깐깐하게 본다', position: 1 },
+        { participant_id: 'p-host', session_id: HOST, provider: 'claude', model: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', persona: '', status: 'active', position: 0 },
+        { participant_id: 'p-rev', session_id: REVIEWER, provider: 'claude', model: 'sonnet', display_name: 'Claude2', role_name: '리뷰어', role_prompt: '깐깐하게 본다', persona: '', status: 'active', position: 1 },
       ],
     );
     roomsDb.updateRoomSettings(ROOM_ID, {
@@ -237,7 +237,7 @@ test('stop aborts the active participant and records the turn as aborted', async
   });
 });
 
-test('the room is capped at three participants and names stay unique', async () => {
+test('the roster is capped and names stay unique', async () => {
   await withRoom(6, async () => {
     await assert.rejects(
       roomsService.addParticipant(ROOM_ID, { provider: 'claude', displayName: 'claude2', roleName: '테스터' }),
@@ -252,16 +252,121 @@ test('the room is capped at three participants and names stay unique', async () 
       (error: Error & { code?: string }) => error.code === 'ALREADY_A_ROOM',
     );
 
-    const now = new Date().toISOString();
-    sessionsDb.createSession('third', 'claude', '/tmp', 'Third', now, now, null);
-    roomsDb.addParticipant({
-      participant_id: 'p-3', room_id: ROOM_ID, session_id: 'third', provider: 'claude', model: null,
-      display_name: 'Tester', role_name: '테스터', role_prompt: '', position: 2,
-    });
+    // 명단은 상한까지 채울 수 있다. 불리기 전까지 세션도 토큰도 쓰지 않아서다.
+    for (let index = 3; index <= 10; index += 1) {
+      roomsDb.addParticipant({
+        participant_id: `p-${index}`, room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+        display_name: `멤버${index}`, role_name: '테스터', role_prompt: '', persona: '', status: 'standby', position: index,
+      });
+    }
     await assert.rejects(
-      roomsService.addParticipant(ROOM_ID, { provider: 'claude', displayName: 'Four', roleName: '넷째' }),
+      roomsService.addParticipant(ROOM_ID, { provider: 'claude', displayName: '하나더', roleName: '열한째' }),
       (error: Error & { code?: string }) => error.code === 'ROOM_FULL',
     );
+  });
+});
+
+/** 브로드캐스트된 프레임을 모으는 가짜 화면. 끝나면 cleanup 으로 뗀다. */
+function watchFrames(): { frames: Array<Record<string, unknown>>; cleanup: () => void } {
+  const frames: Array<Record<string, unknown>> = [];
+  const client = {
+    readyState: 1,
+    send: (payload: string) => frames.push(JSON.parse(payload) as Record<string, unknown>),
+  } as never;
+  connectedClients.add(client);
+  return { frames, cleanup: () => connectedClients.delete(client) };
+}
+
+test('summoning a member tells the open screens, so the chip stops saying standby', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['체커가 봐줘 @체커'] }, calls));
+    roomsDb.addParticipant({
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 2,
+    });
+
+    const watcher = watchFrames();
+    try {
+      roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+      await waitFor(() => isIdle() && speakers().includes('p-roster'), 'summoned turn');
+
+      // 들어올 때와 대기로 돌아갈 때 모두 알려야 칩이 따라 바뀐다. 이 알림이
+      // 없으면 화면은 일하는 중에도 "대기" 를 그대로 띄운다.
+      const updates = watcher.frames.filter((frame) => frame.kind === 'room_updated');
+      assert.ok(updates.length >= 2, `room_updated 가 두 번 이상 와야 한다 (${updates.length})`);
+      assert.ok(updates.every((frame) => frame.roomId === ROOM_ID));
+    } finally {
+      watcher.cleanup();
+    }
+  });
+});
+
+test('a roster member is summoned by name, answers, and returns to standby', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['체커가 봐줘 @체커'] }, calls));
+
+    // 명단에만 담긴 멤버. 세션이 아직 없다.
+    roomsDb.addParticipant({
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      display_name: '체커', role_name: '리뷰어', role_prompt: '버그만 짚는다', persona: '', status: 'standby', position: 2,
+    });
+    const before = roomsService.getRoomDetail(ROOM_ID).participants.find((p) => p.displayName === '체커');
+    assert.equal(before?.sessionId, null);
+    assert.equal(before?.status, 'standby');
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().includes('p-roster'), 'summoned turn');
+
+    // 불리면서 세션이 생기고, 그 세션에서 실제로 돌았다.
+    const after = roomsService.getRoomDetail(ROOM_ID).participants.find((p) => p.displayName === '체커');
+    assert.ok(after?.sessionId, '불릴 때 세션이 생겨야 한다');
+    assert.ok(calls.some((call) => call.sessionId === after?.sessionId), '생긴 세션에서 차례가 돌아야 한다');
+    // 답을 마치면 다시 대기로 돌아간다.
+    assert.equal(after?.status, 'standby');
+
+    // 호스트의 첫 차례 프롬프트에 부를 수 있는 멤버로 적혀 있었다.
+    assert.match(calls[0].command, /부를 수 있는 멤버/);
+    assert.match(calls[0].command, /@체커: 리뷰어/);
+  });
+});
+
+test('a standby member sits out the rounds it is not called into', async () => {
+  await withRoom(4, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['혼자 끝냈습니다 [DONE]'] }, calls));
+
+    roomsDb.addParticipant({
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      display_name: '테스티', role_name: '테스터', role_prompt: '', persona: '', status: 'standby', position: 2,
+    });
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'host only');
+
+    // 부르지 않았으니 세션도 생기지 않고 차례도 돌지 않았다.
+    const roster = roomsService.getRoomDetail(ROOM_ID).participants.find((p) => p.displayName === '테스티');
+    assert.equal(roster?.sessionId, null);
+    assert.equal(calls.length, 1);
+  });
+});
+
+test('changing the room permission clears the per-participant overrides', async () => {
+  await withRoom(6, async () => {
+    roomTurnEngine.initialize(createRuntime({}, []));
+
+    // 한 명만 따로 전체 허용으로 둔 상태.
+    roomsService.updateParticipant(ROOM_ID, 'p-rev', { permissionMode: 'full' });
+    assert.deepEqual(
+      roomsService.getRoomDetail(ROOM_ID).participants.map((participant) => participant.permissionMode),
+      ['ask', 'full'],
+    );
+
+    // 룸 권한을 바꾸면 따로 둔 값도 지워져 전원이 같은 권한을 쓴다.
+    const detail = roomsService.updateSettings(ROOM_ID, { permissionMode: 'read' });
+    assert.equal(detail.room.permissionMode, 'read');
+    assert.deepEqual(detail.participants.map((participant) => participant.permissionMode), ['read', 'read']);
   });
 });
 
@@ -285,6 +390,67 @@ test('each participant runs with its own permission, model and effort', async ()
     assert.equal(calls[1].options.permissionMode, 'bypassPermissions');
     assert.equal(calls[1].options.model, 'opus');
     assert.equal(calls[1].options.effort, 'high');
+  });
+});
+
+test('a role changed mid-room reaches the participant on its next turn', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['첫 답 @Claude2', '둘째 답 @Claude2'],
+      [REVIEWER]: ['[DONE]', '[DONE]'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'first round');
+    // 첫 차례에는 초대할 때의 역할이 간다.
+    assert.match(calls[1].command, /역할 설명: 깐깐하게 본다/);
+
+    roomsService.updateParticipant(ROOM_ID, 'p-rev', {
+      roleName: '보안 검토자',
+      rolePrompt: '보안 문제만 본다',
+      persona: '단호하다',
+    });
+    assert.deepEqual(
+      roomsService.getRoomDetail(ROOM_ID).participants.map((participant) => participant.roleName),
+      ['설계자', '보안 검토자'],
+    );
+
+    roomsService.postUserMessage(ROOM_ID, { content: '다음' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 6, 'second round');
+
+    // 두 번째 차례는 첫 차례가 아닌데도 역할 안내를 통째로 다시 받는다.
+    const reviewerSecond = calls.filter((call) => call.sessionId === REVIEWER)[1];
+    assert.match(reviewerSecond.command, /\[바뀜\]/);
+    assert.match(reviewerSecond.command, /역할: 보안 검토자/);
+    assert.match(reviewerSecond.command, /역할 설명: 보안 문제만 본다/);
+    assert.match(reviewerSecond.command, /성향: 단호하다/);
+    // 고치지 않은 호스트는 짧은 알림만 받는다.
+    assert.doesNotMatch(calls.filter((call) => call.sessionId === HOST)[1].command, /\[바뀜\]/);
+  });
+});
+
+test('renaming a participant re-briefs everyone else, so mentions keep working', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['첫 답 @Claude2', '둘째 답 @체커'],
+      [REVIEWER]: ['[DONE]', '[DONE]'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'first round');
+
+    roomsService.updateParticipant(ROOM_ID, 'p-rev', { displayName: '체커' });
+
+    roomsService.postUserMessage(ROOM_ID, { content: '다음' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 6, 'second round');
+
+    // 이름이 바뀌면 다른 참가자도 새 이름이 적힌 참가자 목록을 다시 받는다.
+    const hostSecond = calls.filter((call) => call.sessionId === HOST)[1];
+    assert.match(hostSecond.command, /@체커: 리뷰어/);
+    // 호스트가 새 이름으로 부른 멘션이 그대로 닿는다.
+    assert.equal(speakers().at(-1), 'p-rev');
   });
 });
 
@@ -355,7 +521,94 @@ test('a host command runs as written in the host session and does not start a ro
   });
 });
 
-test('a participant can leave, but the host cannot', async () => {
+test('compacting sends the command to each session and keeps the timeline', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['요약했습니다'], [REVIEWER]: ['요약했습니다'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle(), 'first round');
+    const before = speakers().length;
+    calls.length = 0;
+
+    await roomsService.compact(ROOM_ID);
+
+    // 세션마다 명령이 그대로 간다. 룸 안내문으로 감싸면 명령으로 읽히지 않는다.
+    assert.deepEqual(calls.map((call) => call.command), ['/compact', '/compact']);
+    assert.deepEqual(new Set(calls.map((call) => call.sessionId)), new Set([HOST, REVIEWER]));
+    // 줄인 답은 룸 타임라인에 올리지 않는다. 그 세션의 살림이지 오간 말이 아니다.
+    assert.equal(speakers().length, before);
+  });
+});
+
+test('compacting one participant leaves the others alone', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [REVIEWER]: ['요약했습니다'] }, calls));
+
+    await roomsService.compact(ROOM_ID, 'p-rev');
+
+    assert.deepEqual(calls.map((call) => call.sessionId), [REVIEWER]);
+  });
+});
+
+test('a read-only turn asks nothing when the participant is set to full access', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [
+        '이렇게 나눕니다.\n[작업 @Claude2 수정] 테스트 작성\n[작업 @Claude] 기존 코드 조사',
+        async () => { await gate; return '조사했습니다'; },
+        '정리했습니다 [DONE]',
+      ],
+      [REVIEWER]: [async () => { await gate; return '테스트를 추가했습니다'; }],
+    }, calls));
+
+    // 룸 전체를 전체 허용으로. 사용자가 "묻지 말라" 고 정한 상태다.
+    roomsService.updateSettings(ROOM_ID, { permissionMode: 'full' });
+    roomsService.postUserMessage(ROOM_ID, { content: '손봐줘' }, 1);
+    await waitFor(() => calls.length === 3, 'both assignees started');
+    release();
+    await waitFor(() => isIdle(), 'round done');
+
+    const readOnlyTurn = calls[1].sessionId === HOST ? calls[1] : calls[2];
+    const tools = readOnlyTurn.options.toolsSettings as { allowedTools: string[]; disallowedTools: string[] };
+    // 조사에 필요한 셸은 묻지 않고 바로 쓴다. 이게 없어서 라운드가 승인 창에서 멈췄다.
+    assert.ok(tools.allowedTools.includes('Bash'), 'Bash 가 허용 목록에 있어야 한다');
+    // 그래도 파일은 고치지 못한다. 동시에 같은 폴더를 고치면 서로 덮어쓴다.
+    assert.deepEqual(tools.disallowedTools, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+  }, { splitWork: true });
+});
+
+test('a read-only turn still asks when the participant is set to ask', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [
+        '이렇게 나눕니다.\n[작업 @Claude2 수정] 테스트 작성\n[작업 @Claude] 기존 코드 조사',
+        async () => { await gate; return '조사했습니다'; },
+        '정리했습니다 [DONE]',
+      ],
+      [REVIEWER]: [async () => { await gate; return '테스트를 추가했습니다'; }],
+    }, calls));
+
+    // 기본값은 매번 묻기. 사용자가 그걸 고른 것이므로 셸도 승인을 받는다.
+    roomsService.postUserMessage(ROOM_ID, { content: '손봐줘' }, 1);
+    await waitFor(() => calls.length === 3, 'both assignees started');
+    release();
+    await waitFor(() => isIdle(), 'round done');
+
+    const readOnlyTurn = calls[1].sessionId === HOST ? calls[1] : calls[2];
+    const tools = readOnlyTurn.options.toolsSettings as { allowedTools: string[] };
+    assert.ok(!tools.allowedTools.includes('Bash'), '매번 묻기에서는 셸도 승인을 받는다');
+  }, { splitWork: true });
+});
+
+test('a worked participant goes to standby instead of leaving the room', async () => {
   await withRoom(6, async () => {
     assert.throws(
       () => roomsService.removeParticipant(ROOM_ID, 'p-host'),
@@ -363,11 +616,51 @@ test('a participant can leave, but the host cannot', async () => {
     );
 
     const detail = roomsService.removeParticipant(ROOM_ID, 'p-rev');
-    assert.deepEqual(detail.participants.map((participant) => participant.participantId), ['p-host']);
-    assert.deepEqual(detail.formerParticipants.map((participant) => participant.participantId), ['p-rev']);
-    // 나간 세션은 다시 평범한 대화로 열린다.
-    assert.equal(roomsDb.getParticipantBySession(REVIEWER), null);
-    assert.deepEqual(roomsService.listRoomIndex()[0].participants.map((participant) => participant.participantId), ['p-host']);
+    // 룸 안에 그대로 남는다. 세션이 프로젝트 목록으로 튀어나오면 룸을 쓸수록
+    // 목록이 지저분해진다.
+    assert.deepEqual(detail.participants.map((participant) => participant.participantId), ['p-host', 'p-rev']);
+    assert.deepEqual(detail.formerParticipants, []);
+    assert.equal(detail.participants.find((participant) => participant.participantId === 'p-rev')?.status, 'standby');
+    // 세션도 룸 참가자로 남아 사이드바에서 룸 밑에 접힌다.
+    assert.equal(roomsDb.getParticipantBySession(REVIEWER)?.participant_id, 'p-rev');
+    assert.deepEqual(
+      roomsService.listRoomIndex()[0].participants.map((participant) => participant.participantId),
+      ['p-host', 'p-rev'],
+    );
+  });
+});
+
+test('a standby participant comes back when it is mentioned again', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['다시 봐줘 @Claude2'], [REVIEWER]: ['[DONE]'] }, calls));
+
+    roomsService.removeParticipant(ROOM_ID, 'p-rev');
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().includes('p-rev'), 'the recalled turn');
+
+    // 같은 세션이 돌아온다. 새로 만들지 않으므로 하던 이야기를 기억한다.
+    assert.ok(calls.some((call) => call.sessionId === REVIEWER));
+    assert.equal(roomsService.getRoomDetail(ROOM_ID).participants.find((p) => p.participantId === 'p-rev')?.sessionId, REVIEWER);
+  });
+});
+
+test('a roster member that was never called is dropped outright, freeing its name', async () => {
+  await withRoom(6, async () => {
+    roomsDb.addParticipant({
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 2,
+    });
+
+    const detail = roomsService.removeParticipant(ROOM_ID, 'p-roster');
+    assert.deepEqual(detail.participants.map((participant) => participant.participantId), ['p-host', 'p-rev']);
+    // 행이 사라졌으므로 같은 이름을 다시 쓸 수 있다.
+    assert.deepEqual(detail.formerParticipants, []);
+    roomsDb.addParticipant({
+      participant_id: 'p-again', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 3,
+    });
+    assert.ok(roomsService.getRoomDetail(ROOM_ID).participants.some((p) => p.displayName === '체커'));
   });
 });
 

@@ -35,6 +35,17 @@ async function withIsolatedDatabase(runTest: (userId: number) => void | Promise<
   }
 }
 
+/** 조건이 참이 될 때까지 기다린다. 참이 되지 않으면 실패한다. */
+async function waitFor(predicate: () => boolean, what: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${what}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 type RunCall = { provider: string; command: string; options: Record<string, unknown> };
 
 function createRuntime(runs: RunCall[], behaviour: 'ok' | 'throw' = 'ok', aborts: string[] = []) {
@@ -52,6 +63,45 @@ function createRuntime(runs: RunCall[], behaviour: 'ok' | 'throw' = 'ok', aborts
     },
   } as never;
 }
+
+test('a slow session does not hold up another session due at the same time', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    const OTHER_SESSION = 'other-session';
+    sessionsDb.createAppSession(OTHER_SESSION, 'claude', '/tmp', 'Another session');
+
+    const due = new Date(Date.now() - 60_000).toISOString();
+    scheduledMessagesService.schedule({ userId, sessionId: SESSION_ID, content: '느린 세션', scheduledFor: due });
+    scheduledMessagesService.schedule({ userId, sessionId: OTHER_SESSION, content: '빠른 세션', scheduledFor: due });
+
+    // 첫 세션의 턴은 풀어 줄 때까지 끝나지 않는다.
+    let release: () => void = () => {};
+    const slowTurn = new Promise<void>((resolve) => { release = resolve; });
+    const started: string[] = [];
+    const finished: string[] = [];
+    const runtime = {
+      hasRuntime: () => true,
+      run: async (_provider: string, _command: string, options: Record<string, unknown>) => {
+        const sessionId = String(options.sessionId);
+        started.push(sessionId);
+        if (sessionId === SESSION_ID) {
+          await slowTurn;
+        }
+        finished.push(sessionId);
+      },
+      abort: async () => true,
+    } as never;
+
+    const pass = dispatchDueScheduledMessages(runtime);
+    // 느린 세션이 아직 도는 중인데도 다른 세션은 제 몫을 마친다. 한 줄로 세우면
+    // 여기서 영영 끝나지 않는다.
+    await waitFor(() => finished.includes(OTHER_SESSION), 'the other session finished');
+    assert.ok(!finished.includes(SESSION_ID), '느린 세션은 아직 도는 중이어야 한다');
+
+    release();
+    assert.equal(await pass, 2);
+    assert.deepEqual(new Set(started), new Set([SESSION_ID, OTHER_SESSION]));
+  });
+});
 
 test('a message due in the past is sent on the next pass, not skipped', async () => {
   await withIsolatedDatabase(async (userId) => {

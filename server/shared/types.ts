@@ -1499,16 +1499,30 @@ export type RoomPermissionMode = 'ask' | 'read' | 'full';
  *
  * Rooms 모듈의 서비스·턴 엔진·프롬프트 빌더가 같이 쓰고, 그대로 화면에 내려간다.
  */
+/**
+ * 참가자가 룸에서 어떤 상태인지.
+ *
+ * - `active`: 상주. 차례가 돌아오고 의견에도 낀다. 호스트는 늘 이것이다.
+ * - `standby`: 명단에만 있다. `@이름` 으로 불러야 온다.
+ * - `summoned`: 불려 와 지금 일하는 중. 차례를 마치면 `standby` 로 돌아간다.
+ */
+export type RoomParticipantStatus = 'active' | 'standby' | 'summoned';
+
 export type RoomParticipant = {
   participantId: string;
   roomId: string;
-  sessionId: string;
+  /** 아직 한 번도 불리지 않은 명단 멤버는 null 이다. 처음 불릴 때 세션이 생긴다. */
+  sessionId: string | null;
   provider: string;
   model: string | null;
   /** `@이름` 으로 부르는 이름. 공백과 `@` 없이, 룸 안에서 겹치지 않는다. */
   displayName: string;
   roleName: string;
+  /** 이 참가자가 무엇을 하는지. */
   rolePrompt: string;
+  /** 어떤 말투와 태도로 하는지. 역할과 따로 두어 같은 역할도 다르게 말하게 한다. */
+  persona: string;
+  status: RoomParticipantStatus;
   position: number;
   isHost: boolean;
   /** 이 참가자의 차례에 쓰는 권한. 따로 정하지 않았으면 룸 설정과 같다. */

@@ -213,11 +213,22 @@ export async function dispatchDueScheduledMessages(
     return 0;
   }
 
-  // Sequentially: a session can only have one run at a time, and two due
-  // messages for the same session must not race each other into it.
+  // Sequential within a session — it can only hold one run at a time, and two
+  // messages due for the same session must not race each other into it — but
+  // parallel across sessions. Draining the whole list in one line meant a
+  // single long turn held up every other session's due messages behind it,
+  // and held the poll's in-flight flag for its entire duration.
+  const bySession = new Map<string, ScheduledMessageRow[]>();
   for (const row of due) {
-    await sendClaimedMessage(row, runtime);
+    const rows = bySession.get(row.session_id) ?? [];
+    rows.push(row);
+    bySession.set(row.session_id, rows);
   }
+  await Promise.all([...bySession.values()].map(async (rows) => {
+    for (const row of rows) {
+      await sendClaimedMessage(row, runtime);
+    }
+  }));
 
   return due.length;
 }

@@ -307,12 +307,20 @@ export const ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS room_participants (
     participant_id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
+    -- 아직 한 번도 불리지 않은 명단 멤버는 NULL 이다. 처음 불릴 때 세션이 생긴다.
+    session_id TEXT,
     provider TEXT NOT NULL,
     model TEXT,
     display_name TEXT NOT NULL,
     role_name TEXT NOT NULL,
     role_prompt TEXT NOT NULL DEFAULT '',
+    -- 말투와 태도. 역할(무엇을 하는가)과 따로 둔다.
+    persona TEXT NOT NULL DEFAULT '',
+    -- 1 이면 역할이 바뀐 뒤 아직 본인에게 알리지 않았다는 뜻. 다음 차례에 역할
+    -- 안내를 다시 보내고 0 으로 되돌린다.
+    role_dirty INTEGER NOT NULL DEFAULT 0,
+    -- active | standby. 대기 중인 멤버는 차례도 의견도 받지 않고, 불리면 돌아온다.
+    status TEXT NOT NULL DEFAULT 'active',
     position INTEGER NOT NULL,
     -- 이 참가자가 마지막으로 읽은 룸 메시지. 다음 차례에는 그 뒤의 것만 보낸다.
     last_seen_message_id INTEGER NOT NULL DEFAULT 0,

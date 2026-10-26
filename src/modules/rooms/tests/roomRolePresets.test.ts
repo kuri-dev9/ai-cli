@@ -28,11 +28,11 @@ test('the defaults are used until the user changes anything', () => {
 });
 
 test('presets can be added, edited, reordered and deleted, and deletions stick', () => {
-  const added = addRoomRolePreset({ displayName: '보안관', roleName: '보안 리뷰어', rolePrompt: '보안만 본다', provider: 'codex' });
+  const added = addRoomRolePreset({ displayName: '보안관', roleName: '보안 리뷰어', rolePrompt: '보안만 본다', persona: '', provider: 'codex' });
   assert.ok(added);
   assert.equal(readRoomRolePresets().at(-1)?.displayName, '보안관');
 
-  assert.equal(updateRoomRolePreset(added.id, { displayName: '보안관', roleName: '보안 감사', rolePrompt: '', provider: null }), true);
+  assert.equal(updateRoomRolePreset(added.id, { displayName: '보안관', roleName: '보안 감사', rolePrompt: '', persona: '', provider: null }), true);
   assert.equal(readRoomRolePresets().at(-1)?.roleName, '보안 감사');
 
   moveRoomRolePreset(added.id, -1);
@@ -50,9 +50,9 @@ test('presets can be added, edited, reordered and deleted, and deletions stick',
 });
 
 test('invalid presets are refused instead of saved', () => {
-  assert.equal(addRoomRolePreset({ displayName: '두 단어', roleName: '역할', rolePrompt: '', provider: null }), null);
-  assert.equal(addRoomRolePreset({ displayName: '이름', roleName: '  ', rolePrompt: '', provider: null }), null);
-  assert.equal(updateRoomRolePreset('default-builder', { displayName: '@빌더', roleName: '구현자', rolePrompt: '', provider: null }), false);
+  assert.equal(addRoomRolePreset({ displayName: '두 단어', roleName: '역할', rolePrompt: '', persona: '', provider: null }), null);
+  assert.equal(addRoomRolePreset({ displayName: '이름', roleName: '  ', rolePrompt: '', persona: '', provider: null }), null);
+  assert.equal(updateRoomRolePreset('default-builder', { displayName: '@빌더', roleName: '구현자', rolePrompt: '', persona: '', provider: null }), false);
   assert.equal(readRoomRolePresets(), DEFAULT_ROOM_ROLE_PRESETS);
 });
 

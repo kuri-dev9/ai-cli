@@ -5,6 +5,7 @@ import type {
   RoomMessage,
   RoomMessageHandoff,
   RoomParticipant,
+  RoomParticipantStatus,
   RoomPermissionMode,
   RoomTask,
   RoomTurnKind,
@@ -26,6 +27,15 @@ export function parseRoomPermissionMode(value: unknown): RoomPermissionMode {
     : 'ask';
 }
 
+const ROOM_PARTICIPANT_STATUSES: RoomParticipantStatus[] = ['active', 'standby', 'summoned'];
+
+/** 알 수 없는 값은 상주로 읽는다. 룸이 호출형이 되기 전의 행이 그렇다. */
+export function parseRoomParticipantStatus(value: unknown): RoomParticipantStatus {
+  return ROOM_PARTICIPANT_STATUSES.includes(value as RoomParticipantStatus)
+    ? (value as RoomParticipantStatus)
+    : 'active';
+}
+
 export function toRoomParticipant(row: RoomParticipantRow, room: RoomRow): RoomParticipant {
   return {
     participantId: row.participant_id,
@@ -36,6 +46,8 @@ export function toRoomParticipant(row: RoomParticipantRow, room: RoomRow): RoomP
     displayName: row.display_name,
     roleName: row.role_name,
     rolePrompt: row.role_prompt,
+    persona: row.persona,
+    status: parseRoomParticipantStatus(row.status),
     position: row.position,
     isHost: row.session_id === room.host_session_id,
     permissionMode: parseRoomPermissionMode(row.permission_mode ?? room.permission_mode),

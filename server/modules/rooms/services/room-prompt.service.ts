@@ -39,22 +39,45 @@ function clip(text: string, limit: number): string {
 }
 
 /**
- * 처음 차례에 붙이는 역할 안내. 세션이 자기 대화를 이어가므로 이후 차례에는
- * 짧은 알림만 붙인다.
+ * 역할 안내. 처음 차례에 붙이고, 사용자가 누군가의 이름·역할·성향을 고친
+ * 뒤에도 다시 붙인다. 세션은 첫 차례에 들은 역할을 기억할 뿐이라, 다시 보내지
+ * 않으면 고친 내용이 영영 닿지 않는다.
+ *
+ * 그 사이 차례에는 짧은 알림(`buildReminder`)만 붙는다.
  */
-export function buildRoleBrief(me: RoomParticipant, participants: RoomParticipant[]): string {
+export function buildRoleBrief(
+  me: RoomParticipant,
+  participants: RoomParticipant[],
+  reason: 'first' | 'changed' = 'first',
+  standby: RoomParticipant[] = [],
+): string {
   const others = participants
     .filter((participant) => participant.participantId !== me.participantId)
     .map((participant) => `- @${participant.displayName}: ${participant.roleName} (${participant.provider})`)
     .join('\n');
+  const callable = standby
+    .filter((participant) => participant.participantId !== me.participantId)
+    .map((participant) => `- @${participant.displayName}: ${participant.roleName} (${participant.provider})`)
+    .join('\n');
   const rolePrompt = me.rolePrompt.trim() ? `\n역할 설명: ${me.rolePrompt.trim()}` : '';
+  const persona = me.persona.trim() ? `\n성향: ${me.persona.trim()}` : '';
+  const changedNotice = reason === 'changed'
+    ? '[바뀜] 사용자가 룸의 참가자 설정을 고쳤습니다. 지금까지의 안내는 잊고 아래 내용을 따르세요.\n\n'
+    : '';
 
   return [
-    `[팀 룸] 당신은 이 룸의 참가자 "@${me.displayName}" 입니다. 역할: ${me.roleName}.${rolePrompt}`,
+    `${changedNotice}[팀 룸] 당신은 이 룸의 참가자 "@${me.displayName}" 입니다. 역할: ${me.roleName}.${rolePrompt}${persona}`,
     '',
-    '함께 일하는 참가자:',
+    '지금 룸에 있는 참가자:',
     others || '- (아직 없음)',
     '- 사용자: 룸의 주인. 언제든 끼어들어 방향을 바꿉니다.',
+    ...(callable
+      ? [
+        '',
+        '부를 수 있는 멤버 (아직 룸에 없습니다. `@이름` 으로 부르면 그때 들어와 답합니다):',
+        callable,
+      ]
+      : []),
     '',
     '규칙:',
     '- 당신의 역할 범위에서 일하세요. 다른 참가자의 일을 대신하지 말고, 필요하면 그 참가자에게 요청하세요.',
@@ -65,8 +88,15 @@ export function buildRoleBrief(me: RoomParticipant, participants: RoomParticipan
   ].join('\n');
 }
 
-function buildReminder(me: RoomParticipant): string {
-  return `[팀 룸] 당신은 "@${me.displayName}"(${me.roleName}) 입니다. 마지막 줄에 "@이름", "${ROOM_PASS_MARKER}", "${ROOM_DONE_MARKER}" 중 하나를 쓰세요.`;
+function buildReminder(me: RoomParticipant, standby: RoomParticipant[] = []): string {
+  // 명단은 그 사이에 바뀔 수 있어 짧은 알림에도 함께 적는다. 부를 상대를 모르면
+  // 부르지 못한다.
+  const callable = standby
+    .filter((participant) => participant.participantId !== me.participantId)
+    .map((participant) => `@${participant.displayName}(${participant.roleName})`)
+    .join(', ');
+  const callableLine = callable ? `\n부를 수 있는 멤버: ${callable}` : '';
+  return `[팀 룸] 당신은 "@${me.displayName}"(${me.roleName}) 입니다. 마지막 줄에 "@이름", "${ROOM_PASS_MARKER}", "${ROOM_DONE_MARKER}" 중 하나를 쓰세요.${callableLine}`;
 }
 
 /**
@@ -159,6 +189,10 @@ export function buildTurnPrompt(input: {
   participants: RoomParticipant[];
   delta: RoomMessage[];
   isFirstTurn: boolean;
+  /** 사용자가 참가자 설정을 고쳐, 이번 차례에 역할 안내를 다시 보내야 하는지. */
+  roleChanged?: boolean;
+  /** 명단에서 기다리는 멤버. `@이름` 으로 부르면 들어온다. */
+  standby?: RoomParticipant[];
   priorContext?: string | null;
   mode?: RoomTurnMode;
 }): string {
@@ -167,7 +201,12 @@ export function buildTurnPrompt(input: {
   const delta = input.delta.slice(-MAX_DELTA_MESSAGES);
   const omitted = input.delta.length - delta.length;
 
-  const sections: string[] = [isFirstTurn ? buildRoleBrief(me, participants) : buildReminder(me)];
+  const sections: string[] = [
+    // 첫 차례가 아닌데도 안내를 다시 보내는 건 설정이 바뀌었을 때뿐이다.
+    isFirstTurn || input.roleChanged
+      ? buildRoleBrief(me, participants, isFirstTurn ? 'first' : 'changed', input.standby ?? [])
+      : buildReminder(me, input.standby ?? []),
+  ];
 
   if (input.priorContext?.trim()) {
     sections.push(`룸이 되기 전 원래 대화의 마지막 부분:\n${input.priorContext.trim()}`);

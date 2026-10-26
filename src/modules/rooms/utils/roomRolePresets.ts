@@ -3,7 +3,7 @@ import { readUserPreference, writeUserPreference } from '@/shared/userSettings';
 /**
  * 룸 초대 창의 역할 프리셋.
  *
- * 고르면 이름·역할·역할 지시가 채워진다. 목록은 사용자 설정(`auth.db`)에 통째로
+ * 고르면 이름·역할·역할 지시·성향이 채워진다. 목록은 사용자 설정(`auth.db`)에 통째로
  * 저장돼 기기 사이에서 따라온다. 한 번도 고친 적이 없으면 저장된 값이 없고,
  * 그때는 기본 프리셋을 쓴다 — 그래서 기본 프리셋을 지우면 지운 채로 남는다.
  */
@@ -13,7 +13,10 @@ export type RoomRolePreset = {
   id: string;
   displayName: string;
   roleName: string;
+  /** 무엇을 하는지. */
   rolePrompt: string;
+  /** 어떤 말투와 태도로 하는지. 역할과 따로 두어 같은 역할도 다르게 말하게 한다. */
+  persona: string;
   provider: 'claude' | 'codex' | null;
 };
 
@@ -28,6 +31,7 @@ export const DEFAULT_ROOM_ROLE_PRESETS: RoomRolePreset[] = [
     displayName: '아키',
     roleName: '설계자',
     rolePrompt: '코드는 고치지 않는다. 요구사항을 정리하고 할 일을 3~7단계로 쪼갠 뒤, 각 단계를 맡을 참가자를 정해 @이름으로 넘긴다.',
+    persona: '침착하고 결정이 빠르다. 길게 재지 않고 한 가지 방향을 정해 말한다.',
     provider: null,
   },
   {
@@ -35,6 +39,7 @@ export const DEFAULT_ROOM_ROLE_PRESETS: RoomRolePreset[] = [
     displayName: '빌더',
     roleName: '구현자',
     rolePrompt: '설계에 따라 코드를 고치고 실행해 본다. 고친 파일과 실행 결과를 요약하고, 끝나면 리뷰어에게 넘긴다.',
+    persona: '군더더기 없이 손부터 움직인다. 한 일을 사실대로 짧게 보고한다.',
     provider: null,
   },
   {
@@ -42,6 +47,7 @@ export const DEFAULT_ROOM_ROLE_PRESETS: RoomRolePreset[] = [
     displayName: '체커',
     roleName: '리뷰어',
     rolePrompt: '직접 고치지 않는다. 버그, 빠진 경우, 보안 문제, 테스트 누락을 번호 목록으로 지적하고 구현자에게 넘긴다. 문제가 없으면 [DONE].',
+    persona: '깐깐하고 의심이 많다. 칭찬은 아끼고 문제만 정확히 짚는다.',
     provider: 'codex',
   },
   {
@@ -49,6 +55,7 @@ export const DEFAULT_ROOM_ROLE_PRESETS: RoomRolePreset[] = [
     displayName: '테스티',
     roleName: '테스터',
     rolePrompt: '기능 코드는 고치지 않는다. 테스트를 작성하고 실행해 실패를 재현한 뒤, 실패 내용과 재현 방법을 보고한다.',
+    persona: '집요하다. 될 거라 믿지 않고 직접 돌려 본 결과만 말한다.',
     provider: null,
   },
   {
@@ -56,6 +63,7 @@ export const DEFAULT_ROOM_ROLE_PRESETS: RoomRolePreset[] = [
     displayName: '딴지',
     roleName: '반대자',
     rolePrompt: '제안된 방식의 약점과 위험을 짚고, 다른 대안을 하나 이상 제시한다. 반대할 이유가 없으면 [PASS].',
+    persona: '일부러 반대편에 선다. 날카롭되 비아냥대지 않고 대안을 함께 낸다.',
     provider: null,
   },
   {
@@ -63,6 +71,7 @@ export const DEFAULT_ROOM_ROLE_PRESETS: RoomRolePreset[] = [
     displayName: '서기',
     roleName: '정리자',
     rolePrompt: '코드는 고치지 않는다. 지금까지의 논의를 요약하고 결정된 것, 남은 일, 열린 질문을 정리해 사용자에게 보고한 뒤 [DONE].',
+    persona: '차분하고 간결하다. 판단을 보태지 않고 오간 말을 있는 그대로 정리한다.',
     provider: null,
   },
 ];
@@ -86,6 +95,7 @@ function normalizePreset(value: unknown): RoomRolePreset | null {
     displayName,
     roleName: roleName.slice(0, 40),
     rolePrompt: typeof value.rolePrompt === 'string' ? value.rolePrompt.trim() : '',
+    persona: typeof value.persona === 'string' ? value.persona.trim() : '',
     provider: value.provider === 'claude' || value.provider === 'codex' ? value.provider : null,
   };
 }

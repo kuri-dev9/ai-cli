@@ -609,7 +609,10 @@ export type QueuedDraft = {
 /** Viewport-relative placement box (right/bottom offsets plus max height and width) computed for a composer popover so the model and permission menus stay inside the window. */
 export type ComposerMenuAnchor = {
   right: number;
-  bottom: number;
+  /** Set when the menu grows upward from its trigger; mutually exclusive with `top`. */
+  bottom?: number;
+  /** Set when the menu grows downward instead, because there is no room above. */
+  top?: number;
   maxHeight: number;
   maxWidth: number;
 };
@@ -1334,15 +1337,29 @@ export type TelegramChatDiscovery = {
 //----------------- TEAM ROOMS ------------
 
 /** One AI member of a team room: a real ai-cli session plus the name, role and prompt it speaks under. `isHost` marks the session the room was created from. */
+/**
+ * 참가자가 룸에서 어떤 상태인지.
+ *
+ * - `active`: 상주. 차례가 돌아오고 의견에도 낀다. 호스트는 늘 이것이다.
+ * - `standby`: 명단에만 있다. `@이름` 으로 불러야 온다.
+ * - `summoned`: 불려 와 지금 일하는 중. 차례를 마치면 `standby` 로 돌아간다.
+ */
+export type RoomParticipantStatus = 'active' | 'standby' | 'summoned';
+
 export type RoomParticipant = {
   participantId: string;
   roomId: string;
-  sessionId: string;
+  /** 아직 한 번도 불리지 않은 명단 멤버는 null 이다. 처음 불릴 때 세션이 생긴다. */
+  sessionId: string | null;
   provider: string;
   model: string | null;
   displayName: string;
   roleName: string;
+  /** 이 참가자가 무엇을 하는지. */
   rolePrompt: string;
+  /** 어떤 말투와 태도로 하는지. 역할과 따로 두어 같은 역할도 다르게 말하게 한다. */
+  persona: string;
+  status: RoomParticipantStatus;
   position: number;
   isHost: boolean;
   /** Permission preset this participant's turns run with; the room's preset unless set per participant. */
@@ -1450,12 +1467,19 @@ export type RoomParticipantInput = {
   displayName: string;
   roleName: string;
   rolePrompt?: string;
+  persona?: string;
+  /**
+   * `standby` (the default) only puts the member on the roster: no session is
+   * created until someone calls them by name. `active` joins the room right
+   * away and takes a turn in every round, the way invites used to work.
+   */
+  status?: 'active' | 'standby';
 };
 
 /** Body of `POST /api/rooms`: converts the host session into a room and adds the first invitee. */
 export type CreateRoomInput = {
   hostSessionId: string;
-  host?: { displayName?: string; roleName?: string; rolePrompt?: string };
+  host?: { displayName?: string; roleName?: string; rolePrompt?: string; persona?: string };
   participant: RoomParticipantInput;
 };
 

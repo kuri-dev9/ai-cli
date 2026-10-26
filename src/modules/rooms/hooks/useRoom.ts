@@ -88,6 +88,16 @@ export function useRoom(hostSessionId: string) {
   }, []);
 
   /** Cuts the running participant off so the waiting user message is handled now. */
+  /** 참가자 세션의 맥락을 줄인다. id 를 주지 않으면 세션이 있는 전원이 줄인다. */
+  const compact = useCallback(async (participantId?: string) => {
+    if (!roomIdRef.current) return;
+    const response = await api.rooms.compact(roomIdRef.current, participantId);
+    const body = await readApiJson<{ data?: { state?: RoomRuntimeState } }>(response);
+    if (body.data?.state) {
+      dispatch({ type: 'room_state', state: body.data.state });
+    }
+  }, []);
+
   const interrupt = useCallback(async () => {
     if (!roomIdRef.current) return;
     const response = await api.rooms.interrupt(roomIdRef.current);
@@ -97,7 +107,16 @@ export function useRoom(hostSessionId: string) {
     }
   }, []);
 
-  const updateParticipant = useCallback(async (participantId: string, changes: { permissionMode?: RoomPermissionMode }) => {
+  const updateParticipant = useCallback(async (
+    participantId: string,
+    changes: {
+      permissionMode?: RoomPermissionMode;
+      displayName?: string;
+      roleName?: string;
+      rolePrompt?: string;
+      persona?: string;
+    },
+  ) => {
     if (!roomIdRef.current) return;
     const response = await api.rooms.updateParticipant(roomIdRef.current, participantId, changes);
     const body = await readApiJson<{ data?: RoomDetail }>(response);
@@ -117,7 +136,13 @@ export function useRoom(hostSessionId: string) {
     return body.data ?? null;
   }, []);
 
-  const updateSettings = useCallback(async (changes: { maxAutoTurns?: number; splitWork?: boolean; discussion?: boolean }) => {
+  const updateSettings = useCallback(async (changes: {
+    maxAutoTurns?: number;
+    splitWork?: boolean;
+    discussion?: boolean;
+    /** 룸 전체 권한. 참가자별로 따로 둔 값은 서버가 함께 지운다. */
+    permissionMode?: RoomPermissionMode;
+  }) => {
     if (!roomIdRef.current) return;
     const response = await api.rooms.update(roomIdRef.current, changes);
     const body = await readApiJson<{ data?: RoomDetail }>(response);
@@ -157,6 +182,7 @@ export function useRoom(hostSessionId: string) {
     interrupt,
     stop,
     updateSettings,
+    compact,
     updateParticipant,
     removeParticipant,
     applyDetail,

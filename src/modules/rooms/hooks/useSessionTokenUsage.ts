@@ -7,11 +7,16 @@ import { api, readApiJson } from '@/shared/api';
  * `refreshKey` reloads it; the room bumps it when a timeline entry lands,
  * which is when a turn has just finished.
  */
-export function useSessionTokenUsage(sessionId: string, refreshKey: number): Record<string, unknown> | null {
+export function useSessionTokenUsage(sessionId: string | null, refreshKey: number): Record<string, unknown> | null {
   // The usage last reported for this session; null until loaded or when there is none yet.
   const [tokenUsage, setTokenUsage] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
+    // A roster member waiting to be called has no session, so nothing to read.
+    if (!sessionId) {
+      setTokenUsage(null);
+      return undefined;
+    }
     let cancelled = false;
     void (async () => {
       try {

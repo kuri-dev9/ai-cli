@@ -3,9 +3,13 @@ import type { RoomIndexEntry, SessionWithProvider } from '@/shared/types';
 /** A room as the sidebar draws it: the host row plus the participant sessions folded under it. */
 export type SidebarRoomGroup = {
   room: RoomIndexEntry;
-  /** Non-host participants, in room order. `session` is the loaded row when this page of the list has it. */
+  /**
+   * Non-host participants that have a session, in room order. Roster members
+   * waiting to be called have no session yet and nothing to fold, so they are
+   * left out. `session` is the loaded row when this page of the list has it.
+   */
   members: Array<{
-    participant: RoomIndexEntry['participants'][number];
+    participant: RoomIndexEntry['participants'][number] & { sessionId: string };
     session: SessionWithProvider | null;
   }>;
 };
@@ -36,8 +40,11 @@ export function groupRoomSessions(
   for (const room of rooms) {
     if (!sessionsById.has(room.hostSessionId)) continue;
     const members = room.participants
-      .filter((participant) => participant.sessionId !== room.hostSessionId)
-      .map((participant) => ({ participant, session: sessionsById.get(participant.sessionId) ?? null }));
+      .filter((participant) => participant.sessionId !== null && participant.sessionId !== room.hostSessionId)
+      .map((participant) => ({
+        participant: participant as RoomIndexEntry['participants'][number] & { sessionId: string },
+        session: sessionsById.get(participant.sessionId as string) ?? null,
+      }));
     for (const member of members) {
       foldedIds.add(member.participant.sessionId);
     }
@@ -61,7 +68,8 @@ export function roomParticipantSessionIds(rooms: RoomIndexEntry[] | null): Set<s
   const ids = new Set<string>();
   for (const room of rooms ?? []) {
     for (const participant of room.participants) {
-      if (participant.sessionId !== room.hostSessionId) {
+      // Roster members have no session, so there is nothing to keep out.
+      if (participant.sessionId && participant.sessionId !== room.hostSessionId) {
         ids.add(participant.sessionId);
       }
     }
