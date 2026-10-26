@@ -3,7 +3,7 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
-## [1.39.0](https://github.com/kuri-dev9/ai-cli/releases/tag/v1.39.0) (2026-10-26)
+## [1.38.1](https://github.com/kuri-dev9/ai-cli/releases/tag/v1.38.1) (2026-10-26)
 
 ### New Features
 
