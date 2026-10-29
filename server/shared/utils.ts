@@ -143,6 +143,22 @@ export function getClaudeConfigFilePath(homeDirectory: string = os.homedir()): s
 }
 
 /**
+ * Claude transcript 의 한 줄이 대화에 속하는 행인지 가린다.
+ *
+ * CLI 2.1.3xx 부터 같은 파일에 API 로 보낸 요청 기록(`api-request`,
+ * `api-request-shape`, `api-request-blob`)이 섞인다. 그중 blob 은 요청 본문을
+ * `message` 째로 담아서 이전 턴의 사용자 글, 답변, 도구 호출이 그대로 들어
+ * 있고 `uuid` 도 `timestamp` 도 없다. 이것을 대화로 읽으면 읽을 때마다 새 id 와
+ * "지금" 시각을 받은 복제본이 되어, 대화 맨 아래에 앞 턴이 다시 붙는다.
+ *
+ * "uuid 없는 행" 으로 넓게 거르지 않는 것은, 손으로 만든 행이나 옛 형식에서
+ * 대화를 잃지 않기 위해서다. 요청 기록이라고 밝힌 행만 뺀다.
+ */
+export function isClaudeConversationRow(entry: { type?: unknown }): boolean {
+  return !(typeof entry.type === 'string' && entry.type.startsWith('api-request'));
+}
+
+/**
  * Reports whether `candidatePath` sits inside `directoryPath`.
  *
  * Used by the session synchronizer to drop indexed sessions whose transcript

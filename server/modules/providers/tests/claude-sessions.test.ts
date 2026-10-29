@@ -769,3 +769,86 @@ test('partial events with no transcript shape are dropped, not read as empty tur
     }, SESSION_ID), [], `${event.type} produced a message`);
   }
 });
+
+// CLI 2.1.3xx 부터 transcript 에 API 요청 본문(`api-request-blob`)이 섞인다.
+// 앞 턴의 글과 도구 호출을 `message` 째로 담지만 `uuid`·`timestamp` 가 없어서,
+// 대화로 읽으면 읽을 때마다 "지금" 시각의 복제본이 되어 대화 맨 아래에 붙었다.
+test('Claude history ignores api-request-blob rows that replay earlier turns', { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'claude-request-blob-'));
+
+  try {
+    const transcriptPath = path.join(tempRoot, `${SESSION_ID}.jsonl`);
+    const lines = [
+      { type: 'queue-operation', sessionId: SESSION_ID, timestamp: '2026-10-29T01:09:00.000Z' },
+      {
+        type: 'user',
+        uuid: 'user-1',
+        parentUuid: null,
+        sessionId: SESSION_ID,
+        timestamp: '2026-10-29T01:09:01.000Z',
+        message: { role: 'user', content: '계정 여러 개 가능할까?' },
+      },
+      {
+        type: 'api-request-blob',
+        sessionId: SESSION_ID,
+        hash: 'blob-user',
+        message: { role: 'user', content: [{ type: 'text', text: '<system-reminder>지시</system-reminder>' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'assistant-1',
+        parentUuid: 'user-1',
+        sessionId: SESSION_ID,
+        timestamp: '2026-10-29T01:09:06.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: '구조부터 볼게요.' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'assistant-2',
+        parentUuid: 'assistant-1',
+        sessionId: SESSION_ID,
+        timestamp: '2026-10-29T01:09:07.000Z',
+        message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }] },
+      },
+      {
+        type: 'api-request-blob',
+        sessionId: SESSION_ID,
+        hash: 'blob-assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '구조부터 볼게요.' },
+            { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } },
+          ],
+        },
+      },
+      { type: 'api-request', sessionId: SESSION_ID, id: 'req-1', timestamp: '2026-10-29T01:09:08.000Z' },
+    ];
+    await writeFile(transcriptPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`, 'utf8');
+
+    await withIsolatedDatabase(async () => {
+      const now = new Date().toISOString();
+      sessionsDb.createSession(SESSION_ID, 'claude', tempRoot, 'Blob session', now, now, transcriptPath);
+
+      for (const limit of [null, 20]) {
+        const history = await new ClaudeSessionsProvider().fetchHistory(SESSION_ID, {
+          providerSessionId: SESSION_ID,
+          limit,
+        });
+
+        assert.deepEqual(
+          history.messages.map((message) => [message.kind, message.role ?? null, message.id]),
+          [
+            ['text', 'user', 'user-1'],
+            ['text', 'assistant', 'assistant-1_0'],
+            ['tool_use', null, 'assistant-2_0'],
+          ],
+          `limit=${limit}`,
+        );
+        assert.equal(history.total, 3);
+      }
+    });
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});

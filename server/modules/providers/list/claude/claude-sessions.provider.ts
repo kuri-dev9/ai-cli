@@ -17,6 +17,7 @@ import { prepareTranscriptMessages } from '@/shared/message-unification.js';
 import {
   createNormalizedMessage,
   generateMessageId,
+  isClaudeConversationRow,
   readObjectRecord,
   sliceTailPage,
   truncateSubagentActivity,
@@ -96,6 +97,9 @@ async function readClaudeSubagentTranscript(filePath: string): Promise<ClaudeSub
 
       try {
         const entry = JSON.parse(line) as AnyRecord;
+        if (!isClaudeConversationRow(entry)) {
+          continue;
+        }
         const timestamp = typeof entry.timestamp === 'string' ? entry.timestamp : undefined;
 
         if (entry.message?.role === 'assistant' && Array.isArray(entry.message?.content)) {
@@ -323,7 +327,7 @@ async function readTranscriptRows(jsonlPath: string, providerSessionId: string):
     }
     try {
       const entry = JSON.parse(line) as AnyRecord;
-      if (entry.sessionId === providerSessionId) {
+      if (entry.sessionId === providerSessionId && isClaudeConversationRow(entry)) {
         rows.push(entry);
       }
     } catch {
