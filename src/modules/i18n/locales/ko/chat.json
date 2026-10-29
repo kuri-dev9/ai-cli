@@ -389,6 +389,7 @@
   "rooms": {
     "inviteButton": "참가자",
     "inviteButtonTitle": "다른 AI 참가자를 이 대화에 초대합니다",
+    "newRoomTitle": "새 룸",
     "roomFull": "참가자는 최대 {{max}}명입니다",
     "inviteTitle": "참가자 초대",
     "inviteDescriptionCreate": "첫 초대를 하면 이 대화가 팀 룸이 되고, 지금 세션이 첫 번째 참가자(호스트)가 됩니다.",

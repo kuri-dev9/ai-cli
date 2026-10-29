@@ -185,6 +185,8 @@ function WorkspaceMain({
         onMenuClick={onMenuClick}
         onToggleMediaLibrary={hasMediaFolders ? handleToggleMediaLibrary : null}
         mediaLibraryOpen={mediaLibraryOpen}
+        onSessionEstablished={onSessionEstablished}
+        onNavigateToSession={onNavigateToSession}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">

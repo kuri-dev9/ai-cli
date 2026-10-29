@@ -18,9 +18,9 @@ import type { LLMProvider, RoomParticipant } from '@/shared/types.js';
  */
 
 /**
- * 참가자를 위한 세션을 만든다. 이름만 보고도 어느 룸의 누구인지 알 수 있게
- * 붙여 두고, 모델을 골랐다면 세션에 적어 둔다 — 그 세션을 따로 열었을 때도
- * 같은 모델로 이어진다.
+ * 참가자를 위한 세션을 만든다. 이름은 "이름 · 역할" 이다 — 사이드바가 룸
+ * 아래에 접어 보여 주므로 어느 룸인지는 따로 적지 않는다. 모델을 골랐다면
+ * 세션에 적어 둔다 — 그 세션을 따로 열었을 때도 같은 모델로 이어진다.
  */
 export function createParticipantSession(
   provider: LLMProvider,
@@ -30,7 +30,7 @@ export function createParticipantSession(
   model: string | null,
 ): string {
   const { sessionId } = sessionsService.createAppSession(provider, projectPath, `${displayName} · ${roleName}`);
-  sessionsService.renameSessionById(sessionId, `[룸] ${displayName} · ${roleName}`);
+  sessionsService.renameSessionById(sessionId, `${displayName} · ${roleName}`);
   if (model) {
     providerModelsService.setSessionModel(provider, sessionId, model);
   }

@@ -562,6 +562,18 @@ const addRoomSettingsColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'discussion', 'INTEGER NOT NULL DEFAULT 1');
 };
 
+/**
+ * 참가자 세션 이름 앞의 `[룸] ` 을 뗀다. 사이드바가 참가자 세션을 룸 아래에
+ * 접어 보여 주게 되면서 군더더기가 됐다. 한 번 지나가면 더 바꿀 것이 없다.
+ */
+const stripRoomPrefixFromSessionNames = (db: Database): void => {
+  db.prepare(`
+    UPDATE sessions
+    SET custom_name = substr(custom_name, 5)
+    WHERE custom_name LIKE '[룸] %'
+  `).run();
+};
+
 export const runMigrations = (db: Database) => {
   try {
     const usersTableInfo = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
@@ -615,6 +627,7 @@ export const runMigrations = (db: Database) => {
     db.exec(ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL);
     db.exec(ROOM_MESSAGES_TABLE_SCHEMA_SQL);
     addRoomSettingsColumns(db);
+    stripRoomPrefixFromSessionNames(db);
     db.exec(ROOM_INDEXES_SQL);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');

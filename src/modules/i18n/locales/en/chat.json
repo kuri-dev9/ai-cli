@@ -390,6 +390,7 @@
   "rooms": {
     "inviteButton": "Participant",
     "inviteButtonTitle": "Invite another AI participant to this conversation",
+    "newRoomTitle": "New room",
     "roomFull": "A room holds at most {{max}} participants",
     "inviteTitle": "Invite participant",
     "inviteDescriptionCreate": "The first invite turns this conversation into a team room, with the current session as participant #1 (host).",

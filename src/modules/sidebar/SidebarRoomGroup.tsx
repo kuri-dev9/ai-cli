@@ -125,7 +125,7 @@ export default function SidebarRoomGroup({
             // row; the room index knows enough to draw and open it.
             const memberSession: SessionWithProvider = loaded ?? {
               id: participant.sessionId,
-              summary: `[룸] ${participant.displayName} · ${participant.roleName}`,
+              summary: `${participant.displayName} · ${participant.roleName}`,
               __provider: participant.provider as LLMProvider,
               __projectId: rowProps.project.projectId,
             };

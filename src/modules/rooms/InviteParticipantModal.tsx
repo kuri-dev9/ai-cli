@@ -18,9 +18,14 @@ import type { ProviderModelsDefinition, RoomDetail } from '@/shared/types';
 import { Button, Dialog, DialogContent, DialogTitle, LLMProviderLogo } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 
-/** Where the invitee goes: a plain session becoming a room, or an existing room. */
+/**
+ * Where the invitee goes: a plain session becoming a room, or an existing room.
+ *
+ * `create` 는 호스트 세션 id 를 보낼 때 받아 온다. 아직 한 마디도 하지 않은 새
+ * 대화에는 세션이 없어서, 초대를 누르는 순간에 만들어야 하기 때문이다.
+ */
 type InviteTarget =
-  | { kind: 'create'; hostSessionId: string }
+  | { kind: 'create'; resolveHostSessionId: () => Promise<string> }
   | { kind: 'add'; roomId: string };
 
 type InviteParticipantModalProps = {
@@ -195,7 +200,7 @@ export default function InviteParticipantModal({
     try {
       const response = target.kind === 'create'
         ? await api.rooms.create({
-          hostSessionId: target.hostSessionId,
+          hostSessionId: await target.resolveHostSessionId(),
           host: hostDisplayName.trim() || hostRoleName.trim() || hostRolePrompt.trim() || hostPersona.trim()
             ? {
               displayName: hostDisplayName.trim() || undefined,

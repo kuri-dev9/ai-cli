@@ -413,7 +413,7 @@ export const roomsService = {
       // 세션 목록에 보이는 이름도 따라가야 어떤 대화가 누구인지 알아볼 수 있다.
       const name = profile.displayName ?? current.display_name;
       const role = profile.roleName ?? current.role_name;
-      sessionsService.renameSessionById(current.session_id, `[룸] ${name} · ${role}`);
+      sessionsService.renameSessionById(current.session_id, `${name} · ${role}`);
     }
     if (nameChanged) {
       for (const row of roomsDb.listParticipants(roomId)) {

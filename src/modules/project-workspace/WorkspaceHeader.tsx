@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/shared/ui';
-import type { AppTab, Project, ProjectSession } from '@/shared/types';
+import type { AppTab, Project, ProjectSession, SessionEstablishedContext } from '@/shared/types';
 import { cn } from '@/shared/utils';
 import { InviteParticipantButton } from '@/modules/rooms';
 import MobileMenuButton from '@/modules/project-workspace/MobileMenuButton';
@@ -22,6 +22,9 @@ type WorkspaceHeaderProps = {
   /** 오른쪽 미디어 패널을 열고 닫는다. 연결한 폴더가 없으면 null — 버튼을 두지 않는다. */
   onToggleMediaLibrary: (() => void) | null;
   mediaLibraryOpen: boolean;
+  /** 새 대화에서 룸을 열 때 만든 호스트 세션을 알리고 그리로 옮겨 간다. */
+  onSessionEstablished: (sessionId: string, context: SessionEstablishedContext) => void;
+  onNavigateToSession: (sessionId: string) => void;
 };
 
 /** Rendered by WorkspaceMain to show the workspace title alongside the scrollable tab bar. */
@@ -36,6 +39,8 @@ export default function WorkspaceHeader({
   onMenuClick,
   onToggleMediaLibrary,
   mediaLibraryOpen,
+  onSessionEstablished,
+  onNavigateToSession,
 }: WorkspaceHeaderProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -110,8 +115,16 @@ export default function WorkspaceHeader({
             shouldShowTasksTab={shouldShowTasksTab}
           />
 
-          {activeTab === 'chat' && selectedSession?.id && (
-            <InviteParticipantButton sessionId={selectedSession.id} />
+          {/* 새 대화에도 둔다. 첫 마디 전에 참가자를 정해 룸으로 열 수 있다. */}
+          {activeTab === 'chat' && (
+            <InviteParticipantButton
+              // 대화가 바뀌면 새 대화에서 만들어 둔 호스트 세션을 버린다.
+              key={selectedSession?.id ?? 'new'}
+              sessionId={selectedSession?.id ?? null}
+              project={selectedProject}
+              onSessionEstablished={onSessionEstablished}
+              onNavigateToSession={onNavigateToSession}
+            />
           )}
 
           {onToggleMediaLibrary && (
