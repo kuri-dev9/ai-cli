@@ -78,6 +78,15 @@ function parseStoredHandoff(value: string | null): RoomMessageHandoff | null {
   return null;
 }
 
+/**
+ * SQLite `CURRENT_TIMESTAMP` 은 시간대 표시 없는 UTC(`2026-10-30 09:19:51`)다.
+ * 그대로 넘기면 브라우저가 현지 시각으로 읽어 한국에서는 9시간 이르게 보인다.
+ * ISO(UTC `Z`)로 바꿔 넘긴다. 이미 시간대가 붙은 값은 그대로 둔다.
+ */
+export function toIsoTimestamp(value: string): string {
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(' ', 'T')}Z` : value;
+}
+
 function parseStoredTask(value: string | null): RoomTask | null {
   if (!value) return null;
   try {
@@ -102,6 +111,6 @@ export function toRoomMessage(row: RoomMessageRow): RoomMessage {
     handoff: parseStoredHandoff(row.handoff ?? null),
     turnKind: ROOM_TURN_KINDS.includes(row.turn_kind as RoomTurnKind) ? row.turn_kind as RoomTurnKind : null,
     task: parseStoredTask(row.task ?? null),
-    createdAt: row.created_at,
+    createdAt: toIsoTimestamp(row.created_at),
   };
 }

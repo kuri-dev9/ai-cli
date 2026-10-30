@@ -12,6 +12,7 @@ import { isValidRoomDisplayName } from '@/modules/rooms/services/room-prompt.ser
 import { createParticipantSession } from '@/modules/rooms/services/room-roster.service.js';
 import {
   parseRoomPermissionMode,
+  toIsoTimestamp,
   toRoomMessage,
   toRoomParticipant,
 } from '@/modules/rooms/services/room-records.service.js';
@@ -108,7 +109,7 @@ function buildDetail(room: RoomRow): RoomDetail {
       discussion: room.discussion !== 0,
       hostLed: room.host_led !== 0,
       autoCompact: room.auto_compact !== 0,
-      createdAt: room.created_at,
+      createdAt: toIsoTimestamp(room.created_at),
     },
     participants: roomsDb.listParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
     formerParticipants: roomsDb.listFormerParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
