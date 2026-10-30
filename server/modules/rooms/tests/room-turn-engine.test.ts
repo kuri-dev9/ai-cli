@@ -593,6 +593,8 @@ test('a read-only turn asks nothing when the participant is set to full access',
     const tools = readOnlyTurn.options.toolsSettings as { allowedTools: string[]; disallowedTools: string[] };
     // 조사에 필요한 셸은 묻지 않고 바로 쓴다. 이게 없어서 라운드가 승인 창에서 멈췄다.
     assert.ok(tools.allowedTools.includes('Bash'), 'Bash 가 허용 목록에 있어야 한다');
+    // 역할 지시에 적은 스킬도 묻지 않고 부른다.
+    assert.ok(tools.allowedTools.includes('Skill'), 'Skill 이 허용 목록에 있어야 한다');
     // 그래도 파일은 고치지 못한다. 동시에 같은 폴더를 고치면 서로 덮어쓴다.
     assert.deepEqual(tools.disallowedTools, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
   }, { splitWork: true });
@@ -621,6 +623,8 @@ test('a read-only turn still asks when the participant is set to ask', async () 
     const readOnlyTurn = calls[1].sessionId === HOST ? calls[1] : calls[2];
     const tools = readOnlyTurn.options.toolsSettings as { allowedTools: string[] };
     assert.ok(!tools.allowedTools.includes('Bash'), '매번 묻기에서는 셸도 승인을 받는다');
+    // 스킬은 지시문을 읽어 올 뿐이라 매번 묻기에서도 묻지 않는다.
+    assert.ok(tools.allowedTools.includes('Skill'), '매번 묻기에서도 Skill 은 허용 목록에 있어야 한다');
   }, { splitWork: true });
 });
 

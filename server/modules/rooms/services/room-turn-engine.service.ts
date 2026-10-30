@@ -145,6 +145,16 @@ const CLAUDE_WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
  */
 const READ_ONLY_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'Task', 'TodoRead'];
 
+/**
+ * 읽기 전용 차례에서도 권한 설정과 상관없이 열어 두는 도구.
+ *
+ * 역할 지시에 "○○ 스킬을 써라" 라고 적어 두는 일이 흔한데, 스킬은 지시문을
+ * 읽어 올 뿐이라 막을 이유가 없다. 이것이 빠져 있으면 의견·분담 차례에서
+ * 스킬 하나에 승인 창이 떠 라운드가 멈춘다. 스킬 안에서 고치려 해도 쓰기
+ * 도구는 그대로 막히고, 셸은 위 규칙을 따른다.
+ */
+const READ_ONLY_ROOM_TOOLS = ['Skill'];
+
 function getLoop(roomId: string): RoomLoopState {
   let loop = loops.get(roomId);
   if (!loop) {
@@ -270,7 +280,7 @@ function resolveTurnPermissions(me: RoomParticipant, readOnly: boolean): AnyReco
   if (me.provider === 'codex') {
     return { permissionMode: 'readOnly' };
   }
-  const allowedTools = [...TELEGRAM_READ_ONLY_TOOLS];
+  const allowedTools = [...TELEGRAM_READ_ONLY_TOOLS, ...READ_ONLY_ROOM_TOOLS];
   if (mode === 'full') {
     // 읽기만 하는 차례에도 조사에는 셸이 필요하다. 이것이 없어서 매번 물었다.
     allowedTools.push(...READ_ONLY_SHELL_TOOLS);
