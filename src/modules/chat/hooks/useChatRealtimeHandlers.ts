@@ -240,6 +240,14 @@ export function useChatRealtimeHandlers({
         case 'loading_progress':
           return;
 
+        // 룸 소식은 모든 화면에 가고 rooms 모듈이 roomId 로 걸러 듣는다. 세션
+        // 이름표가 없어 위의 폴백이 지금 보는 대화로 돌리는데, 그대로 두면 `id`
+        // 없는 행이 그 대화의 저장소에 들어가 이후 갱신이 모두 터진다.
+        case 'room_message':
+        case 'room_state':
+        case 'room_updated':
+          return;
+
         default:
           break;
       }

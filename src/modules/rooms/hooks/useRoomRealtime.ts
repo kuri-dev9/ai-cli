@@ -9,6 +9,8 @@ type UseRoomRealtimeArgs = {
   roomId: string | null;
   /** Streams of the participants running now, whose sessions get attached. */
   lives: RoomLiveBuffer[];
+  /** Whether a turn is running; only then is a silent socket suspicious. */
+  isRunning: boolean;
   dispatch: Dispatch<RoomViewAction>;
   reload: () => void;
 };
@@ -18,11 +20,18 @@ const toSubscriptions = (lives: RoomLiveBuffer[]) =>
   lives.map((buffer) => ({ sessionId: buffer.sessionId, lastSeq: buffer.lastSeq }));
 
 /**
+ * 차례가 도는데 이만큼 아무 소식이 없으면 룸을 다시 읽는다. 소켓이 열린 채
+ * 소식만 끊기면 화면은 그걸 알 길이 없어 새로고침할 때까지 멈춰 있었다. 긴
+ * 명령 하나가 조용히 도는 동안에도 걸리지만, 다시 읽기는 가볍고 결과가 같다.
+ */
+const SILENT_RESYNC_MS = 30_000;
+
+/**
  * Feeds the room view from the shared chat websocket: room frames filtered by
  * roomId, plus the running participants' normal session frames, which this
  * hook attaches with `chat.subscribe` whenever a participant starts running.
  */
-export function useRoomRealtime({ roomId, lives, dispatch, reload }: UseRoomRealtimeArgs) {
+export function useRoomRealtime({ roomId, lives, isRunning, dispatch, reload }: UseRoomRealtimeArgs) {
   const { subscribe, sendMessage } = useWebSocket();
   // Read inside the socket listener and the reconnect path without
   // re-registering the listener on every streamed frame.
@@ -30,6 +39,8 @@ export function useRoomRealtime({ roomId, lives, dispatch, reload }: UseRoomReal
   const reloadRef = useRef(reload);
   // Sessions already attached, so a streamed frame does not resubscribe them.
   const subscribedRef = useRef(new Set<string>());
+  // When the last frame for this room (or its running sessions) arrived.
+  const lastFrameAtRef = useRef(Date.now());
   // Declared before the subscribe effect so the refs are current when it runs.
   useLayoutEffect(() => {
     livesRef.current = lives;
@@ -54,6 +65,9 @@ export function useRoomRealtime({ roomId, lives, dispatch, reload }: UseRoomReal
     }
 
     return subscribe((event: ServerEvent) => {
+      if ((event.roomId === roomId) || (event.sessionId && livesRef.current.some((buffer) => buffer.sessionId === event.sessionId))) {
+        lastFrameAtRef.current = Date.now();
+      }
       switch (event.kind) {
         case 'room_message':
           if (event.roomId === roomId && event.message) {
@@ -89,4 +103,19 @@ export function useRoomRealtime({ roomId, lives, dispatch, reload }: UseRoomReal
       }
     });
   }, [dispatch, roomId, sendMessage, subscribe]);
+
+  useEffect(() => {
+    if (!roomId || !isRunning) {
+      return undefined;
+    }
+    lastFrameAtRef.current = Date.now();
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastFrameAtRef.current < SILENT_RESYNC_MS) {
+        return;
+      }
+      lastFrameAtRef.current = Date.now();
+      reloadRef.current();
+    }, SILENT_RESYNC_MS / 3);
+    return () => window.clearInterval(timer);
+  }, [isRunning, roomId]);
 }

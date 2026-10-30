@@ -103,7 +103,8 @@ export function removeOptimisticUserEchoes(
   const claimedServerIds = new Set<string>();
 
   return realtimeMessages.filter((message) => {
-    if (!message.id.startsWith('local_')) {
+    // `id` 없는 행 하나가 이 필터를 터뜨리면 그 대화의 갱신이 전부 멈춘다.
+    if (typeof message.id !== 'string' || !message.id.startsWith('local_')) {
       return true;
     }
 

@@ -58,6 +58,7 @@ export function useRoom(hostSessionId: string) {
   useRoomRealtime({
     roomId,
     lives: viewState.lives,
+    isRunning: viewState.detail?.state?.status === 'running',
     dispatch,
     reload: reloadInBackground,
   });

@@ -99,3 +99,8 @@ test('a replacement echo survives a kept turn that repeats its text', () => {
   const persisted = [...kept, userRow('persisted', 'continue', '2026-01-01T00:00:25.000Z')];
   assert.deepEqual(removeOptimisticUserEchoes(persisted, [echo]), []);
 });
+
+test('a row without an id is kept instead of breaking the whole merge', () => {
+  const stray = { kind: 'status', sessionId: 'session-1' } as unknown as NormalizedMessage;
+  assert.deepEqual(removeOptimisticUserEchoes([], [stray]), [stray]);
+});

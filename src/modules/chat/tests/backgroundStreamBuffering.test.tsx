@@ -169,3 +169,18 @@ test('스트리밍 조각은 그 프레임이 밝힌 provider 로 기록된다',
   assert.equal(streamingCalls[0]?.provider, 'codex');
   vi.useRealTimers();
 });
+
+/**
+ * 룸 소식은 세션 이름표 없이 모든 화면에 간다. 예전에는 폴백이 이걸 지금 보는
+ * 대화의 것으로 돌려 `id` 없는 행을 저장소에 넣었고, 그 뒤로 그 대화의 갱신이
+ * 전부 `startsWith` 오류로 멈춰 새로고침해야 보였다.
+ */
+test('룸 소식은 보고 있는 대화의 저장소에 들어가지 않는다', () => {
+  const { dispatch, appended } = renderHandlers();
+
+  dispatch({ kind: 'room_state', roomId: 'room-1', state: { status: 'running' } } as unknown as ServerEvent);
+  dispatch({ kind: 'room_message', roomId: 'room-1', message: { id: 1 } } as unknown as ServerEvent);
+  dispatch({ kind: 'room_updated', roomId: 'room-1' } as unknown as ServerEvent);
+
+  assert.deepEqual(appended, []);
+});
