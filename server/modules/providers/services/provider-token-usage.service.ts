@@ -150,13 +150,18 @@ function findCodexTokenUsage(fileContent: string): TokenUsageResult | null {
         continue;
       }
 
+      // `total_token_usage` is every token the thread has ever spent, so it only
+      // grows — compaction cannot bring it down. What fills the context window
+      // is the last request, `last_token_usage`, which is also what Codex's own
+      // "context left" reads. Older rollouts without it fall back to the total.
+      const usage = tokenInfo.last_token_usage ?? tokenInfo.total_token_usage;
       let inputTokens = 0;
       let outputTokens = 0;
       let totalTokens = 0;
-      if (tokenInfo.total_token_usage) {
-        inputTokens = readUsageNumber(tokenInfo.total_token_usage.input_tokens);
-        outputTokens = readUsageNumber(tokenInfo.total_token_usage.output_tokens);
-        totalTokens = readUsageNumber(tokenInfo.total_token_usage.total_tokens)
+      if (usage) {
+        inputTokens = readUsageNumber(usage.input_tokens);
+        outputTokens = readUsageNumber(usage.output_tokens);
+        totalTokens = readUsageNumber(usage.total_tokens)
           || inputTokens + outputTokens;
       }
       return {

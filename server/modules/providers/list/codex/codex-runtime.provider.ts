@@ -28,6 +28,7 @@ import {
   createNormalizedMessage,
 } from '@/shared/index.js';
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
+import { codexAppServer } from '@/modules/providers/list/codex/codex-app-server.client.js';
 import type { AnyRecord, ProviderRuntimeContext, ProviderRuntimeWriter } from '@/shared/index.js';
 
 type ActiveCodexSession = {
@@ -331,6 +332,12 @@ async function queryCodex(
   const resolvedModel = await context.resolveResumeModel(sessionId, model);
 
   const workingDirectory = cwd || projectPath || process.cwd();
+
+  if (command.trim() === COMPACT_COMMAND) {
+    await compactCodexThread(providerSessionId, sessionId, workingDirectory, ws);
+    return;
+  }
+
   const { sandboxMode, approvalPolicy } = mapPermissionModeToCodexOptions(permissionMode);
   const catalog = await context.getProviderModels();
   const selectedModel = catalog.OPTIONS.find((option) => option.value === resolvedModel) || null;
@@ -563,6 +570,37 @@ async function queryCodex(
         session.status = session.status === 'aborted' ? 'aborted' : 'completed';
       }
     }
+  }
+}
+
+/**
+ * `codex exec`, which the SDK drives, has no slash commands — a `/compact`
+ * prompt reached the model as ordinary text, so the context grew instead of
+ * shrinking. Every caller that sends `/compact` (the chat's compact action,
+ * rooms' compaction) means the CLI's command, so it is run here through the
+ * app-server's real compaction instead of as a turn.
+ */
+const COMPACT_COMMAND = '/compact';
+
+async function compactCodexThread(
+  providerSessionId: string | null | undefined,
+  sessionId: string | null | undefined,
+  workingDirectory: string,
+  ws: ProviderRuntimeWriter,
+) {
+  const replySessionId = providerSessionId || sessionId || null;
+  try {
+    if (!providerSessionId) {
+      throw new Error('There is no conversation to compact yet.');
+    }
+    await codexAppServer.compactThread({ threadId: providerSessionId, cwd: workingDirectory });
+    sendMessage(ws, createNormalizedMessage({ kind: 'text', role: 'assistant', content: 'Context compacted', sessionId: replySessionId, provider: 'codex' }));
+    sendMessage(ws, createCompleteMessage({ provider: 'codex', sessionId: replySessionId, actualSessionId: providerSessionId, exitCode: 0 }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Codex] Compaction failed:', message);
+    sendMessage(ws, createNormalizedMessage({ kind: 'error', content: message, sessionId: replySessionId, provider: 'codex' }));
+    sendMessage(ws, createCompleteMessage({ provider: 'codex', sessionId: replySessionId, exitCode: 1 }));
   }
 }
 

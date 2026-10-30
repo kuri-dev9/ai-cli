@@ -24,11 +24,32 @@ import { AppError } from '@/shared/utils.js';
 /** How long a single request may take before the child is killed. */
 const REQUEST_TIMEOUT_MS = 30_000;
 
+/**
+ * How long a compaction turn may run. It is a model call that summarises the
+ * whole thread, so it takes far longer than a plain request.
+ */
+const COMPACT_TIMEOUT_MS = 10 * 60_000;
+
 type JsonRpcResponse = {
   id?: number;
+  method?: string;
+  params?: unknown;
   result?: unknown;
   error?: { code?: number; message?: string };
 };
+
+type AppServerCall = (method: string, params: unknown) => Promise<unknown>;
+
+/**
+ * Waits for the first server notification `match` accepts (returns something
+ * other than undefined for). Rejects on timeout or when the child dies.
+ */
+type AppServerWaitFor = <T>(
+  match: (method: string, params: AnyParams) => T | undefined,
+  timeoutMs: number,
+) => Promise<T>;
+
+type AnyParams = Record<string, any>;
 
 /**
  * One fork of a Codex thread.
@@ -71,7 +92,7 @@ function resolveCodexLauncher(): string {
  * the model turn that follows.
  */
 async function withAppServer<T>(
-  run: (call: (method: string, params: unknown) => Promise<unknown>) => Promise<T>,
+  run: (call: AppServerCall, waitFor: AppServerWaitFor) => Promise<T>,
 ): Promise<T> {
   const launcher = resolveCodexLauncher();
   const child = spawn(process.execPath, [launcher, 'app-server'], {
@@ -89,6 +110,8 @@ async function withAppServer<T>(
 
   let nextRequestId = 1;
   const pending = new Map<number, (response: JsonRpcResponse) => void>();
+  // Callers waiting on a server notification; see waitFor.
+  const waiters = new Set<{ notify: (method: string, params: AnyParams) => void; fail: (reason: string) => void }>();
   let exitReason: string | null = null;
 
   const reader = readline.createInterface({ input: child.stdout });
@@ -105,6 +128,12 @@ async function withAppServer<T>(
       return;
     }
     if (typeof message.id !== 'number') {
+      if (typeof message.method === 'string') {
+        const params = (message.params && typeof message.params === 'object' ? message.params : {}) as AnyParams;
+        for (const waiter of [...waiters]) {
+          waiter.notify(message.method, params);
+        }
+      }
       return;
     }
     pending.get(message.id)?.(message);
@@ -117,6 +146,9 @@ async function withAppServer<T>(
       resolve({ error: { message: reason } });
     }
     pending.clear();
+    for (const waiter of [...waiters]) {
+      waiter.fail(reason);
+    }
   };
 
   child.on('error', (error) => failPending(error.message));
@@ -131,7 +163,47 @@ async function withAppServer<T>(
   child.stdout?.on('error', (error) => failPending(error.message));
   child.stderr?.on('error', () => {});
 
-  const call = (method: string, params: unknown): Promise<unknown> =>
+  const waitFor: AppServerWaitFor = (match, timeoutMs) =>
+    new Promise((resolve, reject) => {
+      if (exitReason) {
+        reject(new AppError(`Codex app-server is not running: ${exitReason}`, {
+          code: 'CODEX_APP_SERVER_UNAVAILABLE',
+          statusCode: 502,
+        }));
+        return;
+      }
+      const waiter = {
+        notify: (method: string, params: AnyParams) => {
+          const matched = match(method, params);
+          if (matched === undefined) {
+            return;
+          }
+          settle();
+          resolve(matched);
+        },
+        fail: (reason: string) => {
+          settle();
+          reject(new AppError(`Codex app-server is not running: ${reason}`, {
+            code: 'CODEX_APP_SERVER_UNAVAILABLE',
+            statusCode: 502,
+          }));
+        },
+      };
+      const timer = setTimeout(() => {
+        settle();
+        reject(new AppError(`Codex app-server did not finish within ${timeoutMs}ms.`, {
+          code: 'CODEX_APP_SERVER_TIMEOUT',
+          statusCode: 504,
+        }));
+      }, timeoutMs);
+      const settle = () => {
+        clearTimeout(timer);
+        waiters.delete(waiter);
+      };
+      waiters.add(waiter);
+    });
+
+  const call: AppServerCall = (method, params) =>
     new Promise((resolve, reject) => {
       if (exitReason) {
         reject(new AppError(`Codex app-server is not running: ${exitReason}`, {
@@ -176,7 +248,7 @@ async function withAppServer<T>(
     });
     child.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })}\n`);
 
-    return await run(call);
+    return await run(call, waitFor);
   } catch (error) {
     if (error instanceof AppError && exitReason) {
       throw new AppError(`${error.message}${stderr ? ` — ${stderr.trim().split('\n').slice(-1)[0]}` : ''}`, {
@@ -192,6 +264,54 @@ async function withAppServer<T>(
 }
 
 export const codexAppServer = {
+  /**
+   * Compacts a thread's context the way Codex's own `/compact` does.
+   *
+   * The SDK runs turns through `codex exec`, which has no slash commands: a
+   * `/compact` prompt reaches the model as plain text and only makes the
+   * context longer. The app-server has the real thing, `thread/compact/start`,
+   * which runs the compaction as a turn of its own on the thread.
+   *
+   * The thread has to be loaded into this fresh server first, hence the
+   * resume. Resolves once the compaction turn completes; rejects if it fails.
+   */
+  async compactThread(input: { threadId: string; cwd?: string }): Promise<void> {
+    return withAppServer(async (call, waitFor) => {
+      await call('thread/resume', {
+        threadId: input.threadId,
+        excludeTurns: true,
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+      });
+
+      // Listening before the request: the turn can finish before the
+      // request's own reply is read.
+      const finished = waitFor((method, params) => {
+        if (params.threadId !== input.threadId) {
+          return undefined;
+        }
+        if (method === 'turn/completed') {
+          return { status: String(params.turn?.status ?? ''), error: params.turn?.error?.message as string | undefined };
+        }
+        if (method === 'error' && params.willRetry === false) {
+          return { status: 'failed', error: params.error?.message as string | undefined };
+        }
+        return undefined;
+      }, COMPACT_TIMEOUT_MS);
+      // If the request below is rejected nobody awaits this; it then fails
+      // when the child is killed, which must not surface as unhandled.
+      finished.catch(() => {});
+
+      await call('thread/compact/start', { threadId: input.threadId });
+      const outcome = await finished;
+      if (outcome.status !== 'completed') {
+        throw new AppError(outcome.error || `Codex compaction ended as "${outcome.status}".`, {
+          code: 'CODEX_COMPACT_FAILED',
+          statusCode: 502,
+        });
+      }
+    });
+  },
+
   /**
    * Copies a thread into a new one that ends at `lastTurnId`, or copies the
    * whole thread when it is omitted.

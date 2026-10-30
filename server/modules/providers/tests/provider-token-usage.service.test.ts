@@ -117,6 +117,43 @@ test('Codex token usage uses the latest token_count snapshot', async () => {
   }
 });
 
+test('Codex token usage reads the last request, which compaction shrinks, not the running total', async () => {
+  const tempDirectory = await mkdtemp(path.join(tmpdir(), 'provider-token-usage-codex-last-'));
+  const sessionFilePath = path.join(tempDirectory, 'rollout-provider-session.jsonl');
+
+  try {
+    // 압축 직후의 모양: 누적치는 그대로지만 지금 맥락은 작아졌다.
+    await writeFile(sessionFilePath, JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: { input_tokens: 49_000, output_tokens: 2_000, total_tokens: 51_000 },
+          last_token_usage: { input_tokens: 4_800, output_tokens: 85, total_tokens: 4_885 },
+          model_context_window: 258_400,
+        },
+      },
+    }));
+
+    const service = createProviderTokenUsageService({
+      getSessionById: () => createSessionRow({
+        provider: 'codex',
+        jsonl_path: sessionFilePath,
+      }),
+    });
+
+    assert.deepEqual(await service.getSessionTokenUsage('app-session'), {
+      used: 4_885,
+      total: 258_400,
+      inputTokens: 4_800,
+      outputTokens: 85,
+      breakdown: { input: 4_800, output: 85 },
+    });
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+});
+
 test('OpenCode token usage resolves its provider-native id from the session row', async () => {
   const tempDirectory = await mkdtemp(path.join(tmpdir(), 'provider-token-usage-opencode-'));
   const databasePath = path.join(tempDirectory, 'opencode.db');
