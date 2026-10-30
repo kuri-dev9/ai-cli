@@ -188,11 +188,14 @@ describe('RoomInterface', () => {
     ]);
   });
 
-  it('opens one participant\'s settings under the chips to change its permission or send it to standby', async () => {
+  it('opens one participant\'s settings beside the member list to change its permission or send it to standby', async () => {
     roomCalls.length = 0;
     await renderRoom();
 
+    // 참가자는 버튼 하나로 접혀 있다. 펼친 목록에서 설정을 열어도 목록은 닫히지 않는다.
+    fireEvent.click(screen.getByRole('button', { name: /^참가자 2/ }));
     fireEvent.click(screen.getByRole('button', { name: '리뷰어 설정' }));
+    expect(screen.getByRole('button', { name: '설계자 설정' })).toBeTruthy();
     const region = screen.getByRole('region', { name: '리뷰어 설정' });
     expect(region).toBeTruthy();
 

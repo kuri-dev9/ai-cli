@@ -388,6 +388,9 @@
     "reduceWhileRunning": "The conversation is still running — try again once this turn finishes."
   },
   "rooms": {
+    "membersButton": "Members {{count}}",
+    "membersButtonTitle": "See who is in this room",
+    "membersWorking": "{{count}} working",
     "inviteButton": "Participant",
     "inviteButtonTitle": "Invite another AI participant to this conversation",
     "newRoomTitle": "New room",

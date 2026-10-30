@@ -387,6 +387,9 @@
     "reduceWhileRunning": "지금은 대화가 돌고 있어 줄일 수 없습니다. 이번 턴이 끝난 뒤에 다시 시도하세요."
   },
   "rooms": {
+    "membersButton": "참가자 {{count}}",
+    "membersButtonTitle": "이 룸에 들어와 있는 참가자를 봅니다",
+    "membersWorking": "{{count}}명 작업 중",
     "inviteButton": "참가자",
     "inviteButtonTitle": "다른 AI 참가자를 이 대화에 초대합니다",
     "newRoomTitle": "새 룸",

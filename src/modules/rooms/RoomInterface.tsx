@@ -223,7 +223,7 @@ export function RoomInterface({
   const [openProcessIds, setOpenProcessIds] = useState<Set<number>>(() => new Set());
   // 진행 중인 차례에서 지난 도구 호출까지 펼쳐 둔 세션. 비어 있으면 최근 것만 보인다.
   const [expandedLiveTurns, setExpandedLiveTurns] = useState<Set<string>>(() => new Set());
-  // The participant whose settings strip is open under the chips; one at a time.
+  // The participant whose settings card is open beside the member list; one at a time.
   const [settingsParticipantId, setSettingsParticipantId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -473,6 +473,53 @@ export function RoomInterface({
     setHeaderSlot(document.getElementById(ROOM_HEADER_SLOT_ID));
   }, []);
 
+  // 참가자 목록은 버튼 하나로 접어 둔다. 칩을 늘어놓으면 헤더 폭을 넘겨 가로
+  // 스크롤에 가려졌다. 바깥을 누르거나 Escape 로 닫는다.
+  const [membersOpen, setMembersOpen] = useState(false);
+  const membersRef = useRef<HTMLDivElement | null>(null);
+  const membersMenuRef = useRef<HTMLDivElement | null>(null);
+  // 목록은 body 로 portal 해 띄운다. 헤더 안에 두면 아래 대화 카드의 고정
+  // 머리줄이 그 위를 덮는다. 위치는 버튼 오른쪽 아래에 맞춘다.
+  const [membersMenuPos, setMembersMenuPos] = useState<{ top: number; right: number } | null>(null);
+  useEffect(() => {
+    if (!membersOpen) return;
+    const place = () => {
+      const rect = membersRef.current?.getBoundingClientRect();
+      if (rect) setMembersMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [membersOpen]);
+  // 설정은 목록에 붙은 하위 메뉴라, 목록이 닫히면 같이 닫는다.
+  const settingsParticipantIdRef = useRef(settingsParticipantId);
+  settingsParticipantIdRef.current = settingsParticipantId;
+  useEffect(() => {
+    if (!membersOpen) setSettingsParticipantId(null);
+  }, [membersOpen]);
+  useEffect(() => {
+    if (!membersOpen) return;
+    const closeOnOutside = (event: globalThis.MouseEvent) => {
+      const target = event.target as Node;
+      if (membersRef.current?.contains(target) || membersMenuRef.current?.contains(target)) return;
+      // 설정 안의 모델 메뉴는 body 에 따로 portal 된다. 거기를 누른 것은 바깥이 아니다.
+      if (target instanceof Element && target.closest('[role="menu"]')) return;
+      setMembersOpen(false);
+    };
+    // Escape 는 한 겹씩 닫는다: 모델 메뉴 → 설정 → 목록.
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || document.querySelector('[role="menu"]')) return;
+      if (settingsParticipantIdRef.current) setSettingsParticipantId(null);
+      else setMembersOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [membersOpen]);
+
   if (!detail) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -684,63 +731,141 @@ export function RoomInterface({
   );
 
   const participantStrip = (
-    <div className="flex min-w-0 max-w-full items-center gap-2 overflow-x-auto">
-      {participants.map((participant) => {
-        const settingsOpen = settingsParticipantId === participant.participantId;
-        return (
-          <div
-            key={participant.participantId}
-            className={cn(
-              'flex max-w-[12rem] flex-shrink-0 items-center rounded-full border',
-              participantColor(participant).ring,
-              // 명단에서 기다리는 멤버는 흐리게. 아직 한 번도 불린 적 없으면
-              // 점선까지 둘러 "아직 들어오지 않았다" 를 더 분명히 한다.
-              participant.status === 'standby' && (participant.sessionId ? 'opacity-75' : 'border-dashed opacity-60'),
-              isParticipantActive(participant.participantId) && 'ring-2 ring-primary/40',
-            )}
-          >
-            <button
-              type="button"
-              disabled={!participant.sessionId}
-              onClick={() => openParticipantSession(participant.sessionId)}
-              // 칩에서 뺀 역할·호스트 표시는 여기에 남겨 둔다.
-              title={`${participant.displayName} · ${participant.roleName}${participant.isHost ? ` (${t('rooms.host')})` : ''}`}
-              className="flex min-w-0 items-center py-0.5 pl-2 pr-1 disabled:cursor-default"
-            >
-              <ParticipantBadge
-                participant={participant}
-                hostLabel={t('rooms.host')}
-                standbyLabel={t('rooms.standby')}
-                compact
-              />
-            </button>
-            <button
-              type="button"
-              onClick={() => setSettingsParticipantId(settingsOpen ? null : participant.participantId)}
-              aria-expanded={settingsOpen}
-              aria-label={t('rooms.participantSettings', { name: participant.displayName })}
-              title={t('rooms.participantSettings', { name: participant.displayName })}
+    <div ref={membersRef} className="relative flex-shrink-0">
+      <button
+        type="button"
+        onClick={() => setMembersOpen((open) => !open)}
+        aria-expanded={membersOpen}
+        aria-haspopup="true"
+        title={t('rooms.membersButtonTitle')}
+        className={cn(
+          'flex h-7 items-center gap-1.5 rounded-full border border-border/60 px-2.5 text-xs transition-colors hover:bg-accent/60',
+          membersOpen && 'bg-accent/60',
+        )}
+      >
+        {/* 접혀 있어도 누가 있는지 색 점으로 보이고, 일하는 참가자는 점이 깜빡인다. */}
+        <span className="flex items-center -space-x-0.5" aria-hidden>
+          {participants.map((participant) => (
+            <span
+              key={participant.participantId}
               className={cn(
-                'mr-1 rounded-full p-1 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground',
-                settingsOpen && 'bg-background/70 text-foreground',
+                'h-2 w-2 rounded-full ring-1 ring-background',
+                participantColor(participant).dot,
+                participant.status === 'standby' && !participant.sessionId && 'opacity-40',
+                isParticipantActive(participant.participantId) && 'animate-pulse',
               )}
+            />
+          ))}
+        </span>
+        <span className="font-medium">{t('rooms.membersButton', { count: participants.length })}</span>
+        {activeParticipants.length > 0 && (
+          <span className="text-muted-foreground">· {t('rooms.membersWorking', { count: activeParticipants.length })}</span>
+        )}
+        <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', membersOpen && 'rotate-180')} />
+      </button>
+
+      {membersOpen && membersMenuPos && createPortal(
+        // 설정은 하위 메뉴처럼 목록 왼쪽에 붙는다. 버튼이 헤더 오른쪽 끝에 있어
+        // 오른쪽에는 자리가 없다.
+        <div
+          ref={membersMenuRef}
+          style={{ top: membersMenuPos.top, right: membersMenuPos.right }}
+          className="fixed z-50 flex items-start gap-1"
+        >
+          {settingsParticipant && (
+            <div className="max-h-[80vh] w-80 overflow-y-auto rounded-xl border border-border/50 bg-card/95 shadow-lg backdrop-blur-md">
+              <ParticipantSettingsPanel
+                key={settingsParticipant.participantId}
+                participant={settingsParticipant}
+                isSpeaking={isRunning && isParticipantActive(settingsParticipant.participantId)}
+                refreshKey={timelineLength}
+                onChangePermission={(mode: RoomPermissionMode) => void runAction(
+                  () => updateParticipant(settingsParticipant.participantId, { permissionMode: mode }),
+                )}
+                onChangeProfile={(profile) => void runAction(
+                  () => updateParticipant(settingsParticipant.participantId, profile),
+                )}
+                onCompact={() => void runAction(() => compact(settingsParticipant.participantId))}
+                onLeave={() => handleLeave(settingsParticipant.participantId)}
+                onOpenSession={() => {
+                  setMembersOpen(false);
+                  openParticipantSession(settingsParticipant.sessionId);
+                }}
+                onClose={() => setSettingsParticipantId(null)}
+              />
+            </div>
+          )}
+        <div className="w-72 overflow-hidden rounded-xl border border-border/50 bg-card/95 py-1 shadow-lg backdrop-blur-md">
+          <ul className="max-h-[60vh] overflow-y-auto">
+            {participants.map((participant) => {
+              const settingsOpen = settingsParticipantId === participant.participantId;
+              return (
+                <li
+                  key={participant.participantId}
+                  className={cn(
+                    'flex items-center gap-1 px-1.5 py-0.5',
+                    // 명단에서 기다리는 멤버는 흐리게 둔다.
+                    participant.status === 'standby' && (participant.sessionId ? 'opacity-75' : 'opacity-60'),
+                  )}
+                >
+                  <button
+                    type="button"
+                    disabled={!participant.sessionId}
+                    onClick={() => {
+                      setMembersOpen(false);
+                      openParticipantSession(participant.sessionId);
+                    }}
+                    title={participant.sessionId ? t('rooms.openSession') : undefined}
+                    className={cn(
+                      'flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 py-1.5 text-left hover:bg-accent/60 disabled:cursor-default disabled:hover:bg-transparent',
+                      isParticipantActive(participant.participantId) && 'bg-primary/10',
+                    )}
+                  >
+                    <ParticipantBadge
+                      participant={participant}
+                      hostLabel={t('rooms.host')}
+                      standbyLabel={t('rooms.standby')}
+                    />
+                    {isParticipantActive(participant.participantId) && (
+                      <Loader2 className="ml-auto h-3.5 w-3.5 flex-shrink-0 animate-spin text-primary" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsParticipantId(settingsOpen ? null : participant.participantId)}
+                    aria-pressed={settingsOpen}
+                    aria-label={t('rooms.participantSettings', { name: participant.displayName })}
+                    title={t('rooms.participantSettings', { name: participant.displayName })}
+                    className={cn(
+                      'flex-shrink-0 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground',
+                      settingsOpen && 'bg-accent/70 text-foreground',
+                    )}
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="mt-1 border-t border-border/50 px-1.5 pt-1">
+            <button
+              type="button"
+              disabled={isFull}
+              onClick={() => {
+                setMembersOpen(false);
+                setInviteOpen(true);
+              }}
+              title={isFull ? t('rooms.roomFull', { max: ROOM_MAX_PARTICIPANTS }) : t('rooms.inviteTitle')}
+              className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Settings2 className="h-3.5 w-3.5" />
+              <UserPlus className="h-3.5 w-3.5" />
+              {t('rooms.inviteTitle')}
             </button>
           </div>
-        );
-      })}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 flex-shrink-0 gap-1 rounded-full px-2 text-xs"
-        disabled={isFull}
-        onClick={() => setInviteOpen(true)}
-        title={isFull ? t('rooms.roomFull', { max: ROOM_MAX_PARTICIPANTS }) : t('rooms.inviteTitle')}
-      >
-        <UserPlus className="h-3.5 w-3.5" />
-        {t('rooms.inviteButton')}
-      </Button>
+        </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 
@@ -865,25 +990,6 @@ export function RoomInterface({
           )}
         </div>
       </div>
-
-      {settingsParticipant && (
-        <ParticipantSettingsPanel
-          key={settingsParticipant.participantId}
-          participant={settingsParticipant}
-          isSpeaking={isRunning && isParticipantActive(settingsParticipant.participantId)}
-          refreshKey={timelineLength}
-          onChangePermission={(mode: RoomPermissionMode) => void runAction(
-            () => updateParticipant(settingsParticipant.participantId, { permissionMode: mode }),
-          )}
-          onChangeProfile={(profile) => void runAction(
-            () => updateParticipant(settingsParticipant.participantId, profile),
-          )}
-          onCompact={() => void runAction(() => compact(settingsParticipant.participantId))}
-          onLeave={() => handleLeave(settingsParticipant.participantId)}
-          onOpenSession={() => openParticipantSession(settingsParticipant.sessionId)}
-          onClose={() => setSettingsParticipantId(null)}
-        />
-      )}
 
       {/* Shared timeline */}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">

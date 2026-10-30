@@ -29,9 +29,9 @@ type ParticipantSettingsPanelProps = {
 const FIELD_CLASS = 'w-full rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground focus:border-primary focus:outline-none';
 
 /**
- * The settings strip that opens under the participant chips: one participant
- * session's model and effort, its permission preset, its token usage, and
- * removing it from the room.
+ * The settings card that opens beside the participant list as a submenu: one
+ * participant session's model and effort, its permission preset, its token
+ * usage, and removing it from the room.
  */
 export default function ParticipantSettingsPanel({
   participant,
@@ -77,14 +77,25 @@ export default function ParticipantSettingsPanel({
     <div
       role="region"
       aria-label={t('rooms.participantSettings', { name: participant.displayName })}
-      className="border-b border-border/60 bg-muted/20 px-3 py-2 text-xs"
+      className="space-y-2.5 p-3 text-xs"
     >
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <span className="font-semibold text-foreground">
-        {t('rooms.participantSettings', { name: participant.displayName })}
-      </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate font-semibold text-foreground">
+          {t('rooms.participantSettings', { name: participant.displayName })}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 flex-shrink-0 p-0"
+          onClick={onClose}
+          aria-label={t('rooms.closeSettings')}
+          title={t('rooms.closeSettings')}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
 
-      <label className="inline-flex items-center gap-1.5 text-muted-foreground">
+      <label className="flex items-center justify-between gap-2 text-muted-foreground">
         {t('rooms.model')}
         <ComposerModelMenu
           effort={session.effort}
@@ -97,7 +108,7 @@ export default function ParticipantSettingsPanel({
         />
       </label>
 
-      <div className="inline-flex items-center gap-1.5 text-muted-foreground" role="group" aria-label={t('rooms.permissionMode')}>
+      <div className="flex items-center justify-between gap-2 text-muted-foreground" role="group" aria-label={t('rooms.permissionMode')}>
         {t('rooms.permissionMode')}
         <div className="inline-flex overflow-hidden rounded-md border border-border">
           {ROOM_PERMISSION_MODES.map((mode) => (
@@ -109,7 +120,7 @@ export default function ParticipantSettingsPanel({
                 if (participant.permissionMode !== mode) onChangePermission(mode);
               }}
               className={cn(
-                'px-2 py-1 transition-colors',
+                'whitespace-nowrap px-2 py-1 transition-colors',
                 participant.permissionMode === mode
                   ? 'bg-primary/15 font-medium text-foreground'
                   : 'text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -121,16 +132,16 @@ export default function ParticipantSettingsPanel({
         </div>
       </div>
 
-      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 text-muted-foreground">
         {t('rooms.tokens')}
         <TokenUsageSummary usage={session.tokenUsage} onClick={onOpenSession} />
-      </span>
+      </div>
 
-      <div className="ml-auto flex items-center gap-1">
+      <div className="grid grid-cols-2 gap-1 border-t border-border/50 pt-2">
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 px-2 text-xs"
+          className="h-7 justify-start gap-1 px-2 text-xs"
           aria-expanded={draft !== null}
           onClick={() => (draft ? setDraft(null) : openEditor())}
         >
@@ -140,7 +151,7 @@ export default function ParticipantSettingsPanel({
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 px-2 text-xs"
+          className="h-7 justify-start gap-1 px-2 text-xs"
           disabled={isSpeaking || !participant.sessionId}
           title={isSpeaking ? t('rooms.compactWhileRunning') : t('rooms.compactOneTitle')}
           onClick={onCompact}
@@ -148,7 +159,7 @@ export default function ParticipantSettingsPanel({
           <Minimize2 className="h-3.5 w-3.5" />
           {t('rooms.compactOne')}
         </Button>
-        <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={onOpenSession}>
+        <Button variant="ghost" size="sm" className="h-7 justify-start gap-1 px-2 text-xs" onClick={onOpenSession}>
           <ExternalLink className="h-3.5 w-3.5" />
           {t('rooms.openSession')}
         </Button>
@@ -156,7 +167,7 @@ export default function ParticipantSettingsPanel({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1 px-2 text-xs text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
+            className="h-7 justify-start gap-1 px-2 text-xs text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
             disabled={Boolean(leaveBlockedReason)}
             title={leaveBlockedReason ?? undefined}
             onClick={() => {
@@ -170,21 +181,10 @@ export default function ParticipantSettingsPanel({
             {t(participant.sessionId ? 'rooms.leave' : 'rooms.leaveRoster')}
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 p-0"
-          onClick={onClose}
-          aria-label={t('rooms.closeSettings')}
-          title={t('rooms.closeSettings')}
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
       </div>
-    </div>
 
     {draft && (
-      <div className="mt-2 space-y-2 rounded-md border border-primary/40 bg-primary/5 p-2">
+      <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 p-2">
         <p className="text-[11px] text-muted-foreground">{t('rooms.editRoleHint')}</p>
         <div className="grid grid-cols-2 gap-2">
           <input
