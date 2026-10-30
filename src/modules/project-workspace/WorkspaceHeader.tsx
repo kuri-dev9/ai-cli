@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/shared/ui';
 import type { AppTab, Project, ProjectSession, SessionEstablishedContext } from '@/shared/types';
 import { cn } from '@/shared/utils';
-import { InviteParticipantButton } from '@/modules/rooms';
+import { InviteParticipantButton, ROOM_HEADER_SLOT_ID } from '@/modules/rooms';
 import MobileMenuButton from '@/modules/project-workspace/MobileMenuButton';
 import WorkspaceTabs from '@/modules/project-workspace/WorkspaceTabs';
 import WorkspaceTitle from '@/modules/project-workspace/WorkspaceTitle';
@@ -143,7 +143,16 @@ export default function WorkspaceHeader({
           )}
         </div>
 
-        <div className="-mx-3 min-w-0 sm:mx-0 sm:flex-1">
+        {/*
+          룸 화면이 참가자 줄을 여기에 그린다. 룸 화면은 다른 탭에서도 마운트된
+          채 남아 있어, 자리를 없애지 않고 숨기기만 한다.
+        */}
+        <div
+          id={ROOM_HEADER_SLOT_ID}
+          className={cn('flex min-w-0 justify-end sm:flex-1', activeTab !== 'chat' && 'hidden')}
+        />
+
+        <div className="-mx-3 min-w-0 sm:mx-0 sm:flex-[0_1_auto]">
           <div className="relative ml-auto w-fit max-w-full">
             {canScrollLeft && (
               <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-background via-background/90 to-transparent" />

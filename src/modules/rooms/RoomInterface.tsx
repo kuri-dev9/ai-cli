@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, KeyboardEvent, MouseEvent, SetStateAction } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowDown, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Loader2, Minimize2, Settings2, Square, UserPlus } from 'lucide-react';
 
@@ -63,6 +64,13 @@ type RoomInterfaceProps = {
 };
 
 const MAX_AUTO_TURN_CHOICES = [3, 5, 10, 20];
+
+/**
+ * The workspace header leaves an empty spot with this id, left of the tabs. The
+ * participant strip is portalled there so the room toolbar keeps its width for
+ * the settings instead of clipping the members.
+ */
+export const ROOM_HEADER_SLOT_ID = 'room-header-participants';
 /** Mirrors the server's auto-turn cap, so the field refuses what the server would. */
 const MAX_AUTO_TURNS_LIMIT = 100;
 
@@ -458,6 +466,13 @@ export function RoomInterface({
     });
   };
 
+  // Where the participant strip goes: the header's spot once it is in the page,
+  // inline in the toolbar until then (or in a layout without that header).
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setHeaderSlot(document.getElementById(ROOM_HEADER_SLOT_ID));
+  }, []);
+
   if (!detail) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -668,6 +683,67 @@ export function RoomInterface({
     </>
   );
 
+  const participantStrip = (
+    <div className="flex min-w-0 max-w-full items-center gap-2 overflow-x-auto">
+      {participants.map((participant) => {
+        const settingsOpen = settingsParticipantId === participant.participantId;
+        return (
+          <div
+            key={participant.participantId}
+            className={cn(
+              'flex max-w-[12rem] flex-shrink-0 items-center rounded-full border',
+              participantColor(participant).ring,
+              // 명단에서 기다리는 멤버는 흐리게. 아직 한 번도 불린 적 없으면
+              // 점선까지 둘러 "아직 들어오지 않았다" 를 더 분명히 한다.
+              participant.status === 'standby' && (participant.sessionId ? 'opacity-75' : 'border-dashed opacity-60'),
+              isParticipantActive(participant.participantId) && 'ring-2 ring-primary/40',
+            )}
+          >
+            <button
+              type="button"
+              disabled={!participant.sessionId}
+              onClick={() => openParticipantSession(participant.sessionId)}
+              // 칩에서 뺀 역할·호스트 표시는 여기에 남겨 둔다.
+              title={`${participant.displayName} · ${participant.roleName}${participant.isHost ? ` (${t('rooms.host')})` : ''}`}
+              className="flex min-w-0 items-center py-0.5 pl-2 pr-1 disabled:cursor-default"
+            >
+              <ParticipantBadge
+                participant={participant}
+                hostLabel={t('rooms.host')}
+                standbyLabel={t('rooms.standby')}
+                compact
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsParticipantId(settingsOpen ? null : participant.participantId)}
+              aria-expanded={settingsOpen}
+              aria-label={t('rooms.participantSettings', { name: participant.displayName })}
+              title={t('rooms.participantSettings', { name: participant.displayName })}
+              className={cn(
+                'mr-1 rounded-full p-1 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground',
+                settingsOpen && 'bg-background/70 text-foreground',
+              )}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        );
+      })}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 flex-shrink-0 gap-1 rounded-full px-2 text-xs"
+        disabled={isFull}
+        onClick={() => setInviteOpen(true)}
+        title={isFull ? t('rooms.roomFull', { max: ROOM_MAX_PARTICIPANTS }) : t('rooms.inviteTitle')}
+      >
+        <UserPlus className="h-3.5 w-3.5" />
+        {t('rooms.inviteButton')}
+      </Button>
+    </div>
+  );
+
   const mentionList = isMentionListOpen ? (
     <ul className="absolute bottom-full left-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-border/50 bg-card/95 py-1 shadow-lg backdrop-blur-md" role="listbox">
       {mentionCandidates.map((name, index) => {
@@ -699,64 +775,7 @@ export function RoomInterface({
         joined.
       */}
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-        {participants.map((participant) => {
-          const settingsOpen = settingsParticipantId === participant.participantId;
-          return (
-            <div
-              key={participant.participantId}
-              className={cn(
-                'flex max-w-[12rem] flex-shrink-0 items-center rounded-full border',
-                participantColor(participant).ring,
-                // 명단에서 기다리는 멤버는 흐리게. 아직 한 번도 불린 적 없으면
-                // 점선까지 둘러 "아직 들어오지 않았다" 를 더 분명히 한다.
-                participant.status === 'standby' && (participant.sessionId ? 'opacity-75' : 'border-dashed opacity-60'),
-                isParticipantActive(participant.participantId) && 'ring-2 ring-primary/40',
-              )}
-            >
-              <button
-                type="button"
-                disabled={!participant.sessionId}
-                onClick={() => openParticipantSession(participant.sessionId)}
-                // 칩에서 뺀 역할·호스트 표시는 여기에 남겨 둔다.
-                title={`${participant.displayName} · ${participant.roleName}${participant.isHost ? ` (${t('rooms.host')})` : ''}`}
-                className="flex min-w-0 items-center py-0.5 pl-2 pr-1 disabled:cursor-default"
-              >
-                <ParticipantBadge
-                  participant={participant}
-                  hostLabel={t('rooms.host')}
-                  standbyLabel={t('rooms.standby')}
-                  compact
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => setSettingsParticipantId(settingsOpen ? null : participant.participantId)}
-                aria-expanded={settingsOpen}
-                aria-label={t('rooms.participantSettings', { name: participant.displayName })}
-                title={t('rooms.participantSettings', { name: participant.displayName })}
-                className={cn(
-                  'mr-1 rounded-full p-1 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground',
-                  settingsOpen && 'bg-background/70 text-foreground',
-                )}
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          );
-        })}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 flex-shrink-0 gap-1 rounded-full px-2 text-xs"
-          disabled={isFull}
-          onClick={() => setInviteOpen(true)}
-          title={isFull ? t('rooms.roomFull', { max: ROOM_MAX_PARTICIPANTS }) : t('rooms.inviteTitle')}
-        >
-          <UserPlus className="h-3.5 w-3.5" />
-          {t('rooms.inviteButton')}
-        </Button>
-      </div>
+        {headerSlot ? createPortal(participantStrip, headerSlot) : participantStrip}
 
         <div className="flex flex-shrink-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1" role="status">
