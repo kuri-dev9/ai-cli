@@ -112,6 +112,7 @@ const PRIOR_CONTEXT_MESSAGE_CHARS = 800;
 /** 지난 대화를 요약해 맥락을 줄이는 명령. Claude 와 Codex 가 같은 이름을 쓴다. */
 const COMPACT_COMMAND = '/compact';
 
+
 /** 읽기 전용 차례에서 막는 Claude 도구. 같은 폴더를 동시에 고치지 않게 한다. */
 const CLAUDE_WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 
@@ -384,11 +385,26 @@ function recordTurnReply(
     loop.interruptedSessions.delete(me.sessionId);
     status = 'aborted';
     text = text || '(중단됨)';
-  } else if (!result.started || result.error || (!text && texts.errors.length)) {
+  } else if (!result.started || (!text && (result.error || texts.errors.length))) {
+    // 실패로 보는 것은 받아 낸 말이 없을 때다. 예전에는 `result.error` 만 있으면
+    // 답이 멀쩡히 와 있어도 실패로 적었는데, 룸은 완료되지 않은 차례에서 멈추므로
+    // 화면에는 답이 보이는데 다음 차례가 오지 않는 모습이 됐다. 프로바이더마다
+    // 끝맺는 방식이 달라 한쪽에서만 그런 꼬리가 붙기도 한다.
     status = 'error';
     text = text || `(실행 실패) ${result.error ?? texts.errors.join('\n') ?? ''}`.trim();
   } else if (!text) {
     text = '(응답 없음)';
+  }
+
+  if (status === 'complete' && result.error) {
+    // 답은 끝까지 왔고 차례도 이어 간다. 다만 런타임이 탈 없이 끝나지는 않았다는
+    // 사실까지 지울 이유는 없다.
+    console.warn('[Rooms] 답은 받았지만 런타임이 오류로 끝났습니다', {
+      roomId: room.room_id,
+      participantId: me.participantId,
+      sessionId: me.sessionId,
+      error: result.error,
+    });
   }
 
   // 넘김과 맡긴 일은 명단 멤버도 가리킬 수 있다. 그것이 "부르기" 다.
@@ -466,18 +482,49 @@ async function runAssignments(
   }));
 }
 
-/** 방금 올라온 답에 나머지 참가자가 동시에 짧게 의견을 낸다. 모두 읽기 전용이다. */
-async function runCommentRound(room: RoomRow, speaker: RoomParticipant, loop: RoomLoopState): Promise<void> {
+/**
+ * 방금 올라온 답에 나머지 참가자가 동시에 짧게 의견을 낸다. 모두 읽기 전용이다.
+ *
+ * 의견에 적힌 넘김 표시는 돌려준다. 예전에는 그 값을 아무도 읽지 않으면서
+ * 타임라인에는 "○○ 에게 넘김" 이라고 그려 두었다 — 화면은 다음 차례를
+ * 약속하는데 실제로는 아무 일도 일어나지 않아, 밖에서는 넘기려다 실패한
+ * 것처럼 보였다.
+ *
+ * 여럿이 동시에 말하므로 지목이 엇갈릴 수 있다. 모두 같은 사람을 가리킬 때만
+ * 따른다. 서로 다른 사람을 부르는 것은 방 전체의 뜻이 아니라 각자의 의견이고,
+ * 그중 하나를 고를 근거가 없다.
+ */
+async function runCommentRound(
+  room: RoomRow,
+  speaker: RoomParticipant,
+  loop: RoomLoopState,
+): Promise<RoomParticipant | null> {
   const others = loadParticipants(room).filter((participant) => participant.participantId !== speaker.participantId);
-  if (others.length === 0) return;
+  if (others.length === 0) return null;
   loop.phase = 'discussing';
-  await Promise.all(others.map((participant) => runParticipantTurn(room, participant, loop, {
+  const results = await Promise.all(others.map((participant) => runParticipantTurn(room, participant, loop, {
     mode: { kind: 'comment', onName: speaker.displayName },
     readOnly: true,
     turnKind: 'comment',
     readAssignments: false,
     dropPass: true,
   })));
+
+  // 타임라인에 남지 않은 의견(보탤 말 없이 끝난 차례)은 넘김도 뜻하지 않는다.
+  const mentioned = results
+    .filter((result) => result.message !== null)
+    .map((result) => result.handoff)
+    .filter((handoff): handoff is { kind: 'mention'; participantId: string } => handoff.kind === 'mention')
+    .map((handoff) => handoff.participantId);
+
+  if (mentioned.length === 0 || new Set(mentioned).size > 1) {
+    return null;
+  }
+
+  // 직전 화자를 다시 부르는 것이야말로 흔한 경우다 — 반대 의견은 방금 말한
+  // 사람에게 가기 마련이다. 의견을 쓴 사람이 자기를 부르는 일은 `parseHandoff`
+  // 가 이미 걸러 둔다.
+  return listRoster(room).find((participant) => participant.participantId === mentioned[0]) ?? null;
 }
 
 /**
@@ -502,6 +549,24 @@ async function runLoop(roomId: string): Promise<void> {
     // 다음 차례가 무엇인지: 사용자 글에 대한 첫 답, 보통의 차례, 맡긴 일의 정리.
     let nextKind: 'opening' | 'turn' | 'summary' = 'turn';
     let consecutivePasses = 0;
+    // 의견에서 나온 지목을 방금 따랐는지. 되받은 차례의 의견까지 따르면 둘이
+    // 서로를 부르며 턴 상한까지 돈다.
+    let followedCommentHandoff = false;
+
+    /**
+     * 차례 돌리기가 왜 끝났는지 남긴다.
+     *
+     * 루프는 여러 이유로 조용히 빠져나간다. 밖에서 보이는 것은 "대기 중" 하나뿐
+     * 이라, 시킨 만큼 돌지 않았을 때 무엇이 멈춰 세웠는지 알 길이 없었다.
+     */
+    const logStop = (reason: string, detail: Record<string, unknown> = {}): void => {
+      console.log('[Rooms] 차례 돌리기를 멈춥니다', {
+        roomId,
+        reason,
+        turnCount: loop.turnCount,
+        ...detail,
+      });
+    };
 
     while (!loop.halted) {
       const room = roomsDb.getRoom(roomId);
@@ -521,17 +586,25 @@ async function runLoop(roomId: string): Promise<void> {
       }
 
       if (!next || loop.turnCount >= room.max_auto_turns) {
+        logStop(next ? 'turn-cap' : 'no-next-speaker', { maxAutoTurns: room.max_auto_turns });
         break;
       }
 
       const speaker: RoomParticipant | undefined = listRoster(room)
         .find((participant) => participant.participantId === next!.participantId);
       if (!speaker) {
+        logStop('speaker-not-in-roster', { participantId: next.participantId });
         break;
       }
 
       const splitting = canSplitWork(room, participants);
       loop.phase = nextKind === 'summary' ? 'summarizing' : 'turn';
+      // 차례를 시작할 때 센다. 끝나고 세면 화면의 "턴 n/N" 이 한 박자 늦어,
+      // 첫 차례가 도는 내내 0 으로 남는다 — 지금 몇 번째인지 읽으려는 사람에게
+      // 한 칸씩 어긋난 숫자를 보여 주는 셈이다. 상한 판정은 바로 위에서 이미
+      // 끝났으므로, 여기서 세어도 도는 횟수는 달라지지 않는다.
+      loop.turnCount += 1;
+      broadcastState(room);
       const mode: RoomTurnMode = nextKind === 'summary'
         ? { kind: 'summary' }
         : nextKind === 'opening' && splitting ? { kind: 'plan' } : { kind: 'turn' };
@@ -542,7 +615,6 @@ async function runLoop(roomId: string): Promise<void> {
         readAssignments: splitting,
         dropPass: false,
       });
-      loop.turnCount += 1;
       broadcastState(room);
 
       if (loop.halted) {
@@ -552,6 +624,10 @@ async function runLoop(roomId: string): Promise<void> {
         continue;
       }
       if (!message || message.status !== 'complete') {
+        logStop('turn-not-complete', {
+          participantId: speaker.participantId,
+          status: message?.status ?? 'no-message',
+        });
         break;
       }
 
@@ -559,8 +635,9 @@ async function runLoop(roomId: string): Promise<void> {
         if (loop.turnCount >= room.max_auto_turns) {
           break;
         }
-        await runAssignments(room, speaker, assignments, loop);
         loop.turnCount += 1;
+        broadcastState(room);
+        await runAssignments(room, speaker, assignments, loop);
         broadcastState(room);
         if (loop.halted) {
           break;
@@ -575,8 +652,9 @@ async function runLoop(roomId: string): Promise<void> {
         continue;
       }
 
+      let commentTarget: RoomParticipant | null = null;
       if (room.discussion !== 0 && participants.length > 1 && handoff.kind !== 'pass') {
-        await runCommentRound(room, speaker, loop);
+        commentTarget = await runCommentRound(room, speaker, loop);
         broadcastState(room);
         if (loop.halted) {
           break;
@@ -587,7 +665,23 @@ async function runLoop(roomId: string): Promise<void> {
       }
 
       nextKind = 'turn';
+
+      // 의견이 한 사람을 가리켰으면 그쪽으로 넘긴다. 화자가 이야기를 맺으려
+      // 했더라도 반대 의견에는 한 번 답하게 하는 것이다 — 타임라인에 "○○ 에게
+      // 넘김" 이라고 적어 두고 아무 일도 하지 않던 자리다.
+      //
+      // 되받은 차례의 의견은 따르지 않는다. 그래야 둘이 서로를 부르며 턴
+      // 상한까지 도는 일이 없다.
+      if (commentTarget && !followedCommentHandoff) {
+        followedCommentHandoff = true;
+        consecutivePasses = 0;
+        next = commentTarget;
+        continue;
+      }
+      followedCommentHandoff = false;
+
       if (handoff.kind === 'done') {
+        logStop('handoff-done', { participantId: speaker.participantId });
         break;
       }
       if (handoff.kind === 'mention') {
@@ -599,6 +693,7 @@ async function runLoop(roomId: string): Promise<void> {
       if (handoff.kind === 'pass') {
         consecutivePasses += 1;
         if (consecutivePasses >= participants.length - 1) {
+          logStop('everyone-passed', { consecutivePasses, participants: participants.length });
           break;
         }
       } else {

@@ -20,12 +20,18 @@ import { createNormalizedMessage } from '@/shared/utils.js';
 const ROOM_ID = 'room-1';
 const HOST = 'host-session';
 const REVIEWER = 'reviewer-session';
+/** 의견이 엇갈리는 상황을 보려면 의견을 낼 사람이 둘은 있어야 한다. */
+const SECOND_REVIEWER = 'second-reviewer-session';
 
 type Call = { sessionId: string; command: string; options: Record<string, unknown> };
 
 type Script = Record<string, Array<string | (() => Promise<string>)>>;
 
-function createRuntime(script: Script, calls: Call[], aborts: string[] = []) {
+/**
+ * `failAfterReply` 에 든 세션은 답을 다 보낸 뒤에 던진다. 프로바이더마다
+ * 끝맺는 방식이 달라, 할 말을 다 하고도 종료가 깨끗하지 않은 경우가 있다.
+ */
+function createRuntime(script: Script, calls: Call[], aborts: string[] = [], failAfterReply: Set<string> = new Set()) {
   return {
     hasRuntime: () => true,
     run: async (_provider: string, command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter) => {
@@ -34,6 +40,9 @@ function createRuntime(script: Script, calls: Call[], aborts: string[] = []) {
       const next = script[sessionId]?.shift() ?? '[PASS]';
       const reply = typeof next === 'function' ? await next() : next;
       writer.send(createNormalizedMessage({ kind: 'text', role: 'assistant', content: reply, sessionId, provider: 'claude' }));
+      if (failAfterReply.has(sessionId)) {
+        throw new Error('runtime exited with a non-zero status');
+      }
     },
     abort: async (_provider: string, sessionId: string) => {
       aborts.push(sessionId);
@@ -52,7 +61,7 @@ function createRuntime(script: Script, calls: Call[], aborts: string[] = []) {
 async function withRoom(
   maxAutoTurns: number,
   runTest: () => Promise<void>,
-  collaboration: { splitWork?: boolean; discussion?: boolean } = {},
+  collaboration: { splitWork?: boolean; discussion?: boolean; thirdParticipant?: boolean } = {},
 ): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'room-engine-'));
@@ -64,12 +73,18 @@ async function withRoom(
     const now = new Date().toISOString();
     sessionsDb.createSession(HOST, 'claude', tempDirectory, 'Host', now, now, null);
     sessionsDb.createSession(REVIEWER, 'claude', tempDirectory, 'Reviewer', now, now, null);
+    if (collaboration.thirdParticipant) {
+      sessionsDb.createSession(SECOND_REVIEWER, 'claude', tempDirectory, 'Reviewer2', now, now, null);
+    }
     // 같은 Claude 두 세션이 서로 다른 역할로 들어간다.
     roomsDb.createRoom(
       { roomId: ROOM_ID, hostSessionId: HOST, projectPath: tempDirectory, permissionMode: 'ask', maxAutoTurns },
       [
         { participant_id: 'p-host', session_id: HOST, provider: 'claude', model: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', persona: '', status: 'active', position: 0 },
         { participant_id: 'p-rev', session_id: REVIEWER, provider: 'claude', model: 'sonnet', display_name: 'Claude2', role_name: '리뷰어', role_prompt: '깐깐하게 본다', persona: '', status: 'active', position: 1 },
+        ...(collaboration.thirdParticipant
+          ? [{ participant_id: 'p-rev2', session_id: SECOND_REVIEWER, provider: 'claude', model: null, display_name: 'Claude3', role_name: '리뷰어2', role_prompt: '', persona: '', status: 'active' as const, position: 2 }]
+          : []),
       ],
     );
     roomsDb.updateRoomSettings(ROOM_ID, {
@@ -759,4 +774,167 @@ test('interrupting stops everyone working in parallel', async () => {
     assert.match(calls[3].command, /방향 바꿀게/);
     assert.doesNotMatch(calls[3].command, /\[정리\]/);
   }, { splitWork: true });
+});
+
+/**
+ * 의견 차례에 적힌 넘김 표시.
+ *
+ * 예전에는 그 값을 아무도 읽지 않으면서 타임라인에는 "○○ 에게 넘김" 이라고
+ * 그려 두었다. 화면은 다음 차례를 약속하는데 방은 그대로 멈춰 서서, 밖에서는
+ * 넘기려다 실패한 것처럼 보였다.
+ */
+test('의견이 한 사람을 가리키면, 화자가 끝내려 했어도 그 참가자가 이어받는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      // 호스트는 이야기를 맺으려 한다.
+      [HOST]: ['정리했습니다 [DONE]', '그 점은 이렇습니다 [DONE]'],
+      // 그런데 의견 차례에서 반대가 나오고, 호스트를 지목한다.
+      // 되받은 답에는 보탤 말이 없다 — 맨 [PASS] 는 타임라인에 남지 않는다.
+      [REVIEWER]: ['그 결론은 이릅니다 @Claude', '[PASS]'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '설계 검토해줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length >= 4, 'the comment handoff is followed');
+
+    // 호스트가 한 번 더 답한다 — [DONE] 만 읽던 때는 p-rev 에서 멈췄다.
+    assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev', 'p-host']);
+  }, { discussion: true });
+});
+
+test('되받은 차례의 의견은 따르지 않는다 — 둘이 서로 부르며 돌지 않게', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['정리했습니다 [DONE]', '다시 정리했습니다 [DONE]', '또 [DONE]'],
+      // 의견 차례마다 호스트를 부른다. 그대로 따르면 턴 상한까지 돈다.
+      [REVIEWER]: ['아직입니다 @Claude', '그래도 아닙니다 @Claude', '여전합니다 @Claude'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '설계 검토해줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length >= 4, 'the room settles');
+
+    // 한 번만 되받고 끝난다. 되받은 차례의 의견까지 따랐다면 더 길어졌을 것이다.
+    assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev', 'p-host', 'p-rev']);
+  }, { discussion: true });
+});
+
+test('의견이 서로 다른 사람을 가리키면 아무 쪽도 따르지 않는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['정리했습니다 [DONE]'],
+      // 둘이 서로 다른 사람을 부른다. 방 전체의 뜻이 아니라 각자의 의견이다.
+      [REVIEWER]: ['저는 Claude3 가 봐야 한다고 봅니다 @Claude3'],
+      [SECOND_REVIEWER]: ['저는 Claude2 가 이어야 한다고 봅니다 @Claude2'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '설계 검토해줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length >= 4, 'the room settles');
+
+    // 의견 둘은 남지만 차례는 넘어가지 않고, 호스트의 [DONE] 대로 끝난다.
+    assert.deepEqual(speakers().slice(0, 2), ['user', 'p-host']);
+    assert.equal(speakers().filter((speaker) => speaker === 'p-host').length, 1, '호스트가 되받으면 안 된다');
+  }, { discussion: true, thirdParticipant: true });
+});
+
+/**
+ * 화면의 "턴 n/N".
+ *
+ * 세는 시점이 차례를 끝낸 뒤였다. 그래서 첫 차례가 도는 내내 0 으로 남았고,
+ * 지금 몇 번째인지 읽으려는 사람에게는 줄곧 한 칸씩 모자란 숫자였다. 도는
+ * 횟수 자체는 그때도 맞았다 — 상한 3 이면 세 번 돈다.
+ */
+test('턴 번호는 차례가 도는 동안 그 차례를 가리킨다', async () => {
+  await withRoom(5, async () => {
+    const seen: number[] = [];
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [
+        async () => {
+          seen.push(roomTurnEngine.getState(ROOM_ID, 5).turnCount);
+          return '첫 답 @Claude2';
+        },
+        async () => {
+          seen.push(roomTurnEngine.getState(ROOM_ID, 5).turnCount);
+          return '셋째 답 [DONE]';
+        },
+      ],
+      [REVIEWER]: [
+        async () => {
+          seen.push(roomTurnEngine.getState(ROOM_ID, 5).turnCount);
+          return '둘째 답 @Claude';
+        },
+      ],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '토론해봐' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 4, 'three turns');
+
+    // 끝내고 세던 때는 [0, 1, 2] 였다.
+    assert.deepEqual(seen, [1, 2, 3]);
+    // 다 돌고 난 뒤의 값은 그대로 "돈 횟수" 다.
+    assert.equal(roomTurnEngine.getState(ROOM_ID, 5).turnCount, 3);
+  });
+});
+
+test('세는 시점을 옮겨도 상한만큼만 돈다', async () => {
+  await withRoom(3, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['의견 1', '의견 3', '의견 5'],
+      [REVIEWER]: ['의견 2', '의견 4'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '토론해봐' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 4, 'cap');
+
+    assert.equal(calls.length, 3, '상한 3 이면 세 번이다');
+    assert.equal(roomTurnEngine.getState(ROOM_ID, 3).turnCount, 3);
+  });
+});
+
+/**
+ * 답은 다 받았는데 런타임이 끝에 가서 탈이 난 차례.
+ *
+ * 그런 차례를 실패로 적으면 룸은 거기서 멈춘다 — 화면에는 멀쩡한 답이 보이는데
+ * 다음 차례가 오지 않는, 밖에서는 까닭을 알 수 없는 모습이 된다. 프로바이더를
+ * 섞어 쓸 때 한쪽에서만 그런 꼬리가 붙기도 한다.
+ */
+test('답을 받은 차례는 런타임이 끝에 탈이 나도 이어 간다', async () => {
+  await withRoom(5, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['첫 답 @Claude2', '셋째 답 [DONE]'],
+      [REVIEWER]: ['둘째 답 @Claude'],
+    }, calls, [], new Set([REVIEWER])));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '토론해봐' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 4, 'the room keeps going');
+
+    // 고치기 전에는 ['user', 'p-host', 'p-rev'] 에서 멈췄다.
+    assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev', 'p-host']);
+
+    const messages = roomsService.getRoomDetail(ROOM_ID).messages;
+    assert.equal(messages[2].status, 'complete', '받아 낸 답이 있으면 완료다');
+    assert.match(messages[2].text, /둘째 답/);
+  });
+});
+
+test('받아 낸 말이 없으면 여전히 실패로 적고 거기서 멈춘다', async () => {
+  await withRoom(5, async () => {
+    const calls: Call[] = [];
+    // 빈 답만 내고 던진다 — 할 말을 못 받은 차례다.
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['첫 답 @Claude2'],
+      [REVIEWER]: [''],
+    }, calls, [], new Set([REVIEWER])));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '토론해봐' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'the room stops');
+
+    const messages = roomsService.getRoomDetail(ROOM_ID).messages;
+    assert.equal(messages[2].status, 'error');
+    assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev']);
+  });
 });
