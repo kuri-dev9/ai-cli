@@ -34,15 +34,31 @@ const writeTomlConfig = async (filePath: string, data: Record<string, unknown>):
   await writeFile(filePath, toml, 'utf8');
 };
 
+const userConfigPath = (): string => path.join(os.homedir(), '.codex', 'config.toml');
+
+/**
+ * 홈 디렉터리 자체가 프로젝트로 등록돼 있으면 project 스코프 경로가
+ * ~/.codex/config.toml 로 user 스코프와 겹친다. 같은 파일을 두 스코프로
+ * 읽으면 목록에 모든 서버가 두 번 보이므로, 이 경우 project 스코프는 없는 것으로 본다.
+ */
+const resolveCodexConfigPath = (scope: McpScope, workspacePath: string): string | null => {
+  if (scope === 'user') {
+    return userConfigPath();
+  }
+  const projectPath = path.join(workspacePath, '.codex', 'config.toml');
+  return path.resolve(projectPath) === path.resolve(userConfigPath()) ? null : projectPath;
+};
+
 export class CodexMcpProvider extends McpProvider {
   constructor() {
     super('codex', ['user', 'project'], ['stdio', 'http']);
   }
 
   protected async readScopedServers(scope: McpScope, workspacePath: string): Promise<Record<string, unknown>> {
-    const filePath = scope === 'user'
-      ? path.join(os.homedir(), '.codex', 'config.toml')
-      : path.join(workspacePath, '.codex', 'config.toml');
+    const filePath = resolveCodexConfigPath(scope, workspacePath);
+    if (!filePath) {
+      return {};
+    }
     const config = await readTomlConfig(filePath);
     return readObjectRecord(config.mcp_servers) ?? {};
   }
@@ -52,9 +68,13 @@ export class CodexMcpProvider extends McpProvider {
     workspacePath: string,
     servers: Record<string, unknown>,
   ): Promise<void> {
-    const filePath = scope === 'user'
-      ? path.join(os.homedir(), '.codex', 'config.toml')
-      : path.join(workspacePath, '.codex', 'config.toml');
+    const filePath = resolveCodexConfigPath(scope, workspacePath);
+    if (!filePath) {
+      throw new AppError('Project-scoped MCP config for the home directory is the user config; use the user scope instead.', {
+        code: 'MCP_PROJECT_SCOPE_IS_USER_CONFIG',
+        statusCode: 400,
+      });
+    }
     const config = await readTomlConfig(filePath);
     config.mcp_servers = servers;
     await writeTomlConfig(filePath, config);

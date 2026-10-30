@@ -164,6 +164,28 @@ test('providerMcpService handles codex MCP TOML config and capability validation
         error.code === 'MCP_TRANSPORT_NOT_SUPPORTED' &&
         error.statusCode === 400,
     );
+
+    // 홈 디렉터리가 프로젝트로 등록돼도 project 스코프가 user 설정을 다시 읽거나 덮어쓰지 않아야 한다.
+    const homeProjectServers = await providerMcpService.listProviderMcpServersForScope('codex', 'project', {
+      workspacePath: tempRoot,
+    });
+    assert.deepEqual(homeProjectServers, []);
+
+    await assert.rejects(
+      providerMcpService.upsertProviderMcpServer('codex', {
+        name: 'codex-home-project',
+        scope: 'project',
+        transport: 'stdio',
+        command: 'node',
+        workspacePath: tempRoot,
+      }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.code === 'MCP_PROJECT_SCOPE_IS_USER_CONFIG' &&
+        error.statusCode === 400,
+    );
+    const userConfigAfter = TOML.parse(await fs.readFile(userTomlPath, 'utf8')) as Record<string, unknown>;
+    assert.ok((userConfigAfter.mcp_servers as Record<string, unknown>)['codex-user-stdio']);
   } finally {
     restoreHomeDir();
     await fs.rm(tempRoot, { recursive: true, force: true });
