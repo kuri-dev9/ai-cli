@@ -63,10 +63,24 @@ const SERVER_WRITE_DEBOUNCE_MS = 1_000;
 
 const EMPTY_DRAFT: DraftRecord = { text: '', queuedMessages: [] };
 
-const listeners = new Set<() => void>();
+/** 바뀐 스코프를 받는다. `null` 은 전부 갈렸다는 뜻이다. */
+export type ChatDraftListener = (changedScope: string | null) => void;
+
+const listeners = new Set<ChatDraftListener>();
 
 let drafts = new Map<string, DraftRecord>();
 const pendingScopes = new Set<string>();
+/**
+ * 서버로 떠났지만 아직 답을 받지 못한 저장. 스코프마다 가장 최근 요청만 둔다.
+ *
+ * 디바운스가 터지는 순간 `pendingScopes` 에서는 빠지지만, 서버가 그 글을
+ * 실제로 받기 전까지는 서버 사본이 여전히 옛 글이다. 그 사이에 hydrate 가
+ * 끼어들면 옛 글을 정답으로 받아들여 입력창을 되돌렸다.
+ */
+const inFlightWrites = new Map<string, Promise<unknown>>();
+/** 이 탭에서 고친 순번. hydrate 가 자기가 출발한 뒤에 난 수정을 알아보는 데 쓴다. */
+let localWriteSeq = 0;
+const lastLocalWrite = new Map<string, number>();
 let serverWriteTimer: ReturnType<typeof setTimeout> | null = null;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -75,6 +89,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 
 const isEmptyDraft = (draft: DraftRecord): boolean => (
   draft.text === '' && draft.queuedMessages.length === 0
+);
+
+const isSameDraft = (a: DraftRecord, b: DraftRecord): boolean => (
+  a.text === b.text && JSON.stringify(a.queuedMessages) === JSON.stringify(b.queuedMessages)
 );
 
 /** 저장된 값이 어떤 세대의 포맷이든 대기 목록으로 읽는다. */
@@ -132,9 +150,25 @@ function writeMirror(): void {
   }
 }
 
-function notifyListeners(): void {
+/**
+ * 바뀐 스코프를 하나씩 알린다. `null` 은 "전부 갈렸다" 는 뜻이고 로그아웃
+ * 때만 쓴다.
+ *
+ * 예전에는 무엇이 바뀌었는지 말하지 않고 모두를 깨웠다. 룸이 한 차례 돌 때마다
+ * 참가자 대기 목록이 갱신되므로, 룸과 아무 상관없는 대화의 입력창까지 같이
+ * 깨어나 제 글을 저장본으로 덮어썼다. hydrate 도 한동안 `null` 로 알렸는데,
+ * 한 세션에 대기 메시지가 있는 동안 5초마다 hydrate 가 돌아서 같은 일이
+ * 되풀이됐다. 받는 쪽에서 거르기에는 이미 늦은 일이라 보내는 쪽에서 밝힌다.
+ */
+function notifyListeners(changedScopes: readonly string[] | null): void {
   for (const listener of listeners) {
-    listener();
+    if (changedScopes === null) {
+      listener(null);
+      continue;
+    }
+    for (const scope of changedScopes) {
+      listener(scope);
+    }
   }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(CHAT_DRAFTS_CHANGED_EVENT));
@@ -153,23 +187,42 @@ function flushServerWrites(): void {
     // timer callback: the mirror already holds the draft, and the next
     // keystroke re-sends it.
     try {
-      if (!draft || isEmptyDraft(draft)) {
-        void api.user.deleteDraft(scope).catch((error: unknown) => {
-          console.error('Failed to delete chat draft:', error);
+      const request = !draft || isEmptyDraft(draft)
+        ? api.user.deleteDraft(scope)
+        : api.user.saveDraft(scope, {
+          text: draft.text,
+          queuedMessage: toQueuePayload(draft.queuedMessages),
         });
-        continue;
-      }
-
-      void api.user.saveDraft(scope, {
-        text: draft.text,
-        queuedMessage: toQueuePayload(draft.queuedMessages),
-      }).catch((error: unknown) => {
-        console.error('Failed to save chat draft:', error);
-      });
+      trackServerWrite(scope, request);
     } catch (error) {
       console.error('Failed to save chat draft:', error);
+      pendingScopes.add(scope);
     }
   }
+}
+
+/**
+ * 서버가 답할 때까지 그 스코프를 이 탭의 것으로 둔다. 실패하면 다시
+ * `pendingScopes` 로 돌려놓는다 — 서버에는 이 글이 없으니 hydrate 가 지우면
+ * 안 되고, 다음 flush 가 다시 보낸다.
+ */
+function trackServerWrite(scope: string, request: Promise<Response>): void {
+  const tracked: Promise<unknown> = request
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    })
+    .catch((error: unknown) => {
+      console.error('Failed to save chat draft:', error);
+      pendingScopes.add(scope);
+    })
+    .finally(() => {
+      if (inFlightWrites.get(scope) === tracked) {
+        inFlightWrites.delete(scope);
+      }
+    });
+  inFlightWrites.set(scope, tracked);
 }
 
 function queueServerWrite(scope: string): void {
@@ -204,10 +257,12 @@ function updateDraft(scope: string, update: Partial<DraftRecord>): void {
     nextDrafts.set(scope, next);
   }
   drafts = nextDrafts;
+  localWriteSeq += 1;
+  lastLocalWrite.set(scope, localWriteSeq);
 
   writeMirror();
   queueServerWrite(scope);
-  notifyListeners();
+  notifyListeners([scope]);
 }
 
 /** Reads one scope's composer text, synchronously, for the first render. */
@@ -260,8 +315,13 @@ export function clearQueuedMessages(scope: string): void {
   writeQueuedMessages(scope, []);
 }
 
-/** Subscribes to any draft change; returns the unsubscribe function. */
-export function subscribeToChatDrafts(listener: () => void): () => void {
+/**
+ * 임시 저장이 바뀌면 알려 준다. 돌려주는 함수를 부르면 구독이 끊긴다.
+ *
+ * 콜백은 바뀐 스코프를 받는다. `null` 이면 전부 갈린 것이다. 자기와 상관없는
+ * 스코프까지 반응하면 남의 대화에서 난 일로 제 입력창을 되돌리게 된다.
+ */
+export function subscribeToChatDrafts(listener: ChatDraftListener): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -269,13 +329,17 @@ export function subscribeToChatDrafts(listener: () => void): () => void {
 }
 
 /**
- * Loads the server's drafts and adopts them as the source of truth.
+ * 서버의 임시 저장을 들여온다. 다른 기기에서 쓴 글과, 디스패처가 가져가서
+ * 사라진 대기 목록이 이 경로로 들어온다.
  *
- * A scope the client has typed into since this page loaded is left alone: the
- * user is looking at that composer right now, and replacing its contents with a
- * staler server copy would delete what they are in the middle of writing.
+ * 이 탭이 고쳤는데 서버가 아직 받았다고 답하지 않은 스코프는 건드리지 않는다.
+ * 서버 사본이 그보다 낡았으니, 받아들이면 지금 쓰고 있는 글이 되돌아간다.
  */
 export async function hydrateChatDrafts(): Promise<void> {
+  // 출발 시점에 아직 서버에 닿지 않은 글은 이 응답에 반영됐을 리 없다.
+  const startedAtSeq = localWriteSeq;
+  const unsettledAtStart = new Set([...pendingScopes, ...inFlightWrites.keys()]);
+
   let serverDrafts: Array<{ scope?: unknown; text?: unknown; queuedMessage?: unknown }> = [];
 
   try {
@@ -295,38 +359,68 @@ export async function hydrateChatDrafts(): Promise<void> {
     return;
   }
 
-  const merged = new Map<string, DraftRecord>();
+  const remote = new Map<string, DraftRecord>();
   for (const draft of serverDrafts) {
     const scope = typeof draft.scope === 'string' ? draft.scope : '';
-    if (!scope || pendingScopes.has(scope)) {
+    if (scope) {
+      remote.set(scope, {
+        text: typeof draft.text === 'string' ? draft.text : '',
+        queuedMessages: readQueueValue(draft.queuedMessage),
+      });
+    }
+  }
+
+  // 이 탭이 고쳤는데 서버가 아직 받았다고 답하지 않은 스코프는 이 탭의 것이다.
+  const isOwnedLocally = (scope: string): boolean => (
+    pendingScopes.has(scope)
+    || inFlightWrites.has(scope)
+    || unsettledAtStart.has(scope)
+    || (lastLocalWrite.get(scope) ?? 0) > startedAtSeq
+  );
+
+  // 스코프마다 따로 판단한다. 서버와 같은 스코프는 원래 객체를 그대로 두고,
+  // 달라진 스코프만 갈아끼워 그 스코프에만 알린다. 다른 세션의 hydrate 가
+  // 이 세션 입력창을 깨우는 일이 없어야 한다.
+  const next = new Map<string, DraftRecord>();
+  const changed: string[] = [];
+  for (const scope of new Set([...drafts.keys(), ...remote.keys()])) {
+    const local = drafts.get(scope);
+    if (isOwnedLocally(scope)) {
+      if (local) {
+        next.set(scope, local);
+      }
       continue;
     }
 
-    merged.set(scope, {
-      text: typeof draft.text === 'string' ? draft.text : '',
-      queuedMessages: readQueueValue(draft.queuedMessage),
-    });
-  }
-
-  // Local edits whose debounced write has not left the browser yet win over
-  // the server snapshot. Every other missing scope was deleted remotely and
-  // must also disappear from the mirror.
-  for (const scope of pendingScopes) {
-    const pending = drafts.get(scope);
-    if (pending) {
-      merged.set(scope, pending);
+    const incoming = remote.get(scope);
+    if (local && incoming && isSameDraft(local, incoming)) {
+      next.set(scope, local);
+      continue;
+    }
+    // 서버에 없는 스코프는 다른 곳에서 지워졌거나 디스패처가 가져간 것이다.
+    if (incoming && !isEmptyDraft(incoming)) {
+      next.set(scope, incoming);
+    }
+    if (local || (incoming && !isEmptyDraft(incoming))) {
+      changed.push(scope);
     }
   }
 
-  drafts = merged;
+  if (changed.length === 0) {
+    return;
+  }
+
+  drafts = next;
   writeMirror();
-  notifyListeners();
+  notifyListeners(changed);
 }
 
 /** Drops every cached draft on sign-out, so the next user sees none of them. */
 export function resetChatDrafts(): void {
   drafts = new Map();
   pendingScopes.clear();
+  inFlightWrites.clear();
+  lastLocalWrite.clear();
   if (serverWriteTimer !== null) {
     clearTimeout(serverWriteTimer);
     serverWriteTimer = null;
@@ -336,7 +430,7 @@ export function resetChatDrafts(): void {
   } catch {
     // The in-memory copy is already cleared, which is what readers use.
   }
-  notifyListeners();
+  notifyListeners(null);
 }
 
 // Read at module load rather than on first use, because the composer's initial

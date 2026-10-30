@@ -129,6 +129,8 @@ test('hydrate removes a mirrored queue after the server claims it', async () => 
   const store = await loadStore();
   store.appendQueuedMessage('session-a', { content: 'server-owned queue' });
   assert.equal(store.readQueuedMessages('session-a')[0]?.content, 'server-owned queue');
+  // 서버가 이 저장을 받았다고 답한 뒤라야 그 뒤의 빈 목록을 "가져갔다" 로 읽는다.
+  await vi.advanceTimersByTimeAsync(0);
 
   serverDrafts = [];
   await store.hydrateChatDrafts();
@@ -256,4 +258,135 @@ test('reset clears the drafts so the next user does not see them', async () => {
 
   assert.equal(store.readDraftText('session-a'), '');
   assert.equal(localStorage.getItem('chat-drafts'), null);
+});
+
+/*
+ * 세션마다 따로 간다. 한 세션의 대기 목록 때문에 hydrate 가 5초마다 돌아도,
+ * 다른 세션 입력창의 글은 되돌아가지도 지워지지도 않고, 깨어나지도 않는다.
+ */
+
+test('hydrate does not revert a draft whose save left but has not been answered', async () => {
+  serverDrafts = [{ scope: 'session-a', text: 'stale server copy', queuedMessage: null }];
+  let answerSave: (response: Response) => void = () => undefined;
+  const api = (await import('@/shared/api')).api;
+  const saveDraft = vi.spyOn(api.user, 'saveDraft').mockImplementation(
+    () => new Promise<Response>((resolve) => { answerSave = resolve; }),
+  );
+
+  const store = await loadStore();
+  store.writeDraftText('session-a', 'what I am writing');
+  await vi.advanceTimersByTimeAsync(1_500);
+  assert.equal(saveDraft.mock.calls.length, 1);
+
+  await store.hydrateChatDrafts();
+  assert.equal(store.readDraftText('session-a'), 'what I am writing');
+
+  // 서버가 받았다고 답한 뒤에는 서버 사본이 다시 기준이 된다.
+  answerSave(new Response('{}', { status: 200 }));
+  await vi.advanceTimersByTimeAsync(0);
+  serverDrafts = [{ scope: 'session-a', text: 'what I am writing', queuedMessage: null }];
+  await store.hydrateChatDrafts();
+  assert.equal(store.readDraftText('session-a'), 'what I am writing');
+  saveDraft.mockRestore();
+});
+
+/** 저장 요청의 답을 붙잡아 둔다. 서버가 아직 커밋하지 않은 순간을 만든다. */
+const holdSaves = async () => {
+  const api = (await import('@/shared/api')).api;
+  const answers: Array<() => void> = [];
+  const spy = vi.spyOn(api.user, 'saveDraft').mockImplementation(
+    () => new Promise<Response>((resolve) => {
+      answers.push(() => resolve(new Response('{}', { status: 200 })));
+    }),
+  );
+  return { answerAll: () => answers.splice(0).forEach((answer) => answer()), restore: () => spy.mockRestore() };
+};
+
+test('a snapshot requested before the save answered is not adopted, even if the answer lands first', async () => {
+  serverDrafts = [{ scope: 'session-a', text: 'stale server copy', queuedMessage: null }];
+  const saves = await holdSaves();
+
+  const store = await loadStore();
+  store.writeDraftText('session-a', 'what I am writing');
+  await vi.advanceTimersByTimeAsync(1_000);
+
+  // GET 이 먼저 떠나고, 그 뒤에 POST 의 답이 도착한다. GET 은 옛 글을 들고 온다.
+  const hydrating = store.hydrateChatDrafts();
+  saves.answerAll();
+  await hydrating;
+
+  assert.equal(store.readDraftText('session-a'), 'what I am writing');
+  saves.restore();
+});
+
+test('a draft the server has not stored yet survives a hydrate', async () => {
+  serverDrafts = [];
+  const saves = await holdSaves();
+
+  const store = await loadStore();
+  store.writeDraftText('session-b', 'typed here only');
+  await vi.advanceTimersByTimeAsync(1_000);
+
+  await store.hydrateChatDrafts();
+
+  assert.equal(store.readDraftText('session-b'), 'typed here only');
+  saves.restore();
+});
+
+test('a draft whose save failed stays local until it is sent again', async () => {
+  const api = (await import('@/shared/api')).api;
+  const saveDraft = vi.spyOn(api.user, 'saveDraft')
+    .mockResolvedValueOnce(new Response('{}', { status: 500 }));
+
+  const store = await loadStore();
+  store.writeDraftText('session-b', 'not on the server');
+  await vi.advanceTimersByTimeAsync(1_500);
+
+  serverDrafts = [];
+  await store.hydrateChatDrafts();
+  assert.equal(store.readDraftText('session-b'), 'not on the server');
+
+  // 다음 flush 가 다시 보낸다.
+  store.writeDraftText('session-c', 'any other write');
+  await vi.advanceTimersByTimeAsync(1_500);
+  assert.ok(saveDraft.mock.calls.some(([scope]) => scope === 'session-b'));
+  saveDraft.mockRestore();
+});
+
+test('hydrate tells only the scopes it changed, and stays silent when nothing did', async () => {
+  const store = await loadStore();
+  store.writeDraftText('session-mine', 'mine');
+  await vi.advanceTimersByTimeAsync(1_500);
+
+  const seen: Array<string | null> = [];
+  store.subscribeToChatDrafts((scope) => { seen.push(scope); });
+
+  serverDrafts = [
+    { scope: 'session-mine', text: 'mine', queuedMessage: null },
+    { scope: 'session-other', text: 'someone else', queuedMessage: null },
+  ];
+  await store.hydrateChatDrafts();
+  assert.deepEqual(seen, ['session-other']);
+
+  seen.length = 0;
+  await store.hydrateChatDrafts();
+  assert.deepEqual(seen, []);
+});
+
+test('another session claiming its queue leaves this session untouched', async () => {
+  const store = await loadStore();
+  store.writeDraftText('session-mine', 'half written');
+  store.appendQueuedMessage('session-busy', { content: 'waiting for its turn' });
+  await vi.advanceTimersByTimeAsync(1_500);
+
+  const seen: Array<string | null> = [];
+  store.subscribeToChatDrafts((scope) => { seen.push(scope); });
+
+  // 디스패처가 바쁜 세션의 대기 메시지를 가져갔다.
+  serverDrafts = [{ scope: 'session-mine', text: 'half written', queuedMessage: null }];
+  await store.hydrateChatDrafts();
+
+  assert.deepEqual(seen, ['session-busy']);
+  assert.deepEqual(store.readQueuedMessages('session-busy'), []);
+  assert.equal(store.readDraftText('session-mine'), 'half written');
 });

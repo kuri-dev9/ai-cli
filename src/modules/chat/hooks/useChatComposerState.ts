@@ -720,7 +720,12 @@ export function useChatComposerState({
       queuedSubmission?: QueuedDraft,
     ) => {
       event.preventDefault();
-      const currentInput = queuedSubmission?.content ?? inputValueRef.current;
+      // 보통은 ref 가 가장 최신이다 — 슬래시 명령을 펼쳐 바로 보내는 경로처럼
+      // 리렌더를 기다릴 수 없는 전송이 있어서 ref 를 둔다. 다만 ref 만 비고
+      // 글상자에는 글이 남는 어긋남이 생기면 전송이 통째로 조용해지므로, 그때는
+      // 사용자가 보고 있는 쪽을 믿는다.
+      const visibleInput = textareaRef.current?.value ?? '';
+      const currentInput = queuedSubmission?.content ?? (inputValueRef.current || visibleInput);
       const currentAttachments = queuedSubmission?.attachments ?? attachedFiles;
       const previouslyUploadedAttachments = queuedSubmission?.uploadedAttachments ?? [];
       if (
@@ -731,6 +736,16 @@ export function useChatComposerState({
         )
         || !selectedProject
       ) {
+        // 보낼 것이 없어서 돌아가는 것은 정상이다(빈 상자에서의 엔터). 글이
+        // 보이는데도 여기로 오면 그것은 고장이고, 화면에는 아무 흔적이 남지
+        // 않으므로 콘솔에라도 남겨 둔다.
+        if (visibleInput.trim() || currentAttachments.length > 0) {
+          console.warn('[composer] 보낼 내용이 있는데 전송이 중단됐습니다', {
+            hasProject: Boolean(selectedProject),
+            refLength: inputValueRef.current.length,
+            visibleLength: visibleInput.length,
+          });
+        }
         return;
       }
 
@@ -1110,9 +1125,10 @@ export function useChatComposerState({
   // Swap in the open scope's draft, and pick up one that arrives from another
   // device with the hydrated drafts.
   //
-  // The subscription is the delicate half. `subscribeToChatDrafts` has no
-  // scope filter — every draft write in the tab, in any conversation, wakes
-  // every composer — and a restore rewrites the controlled textarea's value.
+  // The subscription is the delicate half. Every draft write in the tab, in
+  // any conversation, reaches every composer, so each one has to ignore
+  // scopes other than its own — and a restore rewrites the controlled
+  // textarea's value.
   // Doing that to someone who is mid-word puts the box back a keystroke, and
   // on an IME (한글) it tears the composition apart: the browser keeps
   // reporting `isComposing`, so `handleKeyDown` swallows every Enter after
@@ -1129,18 +1145,32 @@ export function useChatComposerState({
 
     const restoreDraft = () => {
       const savedInput = readDraftText(draftScope);
-      setInputState((previous) => {
-        if (previous.scope === draftScope && previous.value === savedInput) {
-          return previous;
-        }
-        inputValueRef.current = savedInput;
-        return { scope: draftScope, value: savedInput };
-      });
+      // updater 는 순수해야 한다. 여기서 `inputValueRef` 를 함께 쓰던 때가
+      // 있었는데, React 는 bailout 을 판정하려고 updater 를 미리 한 번 더
+      // 돌리고 버려지는 렌더에서도 돌린다. 그 호출마다 ref 가 그 시점의 옛
+      // 값으로 덮였고, 화면에는 글이 그대로 보이는 채 ref 만 비었다.
+      //
+      // `handleSubmit` 은 보낼 내용을 ref 에서 읽는다. 그래서 그 어긋남은
+      // 엔터와 보내기 버튼이 **함께** 죽는 것으로 나타났다 — 눌러도 아무 일도
+      // 일어나지 않고, 글은 그대로 남는다. ref 는 아래 effect 가 커밋 뒤에
+      // 맞춰 주므로 여기서 손댈 이유가 없다.
+      setInputState((previous) => (
+        previous.scope === draftScope && previous.value === savedInput
+          ? previous
+          : { scope: draftScope, value: savedInput }
+      ));
     };
 
     restoreDraft();
 
-    return subscribeToChatDrafts(() => {
+    return subscribeToChatDrafts((changedScope) => {
+      // 남의 대화에서 난 변경은 이 입력창과 아무 상관이 없다. 룸이 한 차례 돌
+      // 때마다 참가자 대기 목록이 갱신되는데, 그때마다 여기까지 깨어나 제 글을
+      // 저장본으로 되돌리던 것이 "엔터도 보내기 버튼도 안 먹는" 증상의 뿌리였다.
+      // `null` 은 로그아웃으로 전부 비워진 경우라 받아들인다.
+      if (changedScope !== null && changedScope !== draftScope) {
+        return;
+      }
       const textarea = textareaRef.current;
       const isBeingTypedInto =
         composingRef.current
