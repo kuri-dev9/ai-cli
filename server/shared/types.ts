@@ -1625,6 +1625,10 @@ export type RoomDetail = {
     splitWork: boolean;
     /** 답마다 나머지 참가자가 짧게 의견을 내는지. */
     discussion: boolean;
+    /** 방장(호스트)이 부른 참가자만 답하는지. 부른 참가자의 답은 방장에게 돌아간다. */
+    hostLed: boolean;
+    /** 참가자 세션의 맥락이 많이 차면 그 차례 전에 스스로 줄이는지. */
+    autoCompact: boolean;
     createdAt: string;
   };
   participants: RoomParticipant[];

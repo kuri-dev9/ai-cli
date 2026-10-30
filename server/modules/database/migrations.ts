@@ -560,6 +560,8 @@ const addRoomSettingsColumns = (db: Database): void => {
   const roomColumns = getTableInfo(db, 'rooms').map((column) => column.name);
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'split_work', 'INTEGER NOT NULL DEFAULT 1');
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'discussion', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'host_led', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'auto_compact', 'INTEGER NOT NULL DEFAULT 1');
 };
 
 /**

@@ -1456,6 +1456,10 @@ export type RoomDetail = {
     splitWork: boolean;
     /** Whether the other participants add a short opinion after each reply. */
     discussion: boolean;
+    /** Whether only the participants the host calls answer; their reply goes back to the host. */
+    hostLed: boolean;
+    /** Whether a participant session compacts itself before its turn once its context fills up. */
+    autoCompact: boolean;
     createdAt: string;
   };
   participants: RoomParticipant[];

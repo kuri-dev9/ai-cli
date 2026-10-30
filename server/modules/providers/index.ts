@@ -11,6 +11,10 @@ export { resolveContextWindow } from './services/context-window.service.js';
 // providerModelsService: used by Commands to list models and resolve the active session model.
 export { providerModelsService } from './services/provider-models.service.js';
 
+// providerTokenUsageService: used by Rooms to compact a participant session on
+// its own once its context window fills up.
+export { providerTokenUsageService } from './services/provider-token-usage.service.js';
+
 // sessionsService: used by the websocket module's chat gateway to resolve an
 // edited message's resume point, which only the providers module can read, and
 // by the Telegram bridge to allocate a session for `/new`.

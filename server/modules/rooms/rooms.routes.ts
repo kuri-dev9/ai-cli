@@ -138,6 +138,8 @@ router.patch(
       maxAutoTurns: body.maxAutoTurns === undefined ? undefined : Number(body.maxAutoTurns),
       splitWork: typeof body.splitWork === 'boolean' ? body.splitWork : undefined,
       discussion: typeof body.discussion === 'boolean' ? body.discussion : undefined,
+      hostLed: typeof body.hostLed === 'boolean' ? body.hostLed : undefined,
+      autoCompact: typeof body.autoCompact === 'boolean' ? body.autoCompact : undefined,
     });
     res.json(createApiSuccessResponse(detail));
   }),

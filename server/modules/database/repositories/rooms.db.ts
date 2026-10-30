@@ -17,6 +17,10 @@ export type RoomRow = {
   split_work: number;
   /** 1 이면 답마다 나머지 참가자가 짧게 의견을 낸다. */
   discussion: number;
+  /** 1 이면 방장이 부른 참가자만 답한다. */
+  host_led: number;
+  /** 1 이면 맥락이 많이 찬 참가자 세션을 차례 전에 스스로 줄인다. */
+  auto_compact: number;
   created_at: string;
   updated_at: string;
 };
@@ -299,6 +303,8 @@ export const roomsDb = {
       maxAutoTurns?: number;
       splitWork?: boolean;
       discussion?: boolean;
+      hostLed?: boolean;
+      autoCompact?: boolean;
     },
   ): void {
     const db = getConnection();
@@ -307,6 +313,12 @@ export const roomsDb = {
     }
     if (settings.discussion !== undefined) {
       db.prepare('UPDATE rooms SET discussion = ? WHERE room_id = ?').run(settings.discussion ? 1 : 0, roomId);
+    }
+    if (settings.hostLed !== undefined) {
+      db.prepare('UPDATE rooms SET host_led = ? WHERE room_id = ?').run(settings.hostLed ? 1 : 0, roomId);
+    }
+    if (settings.autoCompact !== undefined) {
+      db.prepare('UPDATE rooms SET auto_compact = ? WHERE room_id = ?').run(settings.autoCompact ? 1 : 0, roomId);
     }
     if (settings.permissionMode !== undefined) {
       db.prepare('UPDATE rooms SET permission_mode = ? WHERE room_id = ?').run(settings.permissionMode, roomId);

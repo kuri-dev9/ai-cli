@@ -146,6 +146,41 @@ function buildModeInstructions(mode: RoomTurnMode, others: RoomParticipant[]): s
 }
 
 /**
+ * 이번 라운드가 어디쯤인지. 사용자 글 하나에 참가자끼리 주고받을 수 있는 자동
+ * 턴은 정해져 있고, 사용자가 도는 중에 늘리거나 줄일 수 있다. 참가자가 그
+ * 숫자를 모르면 마지막 턴에도 다음 사람에게 넘겨, 일이 넘김 표시만 남긴 채
+ * 끊긴다.
+ *
+ * 맡은 일과 의견 차례는 넘김 표시를 쓰지 않으므로 마무리 안내는 붙이지 않는다.
+ */
+function buildTurnBudget(turn: { count: number; max: number }, mode: RoomTurnMode): string {
+  const remaining = Math.max(0, turn.max - turn.count);
+  const lines = [`[턴 ${turn.count}/${turn.max}] 이번 라운드에 남은 자동 턴: ${remaining}. 사용자가 도중에 늘리거나 줄일 수 있으니 이 숫자를 따르세요.`];
+  const writesHandoff = mode.kind === 'turn' || mode.kind === 'plan' || mode.kind === 'summary';
+  if (remaining === 0 && writesHandoff) {
+    lines.push(`이번이 마지막 턴입니다. 다른 참가자에게 넘겨도 이어지지 않으니, 지금까지를 정리하고 마지막 줄에 "${ROOM_DONE_MARKER}" 를 쓰세요.`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * 방장 주도 룸의 진행 방식. 방장이 부른 참가자만 답하고, 그 답은 방장에게
+ * 돌아간다. 설정은 도중에 바뀔 수 있어 역할 안내가 아니라 매 차례 붙인다.
+ */
+function buildHostLedNotice(me: RoomParticipant, hostName: string): string {
+  if (me.isHost) {
+    return [
+      '[방장 주도] 당신이 이 룸의 방장입니다. 다른 참가자는 당신이 "@이름" 으로 부를 때만 답합니다.',
+      '부르지 않으면 차례는 넘어가지 않고 이번 라운드가 끝납니다. 부른 참가자의 답은 당신에게 돌아옵니다.',
+    ].join('\n');
+  }
+  return [
+    `[방장 주도] 당신은 방장 @${hostName} 가 부를 때만 답합니다. 다른 참가자를 부를 수 없습니다.`,
+    `방장이 부른 일이면 답을 마친 뒤 차례가 @${hostName} 에게 돌아갑니다. 사용자가 직접 불렀다면 방장에게 넘길 때만 마지막 줄에 "@${hostName}" 를 쓰세요.`,
+  ].join('\n');
+}
+
+/**
  * 답에서 일을 나눠 맡긴 줄을 읽는다. `[작업 @이름] 할 일`, 고칠 일은
  * `[작업 @이름 수정] 할 일` 이다(영문 `[TASK @name edit]` 도 받는다).
  *
@@ -195,6 +230,10 @@ export function buildTurnPrompt(input: {
   standby?: RoomParticipant[];
   priorContext?: string | null;
   mode?: RoomTurnMode;
+  /** 이번 라운드에서 몇 번째 자동 턴인지와 그 상한. */
+  turn?: { count: number; max: number } | null;
+  /** 방장 주도 룸이면 방장 이름. 아니면 null. */
+  hostLed?: { hostName: string } | null;
 }): string {
   const { me, participants, isFirstTurn } = input;
   const mode = input.mode ?? { kind: 'turn' };
@@ -222,6 +261,12 @@ export function buildTurnPrompt(input: {
   const instructions = buildModeInstructions(mode, participants.filter((participant) => participant.participantId !== me.participantId));
   if (instructions) {
     sections.push(instructions);
+  }
+  if (input.hostLed) {
+    sections.push(buildHostLedNotice(me, input.hostLed.hostName));
+  }
+  if (input.turn) {
+    sections.push(buildTurnBudget(input.turn, mode));
   }
   sections.push(`이제 @${me.displayName} 의 차례입니다.`);
 

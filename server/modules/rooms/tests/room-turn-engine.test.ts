@@ -61,7 +61,7 @@ function createRuntime(script: Script, calls: Call[], aborts: string[] = [], fai
 async function withRoom(
   maxAutoTurns: number,
   runTest: () => Promise<void>,
-  collaboration: { splitWork?: boolean; discussion?: boolean; thirdParticipant?: boolean } = {},
+  collaboration: { splitWork?: boolean; discussion?: boolean; thirdParticipant?: boolean; hostLed?: boolean } = {},
 ): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'room-engine-'));
@@ -90,6 +90,7 @@ async function withRoom(
     roomsDb.updateRoomSettings(ROOM_ID, {
       splitWork: collaboration.splitWork ?? false,
       discussion: collaboration.discussion ?? false,
+      hostLed: collaboration.hostLed ?? false,
     });
     await runTest();
   } finally {
@@ -936,5 +937,153 @@ test('받아 낸 말이 없으면 여전히 실패로 적고 거기서 멈춘다
     const messages = roomsService.getRoomDetail(ROOM_ID).messages;
     assert.equal(messages[2].status, 'error');
     assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev']);
+  });
+});
+
+test('방장 주도에서는 방장이 부르지 않으면 다른 참가자가 답하지 않는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    // 넘김 표시 없이 끝난 답. 보통의 룸이라면 순서대로 리뷰어에게 넘어간다.
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['혼자 답했습니다'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '질문' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'host only');
+
+    assert.deepEqual(calls.map((call) => call.sessionId), [HOST]);
+    assert.match(calls[0].command, /\[방장 주도\] 당신이 이 룸의 방장입니다/);
+  }, { hostLed: true, discussion: true, thirdParticipant: true });
+});
+
+test('방장 주도에서 방장이 부른 참가자의 답은 방장에게 돌아오고, 의견 차례는 없다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['리뷰 부탁합니다\n@Claude2', '정리했습니다'],
+      // 리뷰어가 다른 참가자를 불러도 따르지 않는다.
+      [REVIEWER]: ['괜찮습니다\n@Claude3'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '설계해줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 4, 'host, reviewer, host');
+
+    assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER, HOST]);
+    assert.match(calls[1].command, /방장 @Claude 가 부를 때만 답합니다/);
+  }, { hostLed: true, discussion: true, thirdParticipant: true });
+});
+
+test('방장 주도에서 사용자가 직접 부른 참가자는 답하고 끝난다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [REVIEWER]: ['봤습니다'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 이거 봐줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'reviewer only');
+
+    assert.deepEqual(calls.map((call) => call.sessionId), [REVIEWER]);
+  }, { hostLed: true });
+});
+
+test('참가자는 차례마다 몇 번째 턴인지와 남은 턴을 듣고, 마지막 턴에는 마무리하라는 말을 듣는다', async () => {
+  await withRoom(2, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['첫 답 @Claude2'], [REVIEWER]: ['둘째 답 @Claude'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'two turns');
+
+    assert.match(calls[0].command, /\[턴 1\/2\] 이번 라운드에 남은 자동 턴: 1/);
+    assert.doesNotMatch(calls[0].command, /마지막 턴입니다/);
+    assert.match(calls[1].command, /\[턴 2\/2\] 이번 라운드에 남은 자동 턴: 0/);
+    assert.match(calls[1].command, /마지막 턴입니다/);
+  });
+});
+
+test('도는 중에 늘린 턴 상한을 다음 차례부터 따르고, 참가자도 바뀐 숫자를 듣는다', async () => {
+  await withRoom(2, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => {
+        roomsService.updateSettings(ROOM_ID, { maxAutoTurns: 3 });
+        return '첫 답 @Claude2';
+      }, '셋째 답'],
+      [REVIEWER]: ['둘째 답 @Claude'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 4, 'three turns');
+
+    assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER, HOST]);
+    assert.match(calls[1].command, /\[턴 2\/3\]/);
+  });
+});
+
+test('맥락이 많이 찬 세션은 그 차례 전에 스스로 줄인다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(
+      // 가짜 런타임은 `/compact` 에도 대본 한 줄을 쓴다.
+      createRuntime({ [HOST]: ['답 @Claude2', '[DONE]'], [REVIEWER]: ['줄였습니다', '리뷰\n[DONE]'] }, calls),
+      { readTokenUsage: async (sessionId) => (sessionId === REVIEWER ? { used: 150_000, total: 200_000 } : { used: 10_000, total: 200_000 }) },
+    );
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'two turns');
+
+    assert.deepEqual(
+      calls.map((call) => [call.sessionId, call.command === '/compact' ? 'compact' : 'turn']),
+      [[HOST, 'turn'], [REVIEWER, 'compact'], [REVIEWER, 'turn']],
+    );
+    // 압축 결과는 타임라인에 남지 않는다.
+    assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev']);
+    assert.equal(roomsDb.listMessages(ROOM_ID).at(-1)?.text, '리뷰\n[DONE]');
+  });
+});
+
+test('자동 압축을 끄면 맥락이 차도 줄이지 않는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(
+      createRuntime({ [HOST]: ['[DONE]'] }, calls),
+      { readTokenUsage: async () => ({ used: 190_000, total: 200_000 }) },
+    );
+    roomsService.updateSettings(ROOM_ID, { autoCompact: false });
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'one turn');
+
+    assert.deepEqual(calls.map((call) => call.command === '/compact'), [false]);
+  });
+});
+
+test('새 룸은 방장 주도와 자동 압축이 켜진 채로 만들어진다', async () => {
+  await withRoom(6, async () => {
+    const otherRoom = 'room-defaults';
+    const now = new Date().toISOString();
+    sessionsDb.createSession('defaults-host', 'claude', '/tmp', 'Host', now, now, null);
+    roomsDb.createRoom(
+      { roomId: otherRoom, hostSessionId: 'defaults-host', projectPath: '/tmp', permissionMode: 'ask', maxAutoTurns: 6 },
+      [{ participant_id: 'p-defaults', session_id: 'defaults-host', provider: 'claude', model: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', persona: '', status: 'active', position: 0 }],
+    );
+    const { room } = roomsService.getRoomDetail(otherRoom);
+    assert.equal(room.hostLed, true);
+    assert.equal(room.autoCompact, true);
+  });
+});
+
+test('맥락이 60% 를 넘으면 줄이고, 그 아래면 두지 않는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(
+      createRuntime({ [HOST]: ['답 @Claude2'], [REVIEWER]: ['줄였습니다', '리뷰\n[DONE]'] }, calls),
+      { readTokenUsage: async (sessionId) => (sessionId === REVIEWER ? { used: 122_000, total: 200_000 } : { used: 118_000, total: 200_000 }) },
+    );
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'two turns');
+
+    assert.deepEqual(
+      calls.map((call) => [call.sessionId, call.command === '/compact' ? 'compact' : 'turn']),
+      [[HOST, 'turn'], [REVIEWER, 'compact'], [REVIEWER, 'turn']],
+    );
   });
 });

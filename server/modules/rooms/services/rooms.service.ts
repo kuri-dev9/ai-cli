@@ -38,7 +38,11 @@ import { AppError } from '@/shared/utils.js';
 const MAX_ROOM_PARTICIPANTS = 10;
 
 const DEFAULT_MAX_AUTO_TURNS = 6;
-const MAX_AUTO_TURNS_LIMIT = 20;
+/**
+ * 자동 턴 수의 상한. 사용자가 직접 적어 넣을 수 있게 넉넉히 둔다 — 루프가
+ * 차례마다 이 값을 다시 읽으므로, 도는 중에 늘리거나 줄여도 바로 따른다.
+ */
+const MAX_AUTO_TURNS_LIMIT = 100;
 
 const PROVIDER_LABELS: Record<string, string> = {
   claude: 'Claude',
@@ -102,6 +106,8 @@ function buildDetail(room: RoomRow): RoomDetail {
       maxAutoTurns: room.max_auto_turns,
       splitWork: room.split_work !== 0,
       discussion: room.discussion !== 0,
+      hostLed: room.host_led !== 0,
+      autoCompact: room.auto_compact !== 0,
       createdAt: room.created_at,
     },
     participants: roomsDb.listParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
@@ -335,6 +341,8 @@ export const roomsService = {
       maxAutoTurns?: number;
       splitWork?: boolean;
       discussion?: boolean;
+      hostLed?: boolean;
+      autoCompact?: boolean;
     },
   ): RoomDetail {
     requireRoom(roomId);

@@ -297,6 +297,10 @@ CREATE TABLE IF NOT EXISTS rooms (
     split_work INTEGER NOT NULL DEFAULT 1,
     -- 1 이면 한 참가자의 답마다 나머지가 짧게 의견을 낸다.
     discussion INTEGER NOT NULL DEFAULT 1,
+    -- 1 이면 방장(호스트)이 부른 참가자만 답하고, 답이 끝나면 방장에게 돌아간다.
+    host_led INTEGER NOT NULL DEFAULT 1,
+    -- 1 이면 참가자 세션의 맥락이 많이 차면 그 차례 전에 스스로 줄인다.
+    auto_compact INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (host_session_id) REFERENCES sessions(session_id) ON DELETE CASCADE

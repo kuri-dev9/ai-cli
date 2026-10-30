@@ -444,6 +444,8 @@ export const api = {
       maxAutoTurns?: number;
       splitWork?: boolean;
       discussion?: boolean;
+      hostLed?: boolean;
+      autoCompact?: boolean;
     }) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}`, changes),
     // `hostCommand` runs the text as written in the host session instead of starting a round.

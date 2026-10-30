@@ -63,6 +63,53 @@ type RoomInterfaceProps = {
 };
 
 const MAX_AUTO_TURN_CHOICES = [3, 5, 10, 20];
+/** Mirrors the server's auto-turn cap, so the field refuses what the server would. */
+const MAX_AUTO_TURNS_LIMIT = 100;
+
+/**
+ * The auto-turn limit as a free number field, with the old presets offered as
+ * suggestions. It commits on Enter or blur rather than per keystroke, so typing
+ * "15" does not briefly set the limit to 1. The loop reads the limit before
+ * every turn, so changing it mid-round takes effect on the next turn.
+ */
+function TurnLimitInput({ value, label, onCommit }: { value: number; label: string; onCommit: (next: number) => void }) {
+  // What the user is typing; null while the field shows the saved value.
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commit = () => {
+    if (draft === null) return;
+    const next = Math.round(Number(draft));
+    setDraft(null);
+    if (Number.isFinite(next) && next >= 1 && next <= MAX_AUTO_TURNS_LIMIT && next !== value) {
+      onCommit(next);
+    }
+  };
+
+  return (
+    <>
+      <input
+        type="number"
+        min={1}
+        max={MAX_AUTO_TURNS_LIMIT}
+        step={1}
+        list="room-max-auto-turn-choices"
+        aria-label={label}
+        title={label}
+        value={draft ?? String(value)}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') commit();
+          if (event.key === 'Escape') setDraft(null);
+        }}
+        className="w-14 rounded border border-border bg-background px-1 py-0.5 text-xs"
+      />
+      <datalist id="room-max-auto-turn-choices">
+        {MAX_AUTO_TURN_CHOICES.map((choice) => <option key={choice} value={choice} />)}
+      </datalist>
+    </>
+  );
+}
 
 // MessageComponent draws a "Claude"/"Codex" header unless the previous row is
 // of the same type. Room rows carry their own name badge, so they are always
@@ -720,6 +767,8 @@ export function RoomInterface({
             {([
               { key: 'splitWork', label: t('rooms.splitWork'), title: t('rooms.splitWorkTitle'), on: detail.room.splitWork },
               { key: 'discussion', label: t('rooms.discussion'), title: t('rooms.discussionTitle'), on: detail.room.discussion },
+              { key: 'hostLed', label: t('rooms.hostLed'), title: t('rooms.hostLedTitle'), on: detail.room.hostLed },
+              { key: 'autoCompact', label: t('rooms.autoCompact'), title: t('rooms.autoCompactTitle'), on: detail.room.autoCompact },
             ] as const).map((toggle) => (
               <button
                 key={toggle.key}
@@ -764,17 +813,11 @@ export function RoomInterface({
             ))}
           </div>
           <span>{t('rooms.turnCount', { count: roomState?.turnCount ?? 0, max: roomState?.maxAutoTurns ?? detail.room.maxAutoTurns })}</span>
-          <select
-            aria-label={t('rooms.maxAutoTurns')}
-            title={t('rooms.maxAutoTurns')}
+          <TurnLimitInput
             value={detail.room.maxAutoTurns}
-            onChange={(event) => void runAction(() => updateSettings({ maxAutoTurns: Number(event.target.value) }))}
-            className="rounded border border-border bg-background px-1 py-0.5 text-xs"
-          >
-            {Array.from(new Set([...MAX_AUTO_TURN_CHOICES, detail.room.maxAutoTurns])).sort((a, b) => a - b).map((value) => (
-              <option key={value} value={value}>{value}</option>
-            ))}
-          </select>
+            label={t('rooms.maxAutoTurnsTitle', { max: MAX_AUTO_TURNS_LIMIT })}
+            onCommit={(next) => void runAction(() => updateSettings({ maxAutoTurns: next }))}
+          />
           {/*
             참가자마다 자기 세션에 맥락이 쌓인다. 룸은 한 요청에 여럿이 답하므로
             사람 수만큼 빨리 찬다. 이 단추가 모두의 맥락을 한 번에 줄인다.

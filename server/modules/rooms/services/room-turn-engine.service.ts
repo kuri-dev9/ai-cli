@@ -1,6 +1,6 @@
 import { roomsDb, sessionsDb } from '@/modules/database/index.js';
 import type { RoomRow } from '@/modules/database/index.js';
-import { sessionsService } from '@/modules/providers/index.js';
+import { providerTokenUsageService, sessionsService } from '@/modules/providers/index.js';
 import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/index.js';
 import {
   chatRunRegistry,
@@ -55,6 +55,10 @@ import { AppError } from '@/shared/utils.js';
  *   나머지는 읽기 전용으로 돈다.
  * - 의견(discussion): 한 참가자의 답이 올라올 때마다 나머지가 동시에 짧게
  *   의견을 낸다. 보탤 말이 없으면 `[PASS]` 로 넘어가고, 그 답은 남기지 않는다.
+ * - 방장 주도(host_led): 방장이 `@이름` 으로 부른 참가자만 답하고, 그 답은
+ *   방장에게 돌아간다. 의견 차례와 순서대로 돌리기는 하지 않는다.
+ * - 자동 압축(auto_compact): 참가자 세션의 맥락 창이 많이 찼으면 그 차례 전에
+ *   `/compact` 로 줄인다.
  *
  * 사용자는 언제든 글을 보낼 수 있고, 그 글은 바로 타임라인에 올라간 뒤 지금
  * 일하는 참가자들이 끝나는 대로 반영된다. [지금 끼어들기]는 그들을 끊는다.
@@ -112,6 +116,21 @@ const PRIOR_CONTEXT_MESSAGE_CHARS = 800;
 /** 지난 대화를 요약해 맥락을 줄이는 명령. Claude 와 Codex 가 같은 이름을 쓴다. */
 const COMPACT_COMMAND = '/compact';
 
+/** `/compact` 를 알아듣는 프로바이더. 나머지는 줄일 방법이 없어 자동 압축에서 빠진다. */
+const COMPACTABLE_PROVIDERS = new Set(['claude', 'codex']);
+
+/**
+ * 맥락 창이 이만큼 차면 그 참가자의 차례 전에 스스로 줄인다. 룸은 한 요청에
+ * 여럿이 답해 토큰이 빨리 쌓이고, 창이 넘치면 프로바이더가 차례 도중에 줄이거나
+ * 실패한다. 차례 사이에 미리 줄이는 편이 답이 끊기지 않는다.
+ */
+const AUTO_COMPACT_RATIO = 0.6;
+
+/** 세션 하나의 맥락 사용량. 테스트가 가짜로 바꿔 끼운다. */
+type TokenUsageReader = (sessionId: string) => Promise<{ used?: number; total?: number } | null>;
+
+const defaultTokenUsageReader: TokenUsageReader = (sessionId) => providerTokenUsageService.getSessionTokenUsage(sessionId);
+let readTokenUsage: TokenUsageReader = defaultTokenUsageReader;
 
 /** 읽기 전용 차례에서 막는 Claude 도구. 같은 폴더를 동시에 고치지 않게 한다. */
 const CLAUDE_WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
@@ -277,6 +296,14 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
   }
   const me: SpeakingParticipant = { ...summoned, sessionId: summoned.sessionId };
 
+  if (room.auto_compact !== 0) {
+    await compactIfNearlyFull(room, me, loop);
+    if (loop.halted) {
+      // 줄이는 동안 정지를 눌렀다. 차례를 시작하지 않는다.
+      return { message: null, handoff: { kind: 'none' }, assignments: [] };
+    }
+  }
+
   const participants = loadParticipants(room);
   const standby = listStandbyMembers(room);
   const meRow = roomsDb.listParticipants(room.room_id).find((row) => row.participant_id === me.participantId);
@@ -290,7 +317,21 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
   const priorContext = isFirstTurn && !me.isHost ? await readPriorContext(room) : null;
   const readThroughId = unread.at(-1)?.id ?? lastSeen;
 
-  const prompt = buildTurnPrompt({ me, participants, standby, delta, isFirstTurn, roleChanged, priorContext, mode: options.mode });
+  // 상한은 도는 중에도 바뀔 수 있어 차례마다 새로 읽는다.
+  const maxAutoTurns = roomsDb.getRoom(room.room_id)?.max_auto_turns ?? room.max_auto_turns;
+  const host = room.host_led !== 0 ? listRoster(room).find((participant) => participant.isHost) : undefined;
+  const prompt = buildTurnPrompt({
+    me,
+    participants,
+    standby,
+    delta,
+    isFirstTurn,
+    roleChanged,
+    priorContext,
+    mode: options.mode,
+    turn: { count: loop.turnCount, max: maxAutoTurns },
+    hostLed: host ? { hostName: host.displayName } : null,
+  });
   if (isFirstTurn || roleChanged) {
     // 안내가 프롬프트에 실렸으므로 표시를 내린다. 차례가 실패해도 다시 보내지는
     // 않지만, 그 경우 사용자가 다시 고치거나 다음 안내 때 따라온다.
@@ -312,6 +353,51 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
     });
   } finally {
     finishActiveTurn(room, me, loop);
+  }
+}
+
+/**
+ * 맥락 창이 많이 찼으면 이 참가자의 차례 전에 `/compact` 로 줄인다.
+ *
+ * 프로바이더 세션의 기록은 그쪽 파일에 있어 앱이 골라 지울 수 없다. 대신
+ * 프로바이더가 지난 대화를 요약해 불필요한 부분을 덜어내게 한다. 룸
+ * 타임라인은 DB 에 그대로 있으므로 오간 말이 사라지지는 않는다.
+ *
+ * 사용량을 읽지 못하거나 줄이지 못해도 차례는 그대로 돈다. 압축은 살림이지
+ * 차례의 조건이 아니다.
+ */
+async function compactIfNearlyFull(room: RoomRow, me: SpeakingParticipant, loop: RoomLoopState): Promise<void> {
+  if (!COMPACTABLE_PROVIDERS.has(me.provider)) {
+    return;
+  }
+  let usage: { used?: number; total?: number } | null = null;
+  try {
+    usage = await readTokenUsage(me.sessionId);
+  } catch {
+    // 아직 기록이 없는 새 세션이면 읽을 사용량도 없다.
+    return;
+  }
+  const used = Number(usage?.used ?? 0);
+  const total = Number(usage?.total ?? 0);
+  if (!(total > 0) || used / total < AUTO_COMPACT_RATIO) {
+    return;
+  }
+
+  console.log('[Rooms] 맥락이 많이 차서 차례 전에 줄입니다', {
+    roomId: room.room_id,
+    participantId: me.participantId,
+    used,
+    total,
+  });
+  try {
+    await runTurnInSession(room, me, loop, COMPACT_COMMAND, [], false);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Rooms] Auto compaction failed', { roomId: room.room_id, participant: me.displayName, error: message });
+  } finally {
+    loop.active.delete(me.participantId);
+    // 토큰 표시가 줄어든 값으로 다시 읽히게 한다.
+    broadcastRoomFrame({ kind: 'room_updated', roomId: room.room_id });
   }
 }
 
@@ -552,6 +638,8 @@ async function runLoop(roomId: string): Promise<void> {
     // 의견에서 나온 지목을 방금 따랐는지. 되받은 차례의 의견까지 따르면 둘이
     // 서로를 부르며 턴 상한까지 돈다.
     let followedCommentHandoff = false;
+    // 방장 주도에서 지금 차례를 방장이 불렀는지. 그렇다면 답은 방장에게 돌아간다.
+    let calledByHost = false;
 
     /**
      * 차례 돌리기가 왜 끝났는지 남긴다.
@@ -583,6 +671,7 @@ async function runLoop(roomId: string): Promise<void> {
         // 사용자가 명단 멤버를 바로 부를 수 있다. 그러면 그 멤버가 들어와 답한다.
         next = pickSpeakerForUserMessage(latestUserMessageText(roomId), listRoster(room));
         nextKind = 'opening';
+        calledByHost = false;
       }
 
       if (!next || loop.turnCount >= room.max_auto_turns) {
@@ -597,7 +686,10 @@ async function runLoop(roomId: string): Promise<void> {
         break;
       }
 
-      const splitting = canSplitWork(room, participants);
+      const hostLed = room.host_led !== 0;
+      const host = hostLed ? listRoster(room).find((participant) => participant.isHost) : undefined;
+      // 방장 주도에서는 일을 나눠 맡기는 것도 "부르기" 라 방장만 한다.
+      const splitting = canSplitWork(room, participants) && (!hostLed || speaker.isHost);
       loop.phase = nextKind === 'summary' ? 'summarizing' : 'turn';
       // 차례를 시작할 때 센다. 끝나고 세면 화면의 "턴 n/N" 이 한 박자 늦어,
       // 첫 차례가 도는 내내 0 으로 남는다 — 지금 몇 번째인지 읽으려는 사람에게
@@ -650,6 +742,31 @@ async function runLoop(roomId: string): Promise<void> {
         next = speaker;
         nextKind = 'summary';
         continue;
+      }
+
+      if (hostLed && host) {
+        // 방장 주도: 방장이 부른 사람만 답하고, 그 답은 방장에게 돌아간다. 의견
+        // 차례도, 순서대로 돌리기도 없다 — 부르지 않은 참가자가 끼어들던 길이 그것이다.
+        nextKind = 'turn';
+        consecutivePasses = 0;
+        if (speaker.isHost) {
+          if (handoff.kind !== 'mention') {
+            logStop(handoff.kind === 'done' ? 'handoff-done' : 'host-did-not-call', { participantId: speaker.participantId });
+            break;
+          }
+          next = listRoster(room).find((participant) => participant.participantId === handoff.participantId) ?? null;
+          calledByHost = true;
+          continue;
+        }
+        // 방장이 부른 참가자는 결과를 방장에게 돌려준다. 사용자가 직접 부른
+        // 참가자는 방장을 부를 때만 넘어간다.
+        if (calledByHost || (handoff.kind === 'mention' && handoff.participantId === host.participantId)) {
+          next = host;
+          calledByHost = false;
+          continue;
+        }
+        logStop('called-by-user', { participantId: speaker.participantId });
+        break;
       }
 
       let commentTarget: RoomParticipant | null = null;
@@ -828,8 +945,10 @@ async function runCompaction(roomId: string, participants: SpeakingParticipant[]
 
 /** Rooms 모듈 안에서 룸 서비스가 쓰는 턴 엔진. */
 export const roomTurnEngine = {
-  initialize(gateway: ProviderRuntimeGateway): void {
+  /** `readTokenUsage` 는 테스트가 맥락 사용량을 가짜로 줄 때만 넘긴다. */
+  initialize(gateway: ProviderRuntimeGateway, options: { readTokenUsage?: TokenUsageReader } = {}): void {
     runtime = gateway;
+    readTokenUsage = options.readTokenUsage ?? defaultTokenUsageReader;
   },
 
   close(): void {
@@ -838,6 +957,7 @@ export const roomTurnEngine = {
     }
     loops.clear();
     runtime = null;
+    readTokenUsage = defaultTokenUsageReader;
   },
 
   getState(roomId: string, maxAutoTurns: number): RoomRuntimeState {
