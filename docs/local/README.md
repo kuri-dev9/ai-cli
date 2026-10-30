@@ -25,6 +25,7 @@ GUI로 감싸주는 앱으로, 오픈소스 **CloudCLI UI**(구 claudecodeui)를
 | [`UPSTREAM.md`](./UPSTREAM.md) | **원본 출처, 기준 커밋, 라이선스 의무.** 재배포하기 전에 반드시 읽을 것 |
 | [`claude-cli-headless.md`](./claude-cli-headless.md) | Claude Code CLI 헤드리스 프로토콜 스펙. 직접 GUI를 만들거나 이 앱을 깊게 고칠 때의 설계 자료 |
 | [`ollama-and-multi-llm.md`](./ollama-and-multi-llm.md) | Ollama 로컬 모델 연동, 여러 LLM 을 병렬·직렬로 조합하는 방법. **조사만 했고 아직 적용하지 않았다** |
+| [`multi-account.md`](./multi-account.md) | 같은 AI(Claude·Codex)의 계정 여러 개를 UI 에서 로그인해 대화·룸 참가자마다 골라 쓰는 설계. **설계만 했다** |
 | [`docker.md`](./docker.md) | Docker 로 실행할 수 있는지 검토한 결과. 실제 컨테이너로 검증했다. **적용하지 않았다** |
 
 원본 README 는 [`../upstream/README.original.md`](../upstream/README.original.md) 에 보존해두었다.
