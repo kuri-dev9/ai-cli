@@ -315,6 +315,8 @@ CREATE TABLE IF NOT EXISTS room_participants (
     session_id TEXT,
     provider TEXT NOT NULL,
     model TEXT,
+    -- 세션이 생기기 전에 고른 추론 강도. 처음 불릴 때 세션에 옮긴다.
+    effort TEXT,
     display_name TEXT NOT NULL,
     role_name TEXT NOT NULL,
     role_prompt TEXT NOT NULL DEFAULT '',

@@ -462,6 +462,8 @@ export const api = {
         roleName?: string;
         rolePrompt?: string;
         persona?: string;
+        model?: string;
+        effort?: string;
       },
     ) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`, changes),

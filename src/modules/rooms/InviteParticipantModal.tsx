@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { BookmarkPlus, Settings2 } from 'lucide-react';
+import { BookmarkPlus, ListPlus, Settings2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { useRoomRolePresets } from '@/modules/rooms/hooks/useRoomRolePresets';
@@ -35,6 +35,17 @@ type InviteParticipantModalProps = {
   /** Display names already used in the room, rejected before the request goes out. */
   takenNames: string[];
   onInvited: (detail: RoomDetail) => void;
+};
+
+/** 한 명분 초대 내용. 서버에 그대로 보낸다. */
+type InviteeInput = {
+  provider: string;
+  model: string | null;
+  displayName: string;
+  roleName: string;
+  rolePrompt?: string;
+  persona?: string;
+  status: 'active' | 'standby';
 };
 
 /** 처음 룸을 만들 때 호스트에 미리 골라 두는 프리셋. 목록에서 지웠으면 아무것도 고르지 않는다. */
@@ -84,6 +95,10 @@ export default function InviteParticipantModal({
   const presets = useRoomRolePresets();
   // Model lists fetched so far, by provider; the select reads the chosen one.
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ProviderModelsDefinition>>({});
+  // "목록에 담기" 로 쌓아 둔 사람. 초대를 누르면 폼에 남은 사람과 함께 차례로 들어온다.
+  const [queue, setQueue] = useState<InviteeInput[]>([]);
+  // 여럿을 초대하다 룸을 만든 뒤 실패했으면, 다시 누를 때는 그 룸에 더한다.
+  const [createdRoomId, setCreatedRoomId] = useState<string | null>(null);
   // In-flight flag so a double click cannot invite twice.
   const [submitting, setSubmitting] = useState(false);
   // Server (or validation) message shown above the buttons.
@@ -133,6 +148,8 @@ export default function InviteParticipantModal({
   const handleOpenChange = (next: boolean) => {
     if (!next) {
       setErrorMessage(null);
+      setQueue([]);
+      setCreatedRoomId(null);
       setView('invite');
       setSelectedPresetId(null);
     }
@@ -146,9 +163,11 @@ export default function InviteParticipantModal({
   };
 
   // 처음 만들 때는 아직 룸이 없으니, 호스트가 쓸 이름도 겹치면 안 되는 이름이다.
-  const allTakenNames = target.kind === 'create'
-    ? [...takenNames, hostDisplayName.trim() || 'Claude']
-    : takenNames;
+  // 목록에 담아 둔 이름도 곧 룸에 들어올 이름이다.
+  const allTakenNames = [
+    ...(target.kind === 'create' && !createdRoomId ? [...takenNames, hostDisplayName.trim() || 'Claude'] : takenNames),
+    ...queue.map((invitee) => invitee.displayName),
+  ];
 
   const applyPreset = (preset: RoomRolePreset) => {
     setSelectedPresetId(preset.id);
@@ -180,49 +199,82 @@ export default function InviteParticipantModal({
   const trimmedName = displayName.trim();
   const nameInvalid = trimmedName.length > 0 && !isValidRoomDisplayName(trimmedName);
   const nameTaken = allTakenNames.some((name) => name.toLowerCase() === trimmedName.toLowerCase());
-  const canSubmit = !submitting && isValidRoomDisplayName(trimmedName) && !nameTaken && roleName.trim().length > 0;
+  const formValid = isValidRoomDisplayName(trimmedName) && !nameTaken && roleName.trim().length > 0;
+  // 폼이 비었으면 담아 둔 사람만 초대한다. 뭔가 적혀 있으면 그것도 올바라야 한다.
+  const formEmpty = !trimmedName && !roleName.trim();
+  const inviteCount = queue.length + (formValid ? 1 : 0);
+  const canSubmit = !submitting && (formValid || (formEmpty && queue.length > 0));
+  // 룸을 처음 만들 때의 첫 참가자는 늘 상주다. 부를 호스트가 아직 말하기 전이다.
+  const firstCreatesRoom = target.kind === 'create' && !createdRoomId;
+  const showJoinMode = target.kind === 'add' || createdRoomId !== null || queue.length > 0;
+
+  const resetForm = () => {
+    setDisplayName('');
+    setRoleName('');
+    setRolePrompt('');
+    setPersona('');
+    setSelectedPresetId(null);
+  };
+
+  const buildInvitee = (): InviteeInput => ({
+    provider,
+    model: model || null,
+    displayName: trimmedName,
+    roleName: roleName.trim(),
+    rolePrompt: rolePrompt.trim() || undefined,
+    persona: persona.trim() || undefined,
+    status: joinNow ? 'active' : 'standby',
+  });
+
+  const addToQueue = () => {
+    if (!formValid) return;
+    setQueue((previous) => [...previous, buildInvitee()]);
+    resetForm();
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!canSubmit) return;
     setSubmitting(true);
     setErrorMessage(null);
-    const participant = {
-      provider,
-      model: model || null,
-      displayName: trimmedName,
-      roleName: roleName.trim(),
-      rolePrompt: rolePrompt.trim() || undefined,
-      persona: persona.trim() || undefined,
-      // 룸을 처음 만들 때의 첫 참가자는 늘 상주다. 부를 호스트가 아직 말하기 전이다.
-      status: (target.kind === 'create' || joinNow ? 'active' : 'standby') as 'active' | 'standby',
-    };
+    const invitees = (formValid ? [...queue, buildInvitee()] : [...queue])
+      .map((invitee, index) => (index === 0 && firstCreatesRoom ? { ...invitee, status: 'active' as const } : invitee));
+    let roomId = target.kind === 'add' ? target.roomId : createdRoomId;
+    let invited = 0;
     try {
-      const response = target.kind === 'create'
-        ? await api.rooms.create({
-          hostSessionId: await target.resolveHostSessionId(),
-          host: hostDisplayName.trim() || hostRoleName.trim() || hostRolePrompt.trim() || hostPersona.trim()
-            ? {
-              displayName: hostDisplayName.trim() || undefined,
-              roleName: hostRoleName.trim() || undefined,
-              rolePrompt: hostRolePrompt.trim() || undefined,
-              persona: hostPersona.trim() || undefined,
-            }
-            : undefined,
-          participant,
-        })
-        : await api.rooms.addParticipant(target.roomId, participant);
-      const body = await readApiJson<{ data?: RoomDetail }>(response);
-      if (body.data) {
-        onInvited(body.data);
+      // 한 명씩 차례로 보낸다. 이름 겹침과 인원 상한을 서버가 한 명마다 따진다.
+      for (const participant of invitees) {
+        const response = roomId
+          ? await api.rooms.addParticipant(roomId, participant)
+          : await api.rooms.create({
+            hostSessionId: await (target as Extract<InviteTarget, { kind: 'create' }>).resolveHostSessionId(),
+            host: hostDisplayName.trim() || hostRoleName.trim() || hostRolePrompt.trim() || hostPersona.trim()
+              ? {
+                displayName: hostDisplayName.trim() || undefined,
+                roleName: hostRoleName.trim() || undefined,
+                rolePrompt: hostRolePrompt.trim() || undefined,
+                persona: hostPersona.trim() || undefined,
+              }
+              : undefined,
+            participant,
+          });
+        const body = await readApiJson<{ data?: RoomDetail }>(response);
+        invited += 1;
+        if (body.data) {
+          if (!roomId) {
+            roomId = body.data.room.roomId;
+            setCreatedRoomId(roomId);
+          }
+          onInvited(body.data);
+        }
       }
-      setDisplayName('');
-      setRoleName('');
-      setRolePrompt('');
-      setPersona('');
-      setSelectedPresetId(null);
+      resetForm();
       handleOpenChange(false);
     } catch (error) {
+      // 들어간 사람은 목록에서 빼고, 실패한 사람부터 남겨 다시 누를 수 있게 한다.
+      // 폼에 적힌 사람은 맨 끝이라 아직 안 들어갔고, 폼에 그대로 둔다.
+      const remaining = invitees.slice(invited);
+      setQueue(formValid ? remaining.slice(0, -1) : remaining);
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setSubmitting(false);
@@ -361,7 +413,7 @@ export default function InviteParticipantModal({
               className={FIELD_CLASS}
             />
           </label>
-          {target.kind === 'add' && (
+          {showJoinMode && (
             <div className="rounded-md border border-border/60 px-3 py-2">
               <div className="inline-flex overflow-hidden rounded-md border border-border text-xs" role="group" aria-label={t('rooms.joinMode')}>
                 {([false, true] as const).map((value) => (
@@ -387,7 +439,16 @@ export default function InviteParticipantModal({
             </div>
           )}
 
-          <div className="-mt-1 flex justify-end">
+          <div className="-mt-1 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={addToQueue}
+              disabled={!formValid}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40"
+            >
+              <ListPlus className="h-3.5 w-3.5" />
+              {t('rooms.queueAdd')}
+            </button>
             <button
               type="button"
               onClick={saveCurrentAsPreset}
@@ -399,7 +460,34 @@ export default function InviteParticipantModal({
             </button>
           </div>
 
-          {target.kind === 'create' && (
+          {queue.length > 0 && (
+            <div className="rounded-md border border-border/60 px-3 py-2">
+              <div className="flex flex-wrap gap-1.5">
+                {queue.map((invitee, index) => (
+                  <span
+                    key={invitee.displayName}
+                    className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs"
+                  >
+                    <LLMProviderLogo provider={invitee.provider} className="h-3 w-3" />
+                    <span className="font-medium">{invitee.displayName}</span>
+                    <span className="text-muted-foreground">{invitee.roleName}</span>
+                    {(invitee.status === 'active' || (index === 0 && firstCreatesRoom)) && <span className="text-muted-foreground">· {t('rooms.joinNow')}</span>}
+                    <button
+                      type="button"
+                      onClick={() => setQueue((previous) => previous.filter((_, position) => position !== index))}
+                      aria-label={t('rooms.queueRemove', { name: invitee.displayName })}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">{t('rooms.queueHint')}</p>
+            </div>
+          )}
+
+          {target.kind === 'create' && !createdRoomId && (
             <details open className="rounded-md border border-border/60 px-3 py-2">
               <summary className="cursor-pointer text-xs text-muted-foreground">{t('rooms.hostSection')}</summary>
               <select
@@ -445,7 +533,7 @@ export default function InviteParticipantModal({
               {t('rooms.cancel')}
             </Button>
             <Button type="submit" size="sm" disabled={!canSubmit}>
-              {submitting ? t('rooms.inviting') : t('rooms.invite')}
+              {submitting ? t('rooms.inviting') : inviteCount > 1 ? t('rooms.inviteMany', { count: inviteCount }) : t('rooms.invite')}
             </Button>
           </div>
         </form>

@@ -9,6 +9,7 @@ import {
   parseAssignments,
   parseHandoff,
   pickSpeakerForUserMessage,
+  pickSpeakersForUserMessage,
 } from '@/modules/rooms/services/room-prompt.service.js';
 import type { RoomMessage, RoomParticipant } from '@/shared/types.js';
 
@@ -19,6 +20,7 @@ function participant(id: string, displayName: string, position: number, extra: P
     sessionId: `session-${id}`,
     provider: 'claude',
     model: null,
+    effort: null,
     displayName,
     roleName: `role-${id}`,
     rolePrompt: '',
@@ -66,6 +68,40 @@ test('handoff reads DONE before PASS before a mention, and ignores self mentions
   assert.deepEqual(parseHandoff('제가 계속할게요 @Claude', everyone, 'a'), { kind: 'none' });
   // 마지막 몇 줄만 본다. 본문 앞쪽의 멘션은 넘김이 아니다.
   assert.deepEqual(parseHandoff('@Codex 가 말한 대로\n1\n2\n3\n끝', everyone, 'a'), { kind: 'none' });
+});
+
+test('handoff follows the last line, not a name mentioned on the lines above it', () => {
+  // 실제 룸에서 @헤일리를 불렀는데 위 줄의 @패트릭이 잡혀 패트릭이 다시 불렸다.
+  assert.deepEqual(
+    parseHandoff('@Claude2, 확인했습니다.\n마지막으로 @Codex를 부릅니다.\n@Codex', everyone, 'a'),
+    { kind: 'mention', participantId: 'c' },
+  );
+  // 앞 줄에서 남의 [PASS] 를 인용했다고 라운드가 끝나면 안 된다.
+  assert.deepEqual(
+    parseHandoff('@Claude2의 [PASS]만 올라왔습니다.\n@Codex, 한 줄로 답해 주세요.\n@Codex', everyone, 'a'),
+    { kind: 'mention', participantId: 'c' },
+  );
+  // 한 줄에 여럿이면 마지막 멘션이 넘김이다.
+  assert.deepEqual(parseHandoff('@Claude2 확인 고마워요. 다음은 @Codex', everyone, 'a'), { kind: 'mention', participantId: 'c' });
+  // 넘김 뒤에 덧붙인 줄은 건너뛰고 위 줄의 표시를 따른다.
+  assert.deepEqual(parseHandoff('구현했어요.\n@Claude2\n(참고: 테스트는 통과)', everyone, 'a'), { kind: 'mention', participantId: 'b' });
+  assert.deepEqual(parseHandoff('다음은 me@Codex.dev 로 메일', everyone, 'a'), { kind: 'none' });
+});
+
+test('a last line of names alone calls them all at once; names inside a sentence do not', () => {
+  assert.deepEqual(parseHandoff('둘에게 묻습니다\n@Claude2 @Codex', everyone, 'a'), { kind: 'group', participantIds: ['b', 'c'] });
+  assert.deepEqual(parseHandoff('둘에게 묻습니다\n@Claude2, @Codex', everyone, 'a'), { kind: 'group', participantIds: ['b', 'c'] });
+  // 같은 이름을 두 번 적거나 자기를 섞어도 남는 상대가 하나면 평범한 넘김이다.
+  assert.deepEqual(parseHandoff('@Claude2 @Claude2', everyone, 'a'), { kind: 'mention', participantId: 'b' });
+  assert.deepEqual(parseHandoff('@Claude @Claude2', everyone, 'a'), { kind: 'mention', participantId: 'b' });
+  // 문장 속 이름은 동시 호출이 아니다. 마지막 이름에게만 넘긴다.
+  assert.deepEqual(parseHandoff('@Claude2 확인 고마워요. 다음은 @Codex', everyone, 'a'), { kind: 'mention', participantId: 'c' });
+});
+
+test('a user message naming several participants goes to all of them', () => {
+  assert.deepEqual(pickSpeakersForUserMessage('@Claude2 @Codex 자기소개 해줘', everyone).map((p) => p.participantId), ['b', 'c']);
+  assert.deepEqual(pickSpeakersForUserMessage('@Codex 테스트 짜줘', everyone).map((p) => p.participantId), ['c']);
+  assert.deepEqual(pickSpeakersForUserMessage('다들 어떻게 생각해?', everyone).map((p) => p.participantId), ['a']);
 });
 
 test('round robin goes in position order and wraps', () => {

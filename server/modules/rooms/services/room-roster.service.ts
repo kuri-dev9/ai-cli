@@ -20,7 +20,8 @@ import type { LLMProvider, RoomParticipant } from '@/shared/types.js';
 /**
  * 참가자를 위한 세션을 만든다. 이름은 "이름 · 역할" 이다 — 사이드바가 룸
  * 아래에 접어 보여 주므로 어느 룸인지는 따로 적지 않는다. 모델을 골랐다면
- * 세션에 적어 둔다 — 그 세션을 따로 열었을 때도 같은 모델로 이어진다.
+ * 세션에 적어 둔다 — 그 세션을 따로 열었을 때도 같은 모델로 이어진다. 명단에서
+ * 기다리는 동안 고른 추론 강도도 함께 옮긴다.
  */
 export function createParticipantSession(
   provider: LLMProvider,
@@ -28,11 +29,15 @@ export function createParticipantSession(
   displayName: string,
   roleName: string,
   model: string | null,
+  effort: string | null = null,
 ): string {
   const { sessionId } = sessionsService.createAppSession(provider, projectPath, `${displayName} · ${roleName}`);
   sessionsService.renameSessionById(sessionId, `${displayName} · ${roleName}`);
   if (model) {
     providerModelsService.setSessionModel(provider, sessionId, model);
+  }
+  if (effort) {
+    providerModelsService.setSessionEffort(provider, sessionId, effort);
   }
   return sessionId;
 }
@@ -55,6 +60,7 @@ export function summonParticipant(room: RoomRow, participant: RoomParticipant): 
       participant.displayName,
       participant.roleName,
       participant.model,
+      participant.effort,
     );
   roomsDb.setParticipantStatus(participant.participantId, 'summoned', sessionId);
   // 화면이 이 멤버를 아직 "대기" 로 그리고 있다. 들어왔다는 것과, 처음이라면

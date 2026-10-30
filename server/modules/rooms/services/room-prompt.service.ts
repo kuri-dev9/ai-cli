@@ -85,6 +85,7 @@ export function buildRoleBrief(
     '- 답은 다른 참가자가 읽고 이어받기 쉽게, 한 일과 결론을 요약해 쓰세요.',
     '- 사용자의 지시가 다른 참가자의 의견보다 우선합니다.',
     `- 답의 마지막 줄에는 반드시 다음 중 하나만 쓰세요: "@이름"(그 참가자에게 넘김), "${ROOM_PASS_MARKER}"(덧붙일 말 없음), "${ROOM_DONE_MARKER}"(작업이 끝나 사용자 확인이 필요함).`,
+    `- 여럿에게 동시에 물으려면 마지막 줄에 이름만 "@이름 @이름" 처럼 함께 적으세요. 모두 동시에 답하고(파일은 고치지 않습니다), 답이 모이면 당신에게 차례가 돌아옵니다.`,
   ].join('\n');
 }
 
@@ -109,6 +110,7 @@ export type RoomTurnMode =
   | { kind: 'plan' }
   | { kind: 'task'; task: RoomTask; leadName: string }
   | { kind: 'comment'; onName: string }
+  | { kind: 'called'; byName: string | null; withNames: string[] }
   | { kind: 'summary' };
 
 function buildModeInstructions(mode: RoomTurnMode, others: RoomParticipant[]): string | null {
@@ -135,9 +137,17 @@ function buildModeInstructions(mode: RoomTurnMode, others: RoomParticipant[]): s
         `[의견] 방금 @${mode.onName} 의 답이 올라왔습니다. 당신의 역할에서 보탤 의견, 우려, 다른 방법이 있으면 ${COMMENT_MAX_LINES}줄 이내로 쓰세요.`,
         `보탤 말이 없으면 "${ROOM_PASS_MARKER}" 한 줄만 쓰세요. 이번에는 파일을 고치거나 긴 작업을 하지 마세요.`,
       ].join('\n');
+    case 'called': {
+      const by = mode.byName ? `@${mode.byName}` : '사용자';
+      const together = mode.withNames.length ? `함께 불린 참가자(${mode.withNames.map((name) => `@${name}`).join(', ')})도 지금 동시에 답합니다. ` : '';
+      return [
+        `[동시 호출] ${by} 가 여러 참가자를 함께 불렀습니다. ${together}부른 내용에 당신의 역할에서 답하세요.`,
+        `파일 수정: 불가. 여럿이 동시에 돌므로 읽기·조사만 하세요. 넘김 표시는 쓰지 마세요${mode.byName ? ` — 답이 모이면 @${mode.byName} 에게 돌아갑니다` : ''}.`,
+      ].join('\n');
+    }
     case 'summary':
       return [
-        '[정리] 맡긴 일의 결과가 모두 모였습니다. 결과를 모아 정리하세요.',
+        '[정리] 맡긴 일이나 함께 부른 참가자의 답이 모두 모였습니다. 결과를 모아 정리하세요.',
         '더 나눌 일이 있으면 다시 "[작업 @이름] 할 일" 줄로 맡기고, 끝났으면 마지막 줄에 넘김 표시를 쓰세요.',
       ].join('\n');
     default:
@@ -172,6 +182,7 @@ function buildHostLedNotice(me: RoomParticipant, hostName: string): string {
     return [
       '[방장 주도] 당신이 이 룸의 방장입니다. 다른 참가자는 당신이 "@이름" 으로 부를 때만 답합니다.',
       '부르지 않으면 차례는 넘어가지 않고 이번 라운드가 끝납니다. 부른 참가자의 답은 당신에게 돌아옵니다.',
+      '여럿을 동시에 부르려면 마지막 줄에 "@이름 @이름" 처럼 이름만 함께 적으세요. 모두의 답이 모이면 당신에게 돌아옵니다.',
     ].join('\n');
   }
   return [
@@ -277,6 +288,7 @@ export type RoomHandoff =
   | { kind: 'done' }
   | { kind: 'pass' }
   | { kind: 'mention'; participantId: string }
+  | { kind: 'group'; participantIds: string[] }
   | { kind: 'none' };
 
 /**
@@ -305,28 +317,91 @@ export function findFirstMention(text: string, participants: RoomParticipant[]):
 }
 
 /**
+ * 글에 나오는 참가자 멘션을 나온 순서대로 모두 찾는다. 같은 자리에서는 긴 이름이
+ * 이기고(`@Claude2` 가 `@Claude` 로 잡히지 않게), `@` 앞에 글자가 붙은 것은
+ * 메일 주소 같은 것이라 건너뛴다 — `findFirstMention` 과 같은 규칙이다.
+ */
+function findAllMentions(text: string, participants: RoomParticipant[]): Array<{ participant: RoomParticipant; start: number; end: number }> {
+  const haystack = text.toLowerCase();
+  const byLength = [...participants].sort((a, b) => b.displayName.length - a.displayName.length);
+  const found: Array<{ participant: RoomParticipant; start: number; end: number }> = [];
+  for (let index = haystack.indexOf('@'); index >= 0; index = haystack.indexOf('@', index + 1)) {
+    const before = haystack.charAt(index - 1);
+    if (before && /[\p{L}\p{N}_.-]/u.test(before)) continue;
+    const rest = haystack.slice(index + 1);
+    const match = byLength.find((participant) => rest.startsWith(participant.displayName.toLowerCase()));
+    if (match) {
+      found.push({ participant: match, start: index, end: index + 1 + match.displayName.length });
+    }
+  }
+  return found;
+}
+
+/** 겹치지 않게 모은 참가자. 처음 나온 순서를 지킨다. */
+function uniqueParticipants(participants: RoomParticipant[]): RoomParticipant[] {
+  const seen = new Set<string>();
+  return participants.filter((participant) => {
+    if (seen.has(participant.participantId)) return false;
+    seen.add(participant.participantId);
+    return true;
+  });
+}
+
+/**
+ * 한 줄에서 넘김을 읽는다. 이름만 여럿 적힌 줄(`@헤일리 @레오`, `@헤일리, @레오`)은
+ * 동시 호출이다. 문장 속에 이름이 섞인 줄은 마지막 이름 한 명에게 넘긴다 —
+ * "@패트릭, 확인했습니다. 다음은 @헤일리" 에서 패트릭까지 불러내면 안 된다.
+ */
+function readLineHandoff(line: string, others: RoomParticipant[]): RoomHandoff | null {
+  const mentions = findAllMentions(line, others);
+  if (mentions.length === 0) {
+    return null;
+  }
+  let remainder = '';
+  let from = 0;
+  for (const mention of mentions) {
+    remainder += line.slice(from, mention.start);
+    from = mention.end;
+  }
+  remainder += line.slice(from);
+  const called = uniqueParticipants(mentions.map((mention) => mention.participant));
+  if (called.length > 1 && /^[\s,、·/]*$/u.test(remainder)) {
+    return { kind: 'group', participantIds: called.map((participant) => participant.participantId) };
+  }
+  return { kind: 'mention', participantId: mentions[mentions.length - 1].participant.participantId };
+}
+
+/**
  * 답의 마지막 몇 줄에서 넘김 표시를 읽는다.
  *
- * `[DONE]` 이 `[PASS]` 보다, 둘 다 멘션보다 앞선다 — "끝났다"는 말이 가장 강한
- * 신호다. 자기 자신을 부른 멘션은 무시한다.
+ * 마지막 줄부터 위로 올라가며 표시가 있는 첫 줄을 따른다. 위쪽 줄은 앞서 한
+ * 이야기라 "@패트릭, 확인했습니다" 나 "@패트릭의 [PASS]만 올라왔습니다" 같은
+ * 언급이 섞인다 — 그걸 넘김으로 읽어 엉뚱한 사람을 부르거나 라운드를 끝냈다.
+ *
+ * 한 줄 안에서는 `[DONE]` 이 `[PASS]` 보다, 둘 다 멘션보다 앞선다 — "끝났다"는
+ * 말이 가장 강한 신호다. 자기 자신을 부른 멘션은 무시한다.
  */
 export function parseHandoff(text: string, participants: RoomParticipant[], selfId: string): RoomHandoff {
   const tail = text
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(-HANDOFF_TAIL_LINES)
-    .join('\n');
-
-  if (tail.toUpperCase().includes(ROOM_DONE_MARKER)) {
-    return { kind: 'done' };
-  }
-  if (tail.toUpperCase().includes(ROOM_PASS_MARKER)) {
-    return { kind: 'pass' };
-  }
+    .slice(-HANDOFF_TAIL_LINES);
   const others = participants.filter((participant) => participant.participantId !== selfId);
-  const mentioned = findFirstMention(tail, others);
-  return mentioned ? { kind: 'mention', participantId: mentioned.participantId } : { kind: 'none' };
+
+  for (const line of tail.reverse()) {
+    if (line.toUpperCase().includes(ROOM_DONE_MARKER)) {
+      return { kind: 'done' };
+    }
+    if (line.toUpperCase().includes(ROOM_PASS_MARKER)) {
+      return { kind: 'pass' };
+    }
+    const handoff = readLineHandoff(line, others);
+    if (handoff) {
+      return handoff;
+    }
+  }
+  return { kind: 'none' };
 }
 
 /** 순서상 다음 참가자. 혼자 남은 룸이면 null. */
@@ -340,15 +415,21 @@ export function nextParticipantAfter(participants: RoomParticipant[], currentId:
 }
 
 /**
- * 사용자 메시지를 누가 먼저 받을지. 멘션이 있으면 그 참가자, 없으면 원래
- * 대화(호스트)가 받는다 — 사용자가 늘 이야기하던 상대가 먼저 답하는 게 자연스럽다.
+ * 사용자 메시지를 누가 받을지. 이름을 여럿 적었으면 그 참가자들이 동시에 답하고,
+ * 하나면 그 참가자, 없으면 원래 대화(호스트)가 받는다 — 사용자가 늘 이야기하던
+ * 상대가 먼저 답하는 게 자연스럽다.
  */
-export function pickSpeakerForUserMessage(text: string, participants: RoomParticipant[]): RoomParticipant | null {
-  const mentioned = findFirstMention(text, participants);
-  if (mentioned) {
+export function pickSpeakersForUserMessage(text: string, participants: RoomParticipant[]): RoomParticipant[] {
+  const mentioned = uniqueParticipants(findAllMentions(text, participants).map((mention) => mention.participant));
+  if (mentioned.length > 0) {
     return mentioned;
   }
-  return participants.find((participant) => participant.isHost)
-    ?? [...participants].sort((a, b) => a.position - b.position)[0]
-    ?? null;
+  const fallback = participants.find((participant) => participant.isHost)
+    ?? [...participants].sort((a, b) => a.position - b.position)[0];
+  return fallback ? [fallback] : [];
+}
+
+/** 사용자 메시지를 먼저 받을 한 명. 여럿을 불렀으면 처음 부른 참가자다. */
+export function pickSpeakerForUserMessage(text: string, participants: RoomParticipant[]): RoomParticipant | null {
+  return pickSpeakersForUserMessage(text, participants)[0] ?? null;
 }

@@ -128,7 +128,8 @@ const GROUPED_ASSISTANT_ANCHOR: ChatMessage = { type: 'assistant', timestamp: 0 
 function stripHandoffMarker(text: string): string {
   const lines = text.trimEnd().split('\n');
   const last = (lines.at(-1) ?? '').replace(/\s*\[(DONE|PASS)\]\s*$/i, '');
-  if (/^\s*@[^\s@]+\s*$/u.test(last) || !last.trim()) {
+  // 이름 하나, 또는 동시에 부른 이름 여럿(`@a @b`, `@a, @b`)만 있는 줄이다.
+  if (/^\s*@[^\s@,]+(?:[\s,]+@[^\s@,]+)*[\s,]*$/u.test(last) || !last.trim()) {
     lines.pop();
   } else {
     lines[lines.length - 1] = last;
@@ -623,6 +624,14 @@ export function RoomInterface({
               <ParticipantBadge participant={handoffTarget} hostLabel={t('rooms.host')} />
               {t('rooms.handoffTo')}
             </span>
+          ) : message.handoff.kind === 'group' ? (
+            <span className="inline-flex flex-wrap items-center gap-1.5 text-muted-foreground">
+              <ArrowRight className="h-3.5 w-3.5" />
+              {message.handoff.participantIds.map((participantId) => (
+                <ParticipantBadge key={participantId} participant={participantsById.get(participantId)} hostLabel={t('rooms.host')} />
+              ))}
+              {t('rooms.handoffGroup')}
+            </span>
           ) : message.handoff.kind === 'done' ? (
             <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -785,6 +794,7 @@ export function RoomInterface({
                 onChangeProfile={(profile) => void runAction(
                   () => updateParticipant(settingsParticipant.participantId, profile),
                 )}
+                onChangeRosterSelection={(changes) => updateParticipant(settingsParticipant.participantId, changes)}
                 onCompact={() => void runAction(() => compact(settingsParticipant.participantId))}
                 onLeave={() => handleLeave(settingsParticipant.participantId)}
                 onOpenSession={() => {

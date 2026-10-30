@@ -348,6 +348,33 @@ test('a roster member is summoned by name, answers, and returns to standby', asy
   });
 });
 
+test('a roster member keeps the model and effort picked while it waited, once it is summoned', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['체커가 봐줘 @체커'] }, calls));
+    roomsDb.addParticipant({
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: 'sonnet',
+      display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 2,
+    });
+
+    // 세션이 없어도 고를 수 있어야 한다. 명단에 적혀 있다가 처음 불릴 때 옮겨진다.
+    const updated = roomsService.updateParticipant(ROOM_ID, 'p-roster', { model: 'opus', effort: 'high' });
+    const waiting = updated.participants.find((p) => p.participantId === 'p-roster');
+    assert.equal(waiting?.sessionId, null);
+    assert.equal(waiting?.model, 'opus');
+    assert.equal(waiting?.effort, 'high');
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().includes('p-roster'), 'summoned turn');
+
+    const after = roomsService.getRoomDetail(ROOM_ID).participants.find((p) => p.participantId === 'p-roster');
+    assert.ok(after?.sessionId, '불릴 때 세션이 생겨야 한다');
+    const session = sessionsDb.getSessionById(after.sessionId);
+    assert.equal(session?.model, 'opus');
+    assert.equal(session?.effort, 'high');
+  });
+});
+
 test('a standby member sits out the rounds it is not called into', async () => {
   await withRoom(4, async () => {
     const calls: Call[] = [];
@@ -1090,4 +1117,68 @@ test('맥락이 60% 를 넘으면 줄이고, 그 아래면 두지 않는다', as
       [[HOST, 'turn'], [REVIEWER, 'compact'], [REVIEWER, 'turn']],
     );
   });
+});
+
+test('이름만 여럿 적은 마지막 줄은 모두를 동시에 부르고, 답이 모이면 부른 참가자가 정리한다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['둘에게 묻습니다\n@Claude2 @Claude3', '모아서 정리했습니다 [DONE]'],
+      [REVIEWER]: [async () => { await gate; return '리뷰어 답'; }],
+      [SECOND_REVIEWER]: [async () => { await gate; return '두 번째 리뷰어 답'; }],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '검토해줘' }, 1);
+    // 둘 다 시작했는데 아직 아무도 끝나지 않았다 — 순서대로가 아니라 동시에 돈다.
+    await waitFor(() => calls.length === 3, 'both called');
+    release();
+    await waitFor(() => isIdle(), 'round done');
+
+    assert.deepEqual(calls.slice(1, 3).map((call) => call.sessionId).sort(), [REVIEWER, SECOND_REVIEWER].sort());
+    assert.equal(calls[3].sessionId, HOST);
+    assert.match(calls[3].command, /\[정리\]/);
+    for (const called of calls.slice(1, 3)) {
+      assert.match(called.command, /\[동시 호출\] @Claude 가/);
+      // 동시에 도는 동안은 아무도 파일을 고치지 못한다.
+      const tools = called.options.toolsSettings as { disallowedTools: string[] };
+      assert.deepEqual(tools.disallowedTools, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+    }
+    const hostReply = roomsService.getRoomDetail(ROOM_ID).messages[1];
+    assert.deepEqual(hostReply.handoff, { kind: 'group', participantIds: ['p-rev', 'p-rev2'] });
+  }, { thirdParticipant: true });
+});
+
+test('사용자가 이름을 여럿 적으면 그 참가자들이 동시에 답하고 라운드가 끝난다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [REVIEWER]: ['리뷰어입니다\n@Claude'],
+      [SECOND_REVIEWER]: ['두 번째 리뷰어입니다'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 @Claude3 자기소개 해줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'both answered');
+
+    // 호스트는 부르지 않았고, 답 끝의 넘김도 따르지 않는다. 다음은 사용자가 정한다.
+    assert.deepEqual(calls.map((call) => call.sessionId).sort(), [REVIEWER, SECOND_REVIEWER].sort());
+    assert.match(calls[0].command, /\[동시 호출\] 사용자 가/);
+  }, { thirdParticipant: true });
+});
+
+test('방장 주도에서 방장이 여럿을 함께 부르면 모두 답한 뒤 방장에게 돌아온다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['인사해 주세요\n@Claude2, @Claude3', '모두 인사했습니다'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '다들 불러줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 5, 'host, two members, host');
+
+    assert.equal(calls[0].sessionId, HOST);
+    assert.deepEqual(calls.slice(1, 3).map((call) => call.sessionId).sort(), [REVIEWER, SECOND_REVIEWER].sort());
+    assert.equal(calls[3].sessionId, HOST);
+  }, { hostLed: true, discussion: true, thirdParticipant: true });
 });

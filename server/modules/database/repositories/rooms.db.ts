@@ -41,6 +41,8 @@ export type RoomParticipantRow = {
   session_id: string | null;
   provider: string;
   model: string | null;
+  /** 세션이 생기기 전에 고른 추론 강도. 처음 불릴 때 세션에 옮긴다. */
+  effort: string | null;
   display_name: string;
   role_name: string;
   role_prompt: string;
@@ -61,7 +63,7 @@ export type RoomParticipantRow = {
 /** 새로 넣을 때 정하는 칸. 나머지는 기본값으로 시작한다. */
 type NewRoomParticipantRow = Omit<
   RoomParticipantRow,
-  'last_seen_message_id' | 'permission_mode' | 'joined_at' | 'left_at' | 'role_dirty'
+  'last_seen_message_id' | 'permission_mode' | 'joined_at' | 'left_at' | 'role_dirty' | 'effort'
 >;
 
 export type RoomMessageRow = {
@@ -75,7 +77,7 @@ export type RoomMessageRow = {
   attachments: string | null;
   /** 참가자 답의 마지막 말. 사용자 글이나 예전 행은 NULL. */
   final_text: string | null;
-  /** `done` | `pass` | `mention:<participant_id>`. 없으면 NULL. */
+  /** `done` | `pass` | `mention:<participant_id>` | `group:<id>,<id>`. 없으면 NULL. */
   handoff: string | null;
   /** reply | plan | task | comment | summary. 사용자 글과 예전 행은 NULL. */
   turn_kind: string | null;
@@ -84,7 +86,7 @@ export type RoomMessageRow = {
   created_at: string;
 };
 
-const PARTICIPANT_COLUMNS = `participant_id, room_id, session_id, provider, model, display_name,
+const PARTICIPANT_COLUMNS = `participant_id, room_id, session_id, provider, model, effort, display_name,
   role_name, role_prompt, persona, role_dirty, status, position, last_seen_message_id, permission_mode,
   joined_at, left_at`;
 
@@ -196,6 +198,29 @@ export const roomsDb = {
     return getConnection()
       .prepare(`SELECT ${PARTICIPANT_COLUMNS} FROM room_participants WHERE left_at IS NULL ORDER BY room_id, position`)
       .all() as RoomParticipantRow[];
+  },
+
+  /**
+   * 세션이 없는 명단 멤버의 모델·추론 강도를 고친다. 준 칸만 바뀐다. 세션이
+   * 생긴 뒤에는 세션 쪽 설정이 기준이라 여기를 쓰지 않는다.
+   */
+  updateParticipantModel(participantId: string, selection: { model?: string; effort?: string }): void {
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    if (selection.model !== undefined) {
+      assignments.push('model = ?');
+      values.push(selection.model);
+    }
+    if (selection.effort !== undefined) {
+      assignments.push('effort = ?');
+      values.push(selection.effort);
+    }
+    if (assignments.length === 0) {
+      return;
+    }
+    getConnection()
+      .prepare(`UPDATE room_participants SET ${assignments.join(', ')} WHERE participant_id = ?`)
+      .run(...values, participantId);
   },
 
   updateParticipantPermission(participantId: string, permissionMode: string): void {

@@ -116,6 +116,8 @@ export function useRoom(hostSessionId: string) {
       roleName?: string;
       rolePrompt?: string;
       persona?: string;
+      model?: string;
+      effort?: string;
     },
   ) => {
     if (!roomIdRef.current) return;

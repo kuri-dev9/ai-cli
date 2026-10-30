@@ -36,8 +36,8 @@ const roomDetail: RoomDetail = {
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [
-    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, displayName: '설계자', roleName: '설계', rolePrompt: '', persona: '', status: 'active', position: 0, isHost: true, permissionMode: 'ask' },
-    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', persona: '', status: 'active', position: 1, isHost: false, permissionMode: 'ask' },
+    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, effort: null, displayName: '설계자', roleName: '설계', rolePrompt: '', persona: '', status: 'active', position: 0, isHost: true, permissionMode: 'ask' },
+    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, effort: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', persona: '', status: 'active', position: 1, isHost: false, permissionMode: 'ask' },
   ],
   formerParticipants: [],
   messages: [

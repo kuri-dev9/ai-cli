@@ -43,6 +43,7 @@ export function toRoomParticipant(row: RoomParticipantRow, room: RoomRow): RoomP
     sessionId: row.session_id,
     provider: row.provider,
     model: row.model,
+    effort: row.effort ?? null,
     displayName: row.display_name,
     roleName: row.role_name,
     rolePrompt: row.role_prompt,
@@ -69,12 +70,15 @@ function parseStoredAttachments(value: string | null): RoomAttachment[] {
 /** 넘김 표시를 저장할 한 줄로. 표시가 없으면 NULL 이다. */
 export function serializeHandoff(handoff: RoomMessageHandoff | null): string | null {
   if (!handoff) return null;
-  return handoff.kind === 'mention' ? `mention:${handoff.participantId}` : handoff.kind;
+  if (handoff.kind === 'mention') return `mention:${handoff.participantId}`;
+  if (handoff.kind === 'group') return `group:${handoff.participantIds.join(',')}`;
+  return handoff.kind;
 }
 
 function parseStoredHandoff(value: string | null): RoomMessageHandoff | null {
   if (value === 'done' || value === 'pass') return { kind: value };
   if (value?.startsWith('mention:')) return { kind: 'mention', participantId: value.slice('mention:'.length) };
+  if (value?.startsWith('group:')) return { kind: 'group', participantIds: value.slice('group:'.length).split(',').filter(Boolean) };
   return null;
 }
 

@@ -15,7 +15,7 @@ import {
   nextParticipantAfter,
   parseAssignments,
   parseHandoff,
-  pickSpeakerForUserMessage,
+  pickSpeakersForUserMessage,
 } from '@/modules/rooms/services/room-prompt.service.js';
 import type { RoomHandoff, RoomTurnMode } from '@/modules/rooms/services/room-prompt.service.js';
 import {
@@ -579,6 +579,35 @@ async function runAssignments(
 }
 
 /**
+ * 함께 불린 참가자들이 동시에 답한다. 모두 읽기 전용이다 — 같은 폴더를 여럿이
+ * 동시에 고치면 서로 덮어쓴다. 고칠 일이면 분담(`[작업 @이름 수정]`)으로 한 명에게
+ * 맡긴다.
+ *
+ * `caller` 가 없으면 사용자가 부른 것이다.
+ */
+async function runGroupCall(
+  room: RoomRow,
+  caller: RoomParticipant | null,
+  called: RoomParticipant[],
+  loop: RoomLoopState,
+): Promise<void> {
+  loop.phase = 'working';
+  await Promise.all(called.map((participant) => runParticipantTurn(room, participant, loop, {
+    mode: {
+      kind: 'called',
+      byName: caller?.displayName ?? null,
+      withNames: called
+        .filter((other) => other.participantId !== participant.participantId)
+        .map((other) => other.displayName),
+    },
+    readOnly: true,
+    turnKind: 'reply',
+    readAssignments: false,
+    dropPass: false,
+  })));
+}
+
+/**
  * 방금 올라온 답에 나머지 참가자가 동시에 짧게 의견을 낸다. 모두 읽기 전용이다.
  *
  * 의견에 적힌 넘김 표시는 돌려준다. 예전에는 그 값을 아무도 읽지 않으면서
@@ -634,7 +663,8 @@ async function runCommentRound(
  * 끝나는 경우: `[DONE]`, 다른 참가자 모두가 연달아 `[PASS]`, 자동 턴 한도,
  * 정지, 실행 실패. 실패에서 멈추는 이유는 다음 참가자가 실패한 답을 받아
  * 엉뚱하게 이어가기 쉬워서다 — 사용자가 보고 다시 시키는 편이 낫다.
- * 자동 턴은 차례 하나, 분담 한 번(동시에 몇 명이 일하든)을 각각 하나로 센다.
+ * 자동 턴은 차례 하나, 분담 한 번, 동시 호출 한 번(동시에 몇 명이 일하든)을
+ * 각각 하나로 센다.
  */
 async function runLoop(roomId: string): Promise<void> {
   const loop = getLoop(roomId);
@@ -679,9 +709,26 @@ async function runLoop(roomId: string): Promise<void> {
         loop.turnCount = 0;
         consecutivePasses = 0;
         // 사용자가 명단 멤버를 바로 부를 수 있다. 그러면 그 멤버가 들어와 답한다.
-        next = pickSpeakerForUserMessage(latestUserMessageText(roomId), listRoster(room));
+        const called = pickSpeakersForUserMessage(latestUserMessageText(roomId), listRoster(room));
         nextKind = 'opening';
         calledByHost = false;
+        if (called.length > 1) {
+          // 여럿을 함께 불렀으면 모두 동시에 답하고 라운드는 거기서 끝난다.
+          // 답을 받아 다음을 정하는 건 부른 사용자다.
+          loop.turnCount += 1;
+          broadcastState(room);
+          await runGroupCall(room, null, called, loop);
+          broadcastState(room);
+          if (loop.halted) {
+            break;
+          }
+          if (loop.pendingUserMessage) {
+            continue;
+          }
+          logStop('group-called-by-user', { participants: called.map((participant) => participant.participantId) });
+          break;
+        }
+        next = called[0] ?? null;
       }
 
       if (!next || loop.turnCount >= room.max_auto_turns) {
@@ -749,6 +796,35 @@ async function runLoop(roomId: string): Promise<void> {
         }
         // 결과는 맡긴 참가자가 모아 정리한다.
         consecutivePasses = 0;
+        next = speaker;
+        nextKind = 'summary';
+        continue;
+      }
+
+      // 이름만 여럿 적어 함께 불렀다. 모두 동시에 답하고 부른 참가자가 모아
+      // 정리한다. 방장 주도에서 부르기는 방장만 한다.
+      if (handoff.kind === 'group' && (!hostLed || speaker.isHost)) {
+        if (loop.turnCount >= room.max_auto_turns) {
+          logStop('turn-cap', { maxAutoTurns: room.max_auto_turns });
+          break;
+        }
+        const roster = listRoster(room);
+        const called = handoff.participantIds
+          .map((participantId) => roster.find((participant) => participant.participantId === participantId))
+          .filter((participant): participant is RoomParticipant => Boolean(participant));
+        loop.turnCount += 1;
+        broadcastState(room);
+        await runGroupCall(room, speaker, called, loop);
+        broadcastState(room);
+        if (loop.halted) {
+          break;
+        }
+        if (loop.pendingUserMessage) {
+          continue;
+        }
+        consecutivePasses = 0;
+        followedCommentHandoff = false;
+        calledByHost = false;
         next = speaker;
         nextKind = 'summary';
         continue;

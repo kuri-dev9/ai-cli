@@ -1365,6 +1365,8 @@ export type RoomParticipant = {
   sessionId: string | null;
   provider: string;
   model: string | null;
+  /** 세션이 생기기 전에 고른 추론 강도. 세션이 생긴 뒤에는 세션 쪽이 기준이다. */
+  effort: string | null;
   displayName: string;
   roleName: string;
   /** 이 참가자가 무엇을 하는지. */
@@ -1420,7 +1422,9 @@ export type RoomTask = {
 export type RoomMessageHandoff =
   | { kind: 'done' }
   | { kind: 'pass' }
-  | { kind: 'mention'; participantId: string };
+  | { kind: 'mention'; participantId: string }
+  /** 마지막 줄에 이름만 여럿 적어 동시에 부른 참가자들. */
+  | { kind: 'group'; participantIds: string[] };
 
 /** The server's live view of a room's turn loop: who is speaking now and how many automatic turns have run, broadcast as `room_state` frames. */
 export type RoomRuntimeState = {

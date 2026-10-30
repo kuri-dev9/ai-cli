@@ -557,6 +557,9 @@ const addRoomSettingsColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'turn_kind', 'TEXT');
   addColumnToTableIfNotExists(db, 'room_messages', messageColumns, 'task', 'TEXT');
   allowRosterParticipantsWithoutSession(db);
+  // 표를 새로 만든 뒤에 붙인다. 위에서 다시 만든 표에는 이 칸이 없다.
+  const rosterColumns = getTableInfo(db, 'room_participants').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'room_participants', rosterColumns, 'effort', 'TEXT');
   const roomColumns = getTableInfo(db, 'rooms').map((column) => column.name);
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'split_work', 'INTEGER NOT NULL DEFAULT 1');
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'discussion', 'INTEGER NOT NULL DEFAULT 1');

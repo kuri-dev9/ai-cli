@@ -1515,6 +1515,8 @@ export type RoomParticipant = {
   sessionId: string | null;
   provider: string;
   model: string | null;
+  /** 세션이 생기기 전에 고른 추론 강도. 세션이 생긴 뒤에는 세션 쪽이 기준이다. */
+  effort: string | null;
   /** `@이름` 으로 부르는 이름. 공백과 `@` 없이, 룸 안에서 겹치지 않는다. */
   displayName: string;
   roleName: string;
@@ -1588,7 +1590,9 @@ export type RoomTask = {
 export type RoomMessageHandoff =
   | { kind: 'done' }
   | { kind: 'pass' }
-  | { kind: 'mention'; participantId: string };
+  | { kind: 'mention'; participantId: string }
+  /** 마지막 줄에 이름만 여럿 적어 동시에 부른 참가자들. */
+  | { kind: 'group'; participantIds: string[] };
 
 /**
  * 룸이 지금 돌고 있는지. 메모리에만 있다 — 서버가 다시 뜨면 모두 `idle` 이다.

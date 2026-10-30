@@ -19,6 +19,8 @@ type ParticipantSettingsPanelProps = {
   onChangePermission: (mode: RoomPermissionMode) => void;
   /** 이름·역할·역할 지시·성향을 고친다. 고치면 참가자가 다음 차례에 다시 안내받는다. */
   onChangeProfile: (profile: { displayName: string; roleName: string; rolePrompt: string; persona: string }) => void;
+  /** 세션이 없는 명단 멤버의 모델·추론 강도를 명단에 적는다. 처음 불릴 때 세션으로 옮겨진다. */
+  onChangeRosterSelection: (changes: { model?: string; effort?: string }) => Promise<void>;
   /** 이 참가자 세션의 맥락만 줄인다. 쌓인 토큰을 되돌리는 데 쓴다. */
   onCompact: () => void;
   onLeave: () => void;
@@ -39,13 +41,18 @@ export default function ParticipantSettingsPanel({
   refreshKey,
   onChangePermission,
   onChangeProfile,
+  onChangeRosterSelection,
   onCompact,
   onLeave,
   onOpenSession,
   onClose,
 }: ParticipantSettingsPanelProps) {
   const { t } = useTranslation('chat');
-  const session = useParticipantSession(participant.provider, participant.sessionId, refreshKey);
+  const session = useParticipantSession(participant.provider, participant.sessionId, refreshKey, {
+    model: participant.model,
+    effort: participant.effort,
+    save: onChangeRosterSelection,
+  });
   // 역할 편집 폼이 열려 있으면 고치는 중인 값. 닫혀 있으면 null.
   const [draft, setDraft] = useState<{ displayName: string; roleName: string; rolePrompt: string; persona: string } | null>(null);
 

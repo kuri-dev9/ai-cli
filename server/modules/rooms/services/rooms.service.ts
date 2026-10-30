@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { roomsDb, sessionsDb } from '@/modules/database/index.js';
-import type { RoomRow } from '@/modules/database/index.js';
+import type { RoomParticipantRow, RoomRow } from '@/modules/database/index.js';
 import {
   providerAuthService,
   providerModelsService,
@@ -185,6 +185,31 @@ async function assertProviderUsable(provider: string): Promise<LLMProvider> {
 
 
 /** Rooms 라우트가 쓰는 룸 서비스. */
+/**
+ * 참가자의 모델·추론 강도를 고친다. 세션이 있으면 세션에 적는다 — 차례는
+ * 세션 설정으로 돈다. 아직 불린 적 없는 명단 멤버는 세션이 없으니 명단에
+ * 적어 두고, 처음 불려 세션이 생길 때 옮긴다.
+ */
+function updateParticipantSelection(
+  current: RoomParticipantRow,
+  model: string | undefined,
+  effort: string | undefined,
+): void {
+  const nextModel = model?.trim() || undefined;
+  const nextEffort = effort?.trim() || undefined;
+  if (!current.session_id) {
+    roomsDb.updateParticipantModel(current.participant_id, { model: nextModel, effort: nextEffort });
+    return;
+  }
+  const provider = current.provider as LLMProvider;
+  if (nextModel) {
+    providerModelsService.setSessionModel(provider, current.session_id, nextModel);
+  }
+  if (nextEffort) {
+    providerModelsService.setSessionEffort(provider, current.session_id, nextEffort);
+  }
+}
+
 export const roomsService = {
   listRoomIndex(): RoomIndexEntry[] {
     const participantsByRoom = new Map<string, RoomIndexEntry['participants']>();
@@ -381,12 +406,17 @@ export const roomsService = {
       roleName?: string;
       rolePrompt?: string;
       persona?: string;
+      model?: string;
+      effort?: string;
     },
   ): RoomDetail {
     const room = requireRoom(roomId);
     const current = requireParticipant(roomId, participantId);
     if (settings.permissionMode !== undefined) {
       roomsDb.updateParticipantPermission(participantId, settings.permissionMode);
+    }
+    if (settings.model !== undefined || settings.effort !== undefined) {
+      updateParticipantSelection(current, settings.model, settings.effort);
     }
 
     const profile: { displayName?: string; roleName?: string; rolePrompt?: string; persona?: string } = {};

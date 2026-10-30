@@ -112,6 +112,8 @@ router.patch(
         roleName: readOptionalString(body.roleName) ?? undefined,
         rolePrompt: readOptionalString(body.rolePrompt) ?? undefined,
         persona: readOptionalString(body.persona) ?? undefined,
+        model: readOptionalString(body.model) ?? undefined,
+        effort: readOptionalString(body.effort) ?? undefined,
       },
     );
     res.json(createApiSuccessResponse(detail));
