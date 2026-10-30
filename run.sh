@@ -85,6 +85,11 @@ cmd_start() {
   if ! build_exists; then
     info "빌드 산출물이 없습니다"
     cmd_build || return 1
+  elif build_is_stale; then
+    # `restart` 는 어차피 먼저 빌드하므로 여기 걸리지 않는다. 걸리는 것은
+    # 고친 뒤 `start` 만 친 경우인데, 그대로 띄우면 예전 코드가 올라온다.
+    info "소스가 빌드 산출물보다 새롭습니다"
+    cmd_build || return 1
   fi
 
   # 남아 있는 PID 파일은 지난번에 비정상 종료된 흔적이다. 정리하고 시작한다.
@@ -108,6 +113,8 @@ cmd_start() {
       printf "\n"
       ok "준비됐습니다"
       access_urls
+      printf "\n  %s열어 둔 탭은 새 빌드를 감지하면 스스로 새로고침합니다.%s\n" \
+        "$C_DIM" "$C_OFF"
       printf "\n  %s로그: ./run.sh logs   ·   상태: ./run.sh status   ·   중지: ./run.sh stop%s\n\n" \
         "$C_DIM" "$C_OFF"
       return 0
@@ -174,6 +181,15 @@ cmd_status() {
     printf "%s정상%s  %s%s%s\n" "$C_GREEN" "$C_OFF" "$C_DIM" "$(health_url)" "$C_OFF"
   else
     printf "%s없음%s  %s%s%s\n" "$C_RED" "$C_OFF" "$C_DIM" "$(health_url)" "$C_OFF"
+  fi
+
+  printf "  %-12s" "빌드"
+  if ! build_exists; then
+    printf "%s없음%s\n" "$C_RED" "$C_OFF"
+  elif build_is_stale; then
+    printf "%s소스보다 오래됨%s  %s(./run.sh restart)%s\n" "$C_YELLOW" "$C_OFF" "$C_DIM" "$C_OFF"
+  else
+    printf "%s최신%s\n" "$C_GREEN" "$C_OFF"
   fi
 
   printf "  %-12s%s  (HOST=%s, HTTPS=%s)\n" "설정" "$port" "$(server_host)" \

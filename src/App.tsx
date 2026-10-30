@@ -6,7 +6,7 @@ import { UiPreferencesProvider } from '@/shared/context/UiPreferencesContext';
 import { AuthProvider, ProtectedRoute } from '@/modules/auth';
 import { TaskMasterProvider,TasksSettingsProvider } from '@/modules/task-master';
 import { WebSocketProvider } from '@/shared/context/WebSocketContext';
-import { ConnectionStatusBanner } from '@/shared/ui';
+import { ConnectionStatusBanner, FrontendBuildRefresh } from '@/shared/ui';
 import { PluginsProvider } from '@/modules/plugins';
 import { ProjectWorkspaceRoute } from '@/modules/project-workspace';
 import { i18n } from '@/modules/i18n';
@@ -118,6 +118,8 @@ export default function App() {
           <WebSocketProvider>
             {/* 연결이 끊기면 화면 위에 띄운다. 정상일 때는 아무것도 그리지 않는다. */}
             <ConnectionStatusBanner />
+            {/* 서버가 다시 빌드됐으면 이 탭을 새로고침한다. */}
+            <FrontendBuildRefresh />
             <PluginsProvider>
               <TasksSettingsProvider>
                 <TaskMasterProvider>

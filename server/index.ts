@@ -14,6 +14,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 
 import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
+import { createFrontendBuildIdReader } from '@/shared/frontend-build-id.js';
 import {
     closeSessionsWatcher,
     initializeSessionsWatcher,
@@ -86,6 +87,12 @@ const RUNNING_VERSION = (() => {
         return null;
     }
 })();
+// 열어 둔 탭이 `/health` 로 받아 가는 값. 자기가 돌리고 있는 번들과 다르면
+// 그 탭은 다시 빌드되기 전의 코드를 돌리고 있다는 뜻이다.
+const readFrontendBuildId = createFrontendBuildIdReader(
+    path.join(APP_ROOT, 'dist', 'index.html'),
+);
+
 const systemRoutes = createSystemModule({
     appRoot: APP_ROOT,
     installMode,
@@ -187,7 +194,10 @@ app.get('/health', (req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         installMode,
-        version: RUNNING_VERSION
+        version: RUNNING_VERSION,
+        // 열려 있는 탭이 자기가 돌리고 있는 번들과 견줘 보는 값. 다르면 그 탭은
+        // 다시 빌드되기 전의 코드를 돌리고 있다는 뜻이라 스스로 새로고침한다.
+        frontendBuildId: readFrontendBuildId()
     });
 });
 

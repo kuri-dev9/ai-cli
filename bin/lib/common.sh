@@ -218,3 +218,21 @@ health_check() {
 build_exists() {
   [ -f "$PROJECT_ROOT/dist-server/server/index.js" ] && [ -d "$PROJECT_ROOT/dist" ]
 }
+
+# 빌드 산출물이 소스보다 오래됐는가.
+#
+# 고치고 커밋까지 해 놓고 다시 빌드하는 것만 잊으면, 서버는 멀쩡히 돌면서
+# 예전 코드를 내보낸다. 고친 사람 눈에는 고쳐진 것으로 보이니 같은 증상을
+# 두 번 쫓게 된다. 산출물보다 새 소스가 하나라도 있으면 참이다.
+build_is_stale() {
+  build_exists || return 0
+
+  local marker="$PROJECT_ROOT/dist/index.html"
+  [ -f "$marker" ] || return 0
+
+  local newer
+  newer="$(find "$PROJECT_ROOT/src" "$PROJECT_ROOT/server" "$PROJECT_ROOT/shared" \
+             "$PROJECT_ROOT/index.html" "$PROJECT_ROOT/package.json" \
+             -newer "$marker" -print -quit 2>/dev/null)"
+  [ -n "$newer" ]
+}
