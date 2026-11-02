@@ -75,6 +75,7 @@ function toSettingsResponse(settings: TelegramSettings, running: boolean) {
     running,
     botUsername: settings.botUsername,
     permissionMode: settings.permissionMode,
+    notifyOnCompletion: settings.notifyOnCompletion,
   };
 }
 
@@ -145,6 +146,9 @@ export function createTelegramRouter(
       if (requestBody.enabled !== undefined && typeof requestBody.enabled !== 'boolean') {
         throw invalidRequest('enabled must be a boolean');
       }
+      if (requestBody.notifyOnCompletion !== undefined && typeof requestBody.notifyOnCompletion !== 'boolean') {
+        throw invalidRequest('notifyOnCompletion must be a boolean');
+      }
 
       // 모르는 값은 받지 않는다. 저장되면 그때부터 조용히 `ask` 로 읽히는데,
       // 화면에서는 고른 대로 보이므로 왜 안 듣는지 알 길이 없다.
@@ -165,6 +169,7 @@ export function createTelegramRouter(
         allowedChatIds,
         enabled: requestBody.enabled as boolean | undefined,
         permissionMode: requestBody.permissionMode as TelegramPermissionMode | undefined,
+        notifyOnCompletion: requestBody.notifyOnCompletion as boolean | undefined,
       });
 
       // 저장한 설정대로 켜지거나 꺼진다. 서버를 다시 띄우게 하면 설정 화면을

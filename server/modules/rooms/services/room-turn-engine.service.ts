@@ -1,8 +1,9 @@
 import { roomsDb, sessionsDb } from '@/modules/database/index.js';
 import type { RoomRow } from '@/modules/database/index.js';
 import { providerTokenUsageService, sessionsService } from '@/modules/providers/index.js';
-import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/index.js';
+import { isSessionHandedToTelegram, notifyTelegramRoundFinished } from '@/modules/telegram-bridge/index.js';
 import {
+  activeRunJournal,
   chatRunRegistry,
   resolveTelegramRunPermissions,
   runDetachedChatTurn,
@@ -63,8 +64,9 @@ import { AppError } from '@/shared/utils.js';
  * 사용자는 언제든 글을 보낼 수 있고, 그 글은 바로 타임라인에 올라간 뒤 지금
  * 일하는 참가자들이 끝나는 대로 반영된다. [지금 끼어들기]는 그들을 끊는다.
  *
- * 상태는 메모리에만 있다. 서버가 다시 뜨면 모든 룸은 쉬는 상태로 돌아가고,
- * 타임라인은 DB 에 남아 있으므로 사용자가 다시 말을 걸면 이어진다.
+ * 상태는 메모리에 있고, 라운드가 도는 동안은 그 요약(턴 수, 일하던 참가자)을
+ * `rooms.loop_state` 에도 적어 둔다. 서버가 내려갔다 뜨면 그것으로 이어 간다 —
+ * 끊긴 참가자가 하던 일을 마무리하고, 방장이 이어서 진행한다(`resumeAfterRestart`).
  */
 
 type RoomLoopState = {
@@ -84,6 +86,25 @@ type RoomLoopState = {
   interruptedSessions: Set<string>;
   /** 마지막으로 글을 보낸 사용자. 참가자 턴을 그 사용자 이름으로 돌린다. */
   userId: string | number | null;
+  /** `active` 중 읽기 전용으로 일하는 참가자. 끊겼다 이어 갈 때 같은 권한으로 돌린다. */
+  readOnlyActive: Set<string>;
+  /** 사용자 글로 시작한 라운드가 도는 중인지. 이때만 상태를 DB 에 적는다. */
+  inRound: boolean;
+  /** 이 라운드를 서버 재시작 뒤에 몇 번 이어 갔는지. */
+  resumeCount: number;
+  /** 서버가 다시 뜬 뒤 이어 갈 라운드. `runLoop` 가 처음에 한 번 꺼내 쓴다. */
+  resume: { active: PersistedActive[] } | null;
+};
+
+/** 라운드가 도는 동안 DB 에 적어 두는 일하던 참가자. */
+type PersistedActive = { participantId: string; readOnly: boolean };
+
+/** `rooms.loop_state` 의 모양. */
+type PersistedLoopState = {
+  userId: string | number | null;
+  turnCount: number;
+  active: PersistedActive[];
+  resumeCount: number;
 };
 
 type TurnResult = {
@@ -108,6 +129,11 @@ type TurnOptions = {
 
 const loops = new Map<string, RoomLoopState>();
 let runtime: ProviderRuntimeGateway | null = null;
+/**
+ * 서버가 내려가는 중. 이때 끝나는 차례는 종료에 끌려 끊긴 것이라, 라운드
+ * 상태를 지우거나 "일하던 참가자 없음" 으로 덮어쓰면 다시 떠서 이어 갈 수 없다.
+ */
+let closing = false;
 
 /** 원래 대화에서 새 참가자에게 넘길 최근 메시지 수와 길이. */
 const PRIOR_CONTEXT_MESSAGES = 12;
@@ -167,6 +193,10 @@ function getLoop(roomId: string): RoomLoopState {
       pendingUserMessage: false,
       interruptedSessions: new Set(),
       userId: null,
+      readOnlyActive: new Set(),
+      inRound: false,
+      resumeCount: 0,
+      resume: null,
     };
     loops.set(roomId, loop);
   }
@@ -190,8 +220,56 @@ function readState(roomId: string, maxAutoTurns: number): RoomRuntimeState {
   };
 }
 
+function isShuttingDown(): boolean {
+  return closing || activeRunJournal.isStopping();
+}
+
+/**
+ * 라운드가 도는 중이면 그 상태를 DB 에 적는다. 상태가 바뀔 때마다
+ * `broadcastState` 가 부르므로, 서버가 언제 내려가든 마지막 모습이 남는다.
+ */
+function persistLoopState(roomId: string): void {
+  const loop = loops.get(roomId);
+  if (!loop?.inRound || isShuttingDown()) {
+    return;
+  }
+  const state: PersistedLoopState = {
+    userId: loop.userId,
+    turnCount: loop.turnCount,
+    active: [...loop.active.keys()].map((participantId) => ({
+      participantId,
+      readOnly: loop.readOnlyActive.has(participantId),
+    })),
+    resumeCount: loop.resumeCount,
+  };
+  try {
+    roomsDb.setLoopState(roomId, JSON.stringify(state));
+  } catch (error) {
+    console.error('[Rooms] Failed to record the round state', { roomId, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 function broadcastState(room: RoomRow): void {
+  persistLoopState(room.room_id);
   broadcastRoomFrame({ kind: 'room_state', roomId: room.room_id, state: readState(room.room_id, room.max_auto_turns) });
+}
+
+function parsePersistedLoopState(value: string | null | undefined): PersistedLoopState | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<PersistedLoopState>;
+    return {
+      userId: parsed.userId ?? null,
+      turnCount: typeof parsed.turnCount === 'number' ? parsed.turnCount : 0,
+      active: Array.isArray(parsed.active)
+        ? parsed.active.filter((entry): entry is PersistedActive => typeof entry?.participantId === 'string')
+          .map((entry) => ({ participantId: entry.participantId, readOnly: entry.readOnly === true }))
+        : [],
+      resumeCount: typeof parsed.resumeCount === 'number' ? parsed.resumeCount : 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -406,6 +484,7 @@ async function compactIfNearlyFull(room: RoomRow, me: SpeakingParticipant, loop:
     console.error('[Rooms] Auto compaction failed', { roomId: room.room_id, participant: me.displayName, error: message });
   } finally {
     loop.active.delete(me.participantId);
+    loop.readOnlyActive.delete(me.participantId);
     // 토큰 표시가 줄어든 값으로 다시 읽히게 한다.
     broadcastRoomFrame({ kind: 'room_updated', roomId: room.room_id });
   }
@@ -418,6 +497,7 @@ async function compactIfNearlyFull(room: RoomRow, me: SpeakingParticipant, loop:
  */
 function finishActiveTurn(room: RoomRow, me: SpeakingParticipant, loop: RoomLoopState): void {
   loop.active.delete(me.participantId);
+  loop.readOnlyActive.delete(me.participantId);
   broadcastState(room);
 }
 
@@ -440,11 +520,17 @@ async function runTurnInSession(
   // 앞 차례 끝에 늦게 닿은 끼어들기 표시가 이 차례를 중단으로 만들지 않게 한다.
   loop.interruptedSessions.delete(me.sessionId);
   loop.active.set(me.participantId, me.sessionId);
+  if (readOnly) {
+    loop.readOnlyActive.add(me.participantId);
+  } else {
+    loop.readOnlyActive.delete(me.participantId);
+  }
   broadcastState(room);
 
   const session = sessionsDb.getSessionById(me.sessionId);
   const model = session?.model || me.model;
   const effort = session?.effort;
+  const claudeAccountId = session?.claude_account_id || me.claudeAccountId;
   return runDetachedChatTurn(
     {
       sessionId: me.sessionId,
@@ -453,9 +539,12 @@ async function runTurnInSession(
       options: {
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),
+        ...(claudeAccountId ? { claudeAccountId } : {}),
         ...(attachments.length ? { attachments } : {}),
         ...resolveTurnPermissions(me, readOnly),
       },
+      // 서버가 다시 뜨면 이 차례는 룸이 자기 흐름대로 이어 간다.
+      owner: 'room',
     },
     { runtime, isSessionHandedToTelegram },
   );
@@ -579,6 +668,43 @@ async function runAssignments(
 }
 
 /**
+ * 서버 재시작으로 끊긴 차례를 마무리한다. 방장이 아닌 참가자들은 하던 일을
+ * 동시에 마저 하고(끊길 때와 같은 권한으로), 결과는 타임라인에 올라간다.
+ * 방장은 여기서 돌리지 않는다 — 이어서 진행하는 차례가 곧 방장의 몫이다.
+ *
+ * 다음 차례로 방장을 돌려준다. 방장이 없거나 그 사이 멈췄으면 null.
+ */
+async function finishInterruptedTurns(
+  room: RoomRow,
+  active: PersistedActive[],
+  loop: RoomLoopState,
+): Promise<RoomParticipant | null> {
+  const roster = listRoster(room);
+  const host = roster.find((participant) => participant.isHost) ?? null;
+  const interrupted = active
+    .filter((entry) => entry.participantId !== host?.participantId)
+    .map((entry) => ({ participant: roster.find((candidate) => candidate.participantId === entry.participantId), readOnly: entry.readOnly }))
+    .filter((entry): entry is { participant: RoomParticipant; readOnly: boolean } => Boolean(entry.participant));
+  if (interrupted.length > 0) {
+    loop.turnCount += 1;
+    loop.phase = 'working';
+    broadcastState(room);
+    await Promise.all(interrupted.map(({ participant, readOnly }) => runParticipantTurn(room, participant, loop, {
+      mode: { kind: 'continue' },
+      readOnly,
+      turnKind: 'reply',
+      readAssignments: false,
+      dropPass: true,
+    })));
+    broadcastState(room);
+  }
+  if (loop.halted || loop.pendingUserMessage) {
+    return null;
+  }
+  return host;
+}
+
+/**
  * 함께 불린 참가자들이 동시에 답한다. 모두 읽기 전용이다 — 같은 폴더를 여럿이
  * 동시에 고치면 서로 덮어쓴다. 고칠 일이면 분담(`[작업 @이름 수정]`)으로 한 명에게
  * 맡긴다.
@@ -669,6 +795,7 @@ async function runCommentRound(
 async function runLoop(roomId: string): Promise<void> {
   const loop = getLoop(roomId);
   loop.running = true;
+  loop.inRound = true;
 
   try {
     let next: RoomParticipant | null = null;
@@ -680,6 +807,8 @@ async function runLoop(roomId: string): Promise<void> {
     let followedCommentHandoff = false;
     // 방장 주도에서 지금 차례를 방장이 불렀는지. 그렇다면 답은 방장에게 돌아간다.
     let calledByHost = false;
+    // 이번 차례가 서버 재시작으로 끊긴 라운드를 이어 받는 방장 차례인지.
+    let resumingHost = false;
 
     /**
      * 차례 돌리기가 왜 끝났는지 남긴다.
@@ -696,6 +825,19 @@ async function runLoop(roomId: string): Promise<void> {
       });
     };
 
+    // 서버가 다시 뜬 뒤 이어 가는 라운드. 끊긴 참가자들이 하던 일을 먼저
+    // 마무리하고, 방장이 기록을 보고 이어서 진행한다.
+    if (loop.resume) {
+      const plan = loop.resume;
+      loop.resume = null;
+      const room = roomsDb.getRoom(roomId);
+      if (room) {
+        next = await finishInterruptedTurns(room, plan.active, loop);
+        nextKind = 'turn';
+        resumingHost = next !== null;
+      }
+    }
+
     while (!loop.halted) {
       const room = roomsDb.getRoom(roomId);
       if (!room) {
@@ -707,6 +849,9 @@ async function runLoop(roomId: string): Promise<void> {
         // 사용자의 새 글이 이어지던 흐름보다 우선한다. 한도도 새로 센다.
         loop.pendingUserMessage = false;
         loop.turnCount = 0;
+        // 새 라운드다. 지난 라운드를 몇 번 이어 갔는지는 상관없다.
+        loop.resumeCount = 0;
+        resumingHost = false;
         consecutivePasses = 0;
         // 사용자가 명단 멤버를 바로 부를 수 있다. 그러면 그 멤버가 들어와 답한다.
         const called = pickSpeakersForUserMessage(latestUserMessageText(roomId), listRoster(room));
@@ -754,9 +899,12 @@ async function runLoop(roomId: string): Promise<void> {
       // 끝났으므로, 여기서 세어도 도는 횟수는 달라지지 않는다.
       loop.turnCount += 1;
       broadcastState(room);
-      const mode: RoomTurnMode = nextKind === 'summary'
-        ? { kind: 'summary' }
-        : nextKind === 'opening' && splitting ? { kind: 'plan' } : { kind: 'turn' };
+      const mode: RoomTurnMode = resumingHost
+        ? { kind: 'resumed' }
+        : nextKind === 'summary'
+          ? { kind: 'summary' }
+          : nextKind === 'opening' && splitting ? { kind: 'plan' } : { kind: 'turn' };
+      resumingHost = false;
       const { message, handoff, assignments } = await runParticipantTurn(room, speaker, loop, {
         mode,
         readOnly: false,
@@ -910,16 +1058,29 @@ async function runLoop(roomId: string): Promise<void> {
   } finally {
     loop.running = false;
     loop.active.clear();
+    loop.readOnlyActive.clear();
     loop.phase = 'idle';
+    // 라운드가 끝났다. 서버가 내려가며 끊긴 것이면 상태를 남겨 다시 뜰 때 이어 간다.
+    loop.inRound = false;
+    if (!isShuttingDown()) {
+      try {
+        roomsDb.setLoopState(roomId, null);
+      } catch (error) {
+        console.error('[Rooms] Failed to clear the round state', { roomId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     // 불려 와 일하던 멤버는 라운드가 어떻게 끝났든 대기로 돌아간다.
     returnSummonedToStandby(roomId);
     const room = roomsDb.getRoom(roomId);
     if (room) {
       broadcastState(room);
     }
-    // 마지막 차례가 끝나는 순간 들어온 글이 있으면 다시 돈다.
+    // 마지막 차례가 끝나는 순간 들어온 글이 있으면 다시 돈다 — 그러면 아직
+    // "완전히 끝난" 게 아니라서 여기서는 알리지 않는다. 다음에 멈출 때 한 번만.
     if (loop.pendingUserMessage && !loop.halted && room) {
       void runLoop(roomId);
+    } else {
+      notifyTelegramRoundFinished(roomId);
     }
   }
 }
@@ -972,6 +1133,7 @@ async function runHostCommand(roomId: string, commandMessageId: number, content:
   } finally {
     loop.running = false;
     loop.active.clear();
+    loop.readOnlyActive.clear();
     loop.phase = 'idle';
     const room = roomsDb.getRoom(roomId);
     if (room) {
@@ -1019,6 +1181,7 @@ async function runCompaction(roomId: string, participants: SpeakingParticipant[]
   } finally {
     loop.running = false;
     loop.active.clear();
+    loop.readOnlyActive.clear();
     loop.phase = 'idle';
     const room = roomsDb.getRoom(roomId);
     if (room) {
@@ -1034,16 +1197,50 @@ export const roomTurnEngine = {
   /** `readTokenUsage` 는 테스트가 맥락 사용량을 가짜로 줄 때만 넘긴다. */
   initialize(gateway: ProviderRuntimeGateway, options: { readTokenUsage?: TokenUsageReader } = {}): void {
     runtime = gateway;
+    closing = false;
     readTokenUsage = options.readTokenUsage ?? defaultTokenUsageReader;
   },
 
   close(): void {
+    closing = true;
     for (const loop of loops.values()) {
       loop.halted = true;
     }
     loops.clear();
     runtime = null;
     readTokenUsage = defaultTokenUsageReader;
+  },
+
+  /**
+   * 서버가 내려갈 때 차례가 돌고 있던 룸을 이어 간다. 이미 `maxResumes` 번
+   * 이어 간 라운드면 더 하지 않고 상태를 지운다 — 이어 가다 또 끊기는 일이
+   * 되풀이되지 않게.
+   */
+  resumeAfterRestart(roomId: string, options: { maxResumes: number }): 'resumed' | 'skipped' {
+    const room = roomsDb.getRoom(roomId);
+    const state = parsePersistedLoopState(room?.loop_state);
+    const loop = getLoop(roomId);
+    if (!room || !state || state.resumeCount >= options.maxResumes || loop.running) {
+      roomsDb.setLoopState(roomId, null);
+      return 'skipped';
+    }
+    loop.userId = state.userId;
+    loop.turnCount = state.turnCount;
+    loop.resumeCount = state.resumeCount + 1;
+    loop.halted = false;
+    loop.resume = { active: state.active };
+    void runLoop(roomId);
+    return 'resumed';
+  },
+
+  /** 끊긴 라운드를 이어 가지 않기로 했다. 상태만 지운다. */
+  discardInterruptedRound(roomId: string): void {
+    roomsDb.setLoopState(roomId, null);
+  },
+
+  /** 서버가 내려갈 때 차례가 돌고 있던 룸. */
+  listInterruptedRooms(): string[] {
+    return roomsDb.listRoomsWithLoopState().map((room) => room.room_id);
   },
 
   getState(roomId: string, maxAutoTurns: number): RoomRuntimeState {

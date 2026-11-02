@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink, LogOut, Minimize2, Pencil, X } from 'lucide-react';
 
 import { ComposerModelMenu, TokenUsageSummary } from '@/modules/chat';
+import { api, readApiJson } from '@/shared/api';
 import type { RoomParticipant, RoomPermissionMode } from '@/shared/types';
 import { Button } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 import { useParticipantSession } from '@/modules/rooms/hooks/useParticipantSession';
 import { isValidRoomDisplayName } from '@/modules/rooms/utils/roomRolePresets';
 import { ROOM_PERMISSION_LABEL_KEYS, ROOM_PERMISSION_MODES } from '@/modules/rooms/utils/roomPermissions';
+
+type ClaudeAccount = { id: string; label: string; configDir: string | null };
 
 type ParticipantSettingsPanelProps = {
   participant: RoomParticipant;
@@ -19,8 +22,8 @@ type ParticipantSettingsPanelProps = {
   onChangePermission: (mode: RoomPermissionMode) => void;
   /** 이름·역할·역할 지시·성향을 고친다. 고치면 참가자가 다음 차례에 다시 안내받는다. */
   onChangeProfile: (profile: { displayName: string; roleName: string; rolePrompt: string; persona: string }) => void;
-  /** 세션이 없는 명단 멤버의 모델·추론 강도를 명단에 적는다. 처음 불릴 때 세션으로 옮겨진다. */
-  onChangeRosterSelection: (changes: { model?: string; effort?: string }) => Promise<void>;
+  /** 세션이 없는 명단 멤버의 모델·추론 강도·Claude 계정을 명단에 적는다. 처음 불릴 때 세션으로 옮겨진다. */
+  onChangeRosterSelection: (changes: { model?: string; effort?: string; claudeAccountId?: string }) => Promise<void>;
   /** 이 참가자 세션의 맥락만 줄인다. 쌓인 토큰을 되돌리는 데 쓴다. */
   onCompact: () => void;
   onLeave: () => void;
@@ -64,6 +67,33 @@ export default function ParticipantSettingsPanel({
   const selectEffort = (effort: string) => {
     void session.selectEffort(effort).catch((error: unknown) => {
       console.error('Error changing the participant reasoning effort:', error);
+    });
+  };
+
+  // Claude 계정은 세션이 생기기 전(명단 상태)에만 고를 수 있다.
+  const canPickClaudeAccount = participant.provider === 'claude' && !participant.sessionId;
+  const [claudeAccounts, setClaudeAccounts] = useState<ClaudeAccount[]>([]);
+  useEffect(() => {
+    if (!canPickClaudeAccount) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await api.providers.claudeAccounts();
+        const body = await readApiJson<{ data?: ClaudeAccount[] }>(response);
+        if (!cancelled && Array.isArray(body.data)) {
+          setClaudeAccounts(body.data);
+        }
+      } catch (error) {
+        console.error('Failed to load Claude accounts:', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canPickClaudeAccount]);
+  const selectClaudeAccount = (claudeAccountId: string) => {
+    void session.selectClaudeAccount(claudeAccountId).catch((error: unknown) => {
+      console.error('Error changing the participant Claude account:', error);
     });
   };
 
@@ -114,6 +144,22 @@ export default function ParticipantSettingsPanel({
           modelsLoading={session.modelsLoading}
         />
       </label>
+
+      {canPickClaudeAccount && claudeAccounts.length > 0 && (
+        <label className="flex items-center justify-between gap-2 text-muted-foreground">
+          {t('rooms.claudeAccount')}
+          <select
+            value={participant.claudeAccountId ?? ''}
+            onChange={(event) => selectClaudeAccount(event.target.value)}
+            className={FIELD_CLASS}
+          >
+            <option value="">{t('rooms.claudeAccountDefault')}</option>
+            {claudeAccounts.map((account) => (
+              <option key={account.id} value={account.id}>{account.label}</option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <div className="flex items-center justify-between gap-2 text-muted-foreground" role="group" aria-label={t('rooms.permissionMode')}>
         {t('rooms.permissionMode')}

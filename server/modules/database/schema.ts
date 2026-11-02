@@ -138,6 +138,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- restores its exact runtime configuration instead of provider defaults.
     model TEXT,
     effort TEXT,
+    -- Which registered Claude account (CLAUDE_CONFIG_DIR) this session runs
+    -- with, by id from the claude_accounts app_config row. NULL means the
+    -- server's own default. Set once, on the first turn, and never changed
+    -- after: Claude resumes a session from that account's transcript folder,
+    -- so switching accounts mid-session would make it unresumable.
+    claude_account_id TEXT,
     -- The app session this one was branched from, NULL for sessions created
     -- normally. Informational only: a fork is a fully independent provider
     -- session, and deleting the source does not affect it.
@@ -301,6 +307,12 @@ CREATE TABLE IF NOT EXISTS rooms (
     host_led INTEGER NOT NULL DEFAULT 1,
     -- 1 이면 참가자 세션의 맥락이 많이 차면 그 차례 전에 스스로 줄인다.
     auto_compact INTEGER NOT NULL DEFAULT 1,
+    -- 1 이면 라운드가 완전히 끝났을 때(참가자 한 명이 아니라 전체) 텔레그램으로
+    -- 알린다. 기본은 꺼짐.
+    notify_telegram INTEGER NOT NULL DEFAULT 0,
+    -- 차례가 도는 중인 룸의 상태 JSON. 서버가 내려갔다 뜨면 이것으로 이어 간다.
+    -- 라운드가 끝나면 NULL 로 돌아간다.
+    loop_state TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (host_session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -317,6 +329,10 @@ CREATE TABLE IF NOT EXISTS room_participants (
     model TEXT,
     -- 세션이 생기기 전에 고른 추론 강도. 처음 불릴 때 세션에 옮긴다.
     effort TEXT,
+    -- 세션이 생기기 전에 고른 Claude 계정(claude_accounts 의 id). 처음 불릴 때
+    -- 세션에 옮기고, 그 뒤로는 바꾸지 않는다 — 계정을 바꾸면 그 세션의
+    -- transcript 를 못 찾아 이어가기가 깨진다.
+    claude_account_id TEXT,
     display_name TEXT NOT NULL,
     role_name TEXT NOT NULL,
     role_prompt TEXT NOT NULL DEFAULT '',
@@ -368,6 +384,29 @@ CREATE TABLE IF NOT EXISTS room_messages (
 `;
 
 /** 룸 표에 붙는 색인. 처음 만들 때와 기존 설치를 올릴 때 같이 쓴다. */
+/**
+ * 지금 돌고 있는 실행. 시작할 때 넣고 끝나면 지운다. 서버가 다시 떴을 때 남아
+ * 있는 행은 서버가 내려가며 끊긴 실행이다 — 그 세션에 이어서 하라고 다시 보낸다.
+ */
+export const ACTIVE_RUNS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS active_runs (
+    session_id TEXT PRIMARY KEY,
+    -- 같은 세션의 다음 실행이 이 행을 덮어쓴 뒤 앞 실행이 끝나도 지우지 않게 한다.
+    run_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    -- web | telegram. 텔레그램에서 시작했으면 이어 간 결과도 텔레그램으로 간다.
+    origin TEXT NOT NULL DEFAULT 'web',
+    -- chat | room. 룸 참가자의 차례는 룸이 자기 흐름대로 이어 간다.
+    owner TEXT NOT NULL DEFAULT 'chat',
+    user_id TEXT,
+    -- 실행 옵션(모델·권한) JSON. 첨부는 빼고 적는다.
+    options TEXT NOT NULL DEFAULT '{}',
+    -- 끊겨서 이어 간 횟수. 이어 가다 또 끊기는 일이 되풀이되지 않게 센다.
+    resume_count INTEGER NOT NULL DEFAULT 0,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 export const ROOM_INDEXES_SQL = `
 CREATE INDEX IF NOT EXISTS idx_room_participants_room ON room_participants(room_id, position);
 CREATE INDEX IF NOT EXISTS idx_room_participants_session ON room_participants(session_id);
@@ -435,4 +474,6 @@ ${ROOMS_TABLE_SCHEMA_SQL}
 ${ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL}
 ${ROOM_MESSAGES_TABLE_SCHEMA_SQL}
 ${ROOM_INDEXES_SQL}
+
+${ACTIVE_RUNS_TABLE_SCHEMA_SQL}
 `;

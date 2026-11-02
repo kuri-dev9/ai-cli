@@ -6,8 +6,13 @@ export {
   initializeTelegramBridge,
   isSessionHandedToTelegram,
   isTelegramBridgeRunning,
+  notifyTelegramRoundFinished,
   restartTelegramBridge,
   shouldRelayCompletion,
+  // startTelegramBridge: the lower-level constructor `initializeTelegramBridge`
+  // wraps. Exposed for other modules' integration tests (e.g. rooms, which
+  // verifies a round-finished notification without going through app settings).
+  startTelegramBridge,
 } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
 export { handleTelegramCommand } from '@/modules/telegram-bridge/services/telegram-commands.service.js';
 export {
@@ -16,6 +21,7 @@ export {
 } from '@/modules/telegram-bridge/services/telegram-client.service.js';
 export type {
   TelegramChatDiscovery,
+  TelegramClient,
   TelegramDiscoveredChat,
 } from '@/modules/telegram-bridge/services/telegram-client.service.js';
 // 설정 화면이 토큰과 chat id 를 넣고 연결을 확인하는 라우터.

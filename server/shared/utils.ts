@@ -86,8 +86,17 @@ function expandHomePrefix(candidatePath: string, homeDirectory: string): string 
  * auth), the providers services (sessions watcher, token usage), the Agent
  * module, TaskMaster, and the CLI module.
  */
-export function getClaudeHomeDirectory(homeDirectory: string = os.homedir()): string {
-  const configuredDirectory = process.env.CLAUDE_CONFIG_DIR?.trim();
+/**
+ * `configDirOverride` reads a specific registered Claude account's directory
+ * instead of this process's own `CLAUDE_CONFIG_DIR` — used to query a
+ * non-default account's credentials/usage without touching the env var every
+ * other call in this process relies on.
+ */
+export function getClaudeHomeDirectory(
+  homeDirectory: string = os.homedir(),
+  configDirOverride?: string,
+): string {
+  const configuredDirectory = (configDirOverride ?? process.env.CLAUDE_CONFIG_DIR)?.trim();
   if (!configuredDirectory) {
     return path.join(homeDirectory, '.claude');
   }
@@ -112,12 +121,16 @@ export function getClaudeHomeDirectory(homeDirectory: string = os.homedir()): st
  * Consumed by the Claude auth provider (login detection) and the providers
  * usage service (reading the token for the usage endpoint).
  */
-export function getClaudeKeychainServiceName(homeDirectory: string = os.homedir()): string {
-  if (!process.env.CLAUDE_CONFIG_DIR?.trim()) {
+export function getClaudeKeychainServiceName(
+  homeDirectory: string = os.homedir(),
+  configDirOverride?: string,
+): string {
+  const configuredDirectory = configDirOverride ?? process.env.CLAUDE_CONFIG_DIR;
+  if (!configuredDirectory?.trim()) {
     return 'Claude Code-credentials';
   }
 
-  const configDirectory = getClaudeHomeDirectory(homeDirectory).normalize('NFC');
+  const configDirectory = getClaudeHomeDirectory(homeDirectory, configDirOverride).normalize('NFC');
   const suffix = createHash('sha256').update(configDirectory).digest('hex').slice(0, 8);
   return `Claude Code-credentials-${suffix}`;
 }

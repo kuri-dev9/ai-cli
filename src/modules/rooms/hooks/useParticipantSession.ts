@@ -9,7 +9,7 @@ type SessionSelection = { model: string | null; effort: string | null };
 
 /** 세션이 없는 명단 멤버의 고른 값. 명단에 적어 두면 처음 불릴 때 세션으로 옮겨진다. */
 type RosterSelection = SessionSelection & {
-  save: (changes: { model?: string; effort?: string }) => Promise<void>;
+  save: (changes: { model?: string; effort?: string; claudeAccountId?: string }) => Promise<void>;
 };
 
 /**
@@ -110,6 +110,16 @@ export function useParticipantSession(
     setSelection((current) => ({ ...current, effort: body.data?.effort?.trim() || nextEffort }));
   }, [provider, sessionId, saveToRoster]);
 
+  /**
+   * 명단 멤버만 바꿀 수 있다. 세션이 생긴 뒤에는 이 계정으로 그 세션의 Claude
+   * transcript 를 찾으므로, 거기서는 호출하지 않는다(호출해도 조용히 무시된다
+   * — `updateParticipantSelection` 쪽 서버 가드).
+   */
+  const selectClaudeAccount = useCallback(async (nextClaudeAccountId: string) => {
+    if (sessionId) return;
+    await saveToRoster({ claudeAccountId: nextClaudeAccountId });
+  }, [sessionId, saveToRoster]);
+
   return {
     model,
     modelOptions,
@@ -118,6 +128,7 @@ export function useParticipantSession(
     effortOptions,
     selectModel,
     selectEffort,
+    selectClaudeAccount,
     tokenUsage,
   };
 }

@@ -21,6 +21,7 @@ function participant(id: string, displayName: string, position: number, extra: P
     provider: 'claude',
     model: null,
     effort: null,
+    claudeAccountId: null,
     displayName,
     roleName: `role-${id}`,
     rolePrompt: '',

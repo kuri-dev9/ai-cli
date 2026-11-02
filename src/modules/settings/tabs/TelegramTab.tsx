@@ -26,6 +26,7 @@ const EMPTY_SETTINGS: TelegramSettingsState = {
   running: false,
   botUsername: null,
   permissionMode: 'ask',
+  notifyOnCompletion: false,
 };
 
 /**
@@ -60,6 +61,7 @@ function unwrapSettings(payload: unknown): TelegramSettingsState {
     permissionMode: PERMISSION_MODES.includes(source?.permissionMode as TelegramPermissionMode)
       ? (source?.permissionMode as TelegramPermissionMode)
       : 'ask',
+    notifyOnCompletion: source?.notifyOnCompletion === true,
   };
 }
 
@@ -313,6 +315,22 @@ export default function TelegramTab() {
                 checked={current.enabled}
                 onChange={(value) => void save({ enabled: value })}
                 ariaLabel={t('telegramSettings.enableAriaLabel')}
+                disabled={isSaving}
+              />
+            )}
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('telegramSettings.notifyOnCompletionLabel')}
+            description={t('telegramSettings.notifyOnCompletionDescription')}
+          >
+            {isLoading && !settings ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : (
+              <SettingsToggle
+                checked={current.notifyOnCompletion}
+                onChange={(value) => void save({ notifyOnCompletion: value })}
+                ariaLabel={t('telegramSettings.notifyOnCompletionAriaLabel')}
                 disabled={isSaving}
               />
             )}

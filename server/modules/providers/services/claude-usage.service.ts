@@ -8,7 +8,8 @@
  *
  * Claude Code 가 `/usage` 를 그릴 때 쓰는 엔드포인트를 같은 자격증명으로 부르면
  * 모든 창이 사용률과 함께 한 번에 온다. 문서화된 API 가 아니므로 실패는 모두
- * 빈 결과로 떨어뜨린다 — 그때는 CLI 에게 직접 `/usage` 를 물어보고
+ * 빈 결과로 떨어뜨린다 — 그때는 1토큰짜리 요청의 응답 헤더에서 한도를 읽고,
+ * 그것도 안 되면 CLI 에게 직접 `/usage` 를 물어보고
  * (`claude-cli-usage.service`), 그마저 비면 호출한 쪽이 쌓아 둔 이벤트로 물러선다.
  */
 
@@ -26,6 +27,11 @@ import {
 } from '@/shared/utils.js';
 
 const USAGE_ENDPOINT = 'https://api.anthropic.com/api/oauth/usage';
+
+const MESSAGES_ENDPOINT = 'https://api.anthropic.com/v1/messages';
+
+/** 헤더만 읽으면 되는 요청이라 가장 싼 모델에 1토큰만 시킨다. */
+const PROBE_MODEL = 'claude-haiku-4-5-20251001';
 
 /** 새로고침 연타가 그대로 요청이 되지 않을 만큼만. */
 const CACHE_TTL_MS = 30_000;
@@ -52,7 +58,10 @@ const STATUS_BY_SEVERITY: Record<string, ProviderRateLimitWindow['status']> = {
 export type ClaudeUsageSnapshot = {
   windows: ProviderRateLimitWindow[];
   planType?: string;
-  /** 어느 길로 읽었는지. `live` 는 계정에 직접, `cli` 는 `claude -p "/usage"`. */
+  /**
+   * 어느 길로 읽었는지. `live` 는 계정에 직접(또는 응답 헤더로) 지금 읽은 값,
+   * `cli` 는 `claude -p "/usage"`.
+   */
   source?: 'live' | 'cli';
 };
 
@@ -62,9 +71,15 @@ type ClaudeCredentials = {
 };
 
 type ClaudeUsageServiceDependencies = {
-  readCredentials: () => Promise<ClaudeCredentials | null>;
+  readCredentials: (configDir?: string | null) => Promise<ClaudeCredentials | null>;
   fetchUsage: (credentials: ClaudeCredentials) => Promise<unknown>;
-  /** 직접 물어보기가 실패했을 때 CLI 에게 묻는 길. */
+  /** 계정 조회가 막혔을 때, 1토큰 요청의 응답 헤더에서 창들을 읽는 길. */
+  probeUsage: (credentials: ClaudeCredentials, observedAt: string) => Promise<ProviderRateLimitWindow[]>;
+  /**
+   * 직접 물어보기가 실패했을 때 CLI 에게 묻는 길. CLI 는 이 프로세스의
+   * `CLAUDE_CONFIG_DIR` 하나만 보므로, 서버 기본 계정을 물을 때만 쓴다 — 다른
+   * 등록 계정을 물을 때 불렀다간 기본 계정의 값을 그 계정 것인 양 보여주게 된다.
+   */
   readCliUsage: () => Promise<{ windows: ProviderRateLimitWindow[] }>;
   now: () => number;
 };
@@ -135,10 +150,17 @@ const toWindow = (raw: unknown, observedAt: string): ProviderRateLimitWindow | n
 };
 
 /**
- * 자격증명은 파일에 있을 수도, 키체인에 있을 수도 있다. Claude Code 가 보는
- * 순서를 그대로 따른다 — 파일이 있으면 그것이 최신이다.
+ * 자격증명은 파일에 있을 수도, 키체인에 있을 수도, 환경변수에 있을 수도 있다.
+ * 파일 → 키체인 순서는 Claude Code 를 따른다 — 파일이 있으면 그것이 최신이다.
+ *
+ * `CLAUDE_CODE_OAUTH_TOKEN` 은 Claude Code 에서는 가장 먼저 보지만 여기서는
+ * 마지막이다. `claude setup-token` 으로 만든 이 토큰은 사용량 엔드포인트가
+ * 받아 주지 않아서(429 와 한 시간짜리 retry-after), 대화형 로그인 토큰이 함께
+ * 있으면 그쪽이 낫다. 대화형으로 로그인한 적 없이 이 토큰만으로 돌리는 설치에서는
+ * 이것이 유일한 자격증명이고, 계정 조회가 막혀도 헤더로 읽는 길에 쓸 수 있다.
  */
-const defaultReadCredentials = async (): Promise<ClaudeCredentials | null> => {
+const defaultReadCredentials = async (configDir?: string | null): Promise<ClaudeCredentials | null> => {
+  const override = configDir ?? undefined;
   const fromOauth = (raw: unknown): ClaudeCredentials | null => {
     const oauth = (raw as Record<string, unknown> | null)?.claudeAiOauth as
       | Record<string, unknown>
@@ -154,7 +176,7 @@ const defaultReadCredentials = async (): Promise<ClaudeCredentials | null> => {
   };
 
   try {
-    const filePath = path.join(getClaudeHomeDirectory(), '.credentials.json');
+    const filePath = path.join(getClaudeHomeDirectory(undefined, override), '.credentials.json');
     const parsed = JSON.parse(await fsp.readFile(filePath, 'utf8')) as unknown;
     const credentials = fromOauth(parsed);
     if (credentials) {
@@ -164,21 +186,29 @@ const defaultReadCredentials = async (): Promise<ClaudeCredentials | null> => {
     // 파일이 없는 설치가 정상이다 — macOS 는 키체인에 넣는다.
   }
 
-  if (process.platform !== 'darwin') {
-    return null;
+  if (process.platform === 'darwin') {
+    try {
+      // `CLAUDE_CONFIG_DIR` 를 쓰는 설치는 항목 이름 끝에 디렉터리 해시가 붙는다.
+      const raw = execFileSync(
+        'security',
+        ['find-generic-password', '-s', getClaudeKeychainServiceName(undefined, override), '-w'],
+        { encoding: 'utf8', timeout: REQUEST_TIMEOUT_MS },
+      );
+      const credentials = fromOauth(JSON.parse(raw) as unknown);
+      if (credentials) {
+        return credentials;
+      }
+    } catch {
+      // 키체인 항목이 없거나 비어 있다. 환경변수 토큰만 쓰는 설치가 이렇다.
+    }
   }
 
-  try {
-    // `CLAUDE_CONFIG_DIR` 를 쓰는 설치는 항목 이름 끝에 디렉터리 해시가 붙는다.
-    const raw = execFileSync(
-      'security',
-      ['find-generic-password', '-s', getClaudeKeychainServiceName(), '-w'],
-      { encoding: 'utf8', timeout: REQUEST_TIMEOUT_MS },
-    );
-    return fromOauth(JSON.parse(raw) as unknown);
-  } catch {
-    return null;
-  }
+  // 이 토큰은 설정 디렉터리에 묶여 있지 않다 — 파일·키체인에 못 찾은 계정의
+  // 마지막 수단이다. 여러 계정이 전부 이 길로 떨어지면 전부 같은 토큰을 쓰는
+  // 셈이라 구분이 안 되지만, 로그인한 적 없이 setup-token 하나만 돌리는
+  // 설치가 대개 하나뿐이라 실제로는 맞는다.
+  const envToken = readOptionalString(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+  return envToken ? { accessToken: envToken } : null;
 };
 
 const defaultFetchUsage = (credentials: ClaudeCredentials): Promise<unknown> =>
@@ -226,36 +256,170 @@ const defaultFetchUsage = (credentials: ClaudeCredentials): Promise<unknown> =>
     request.end();
   });
 
+/**
+ * 헤더의 창 이름(`5h`, `7d`, `7d_opus`…)을 이벤트가 쓰던 이름으로 옮긴다.
+ * 모르는 접두는 그대로 둔다 — 떨구는 것보다 낯선 라벨이 낫다.
+ */
+const windowNameFromClaim = (claim: string): string => {
+  if (claim === '5h') {
+    return 'five_hour';
+  }
+  if (claim === '7d') {
+    return 'seven_day';
+  }
+  if (claim.startsWith('7d_')) {
+    return `seven_day_${claim.slice(3)}`;
+  }
+  return claim;
+};
+
+const readHeaderStatus = (value: unknown): ProviderRateLimitWindow['status'] => {
+  const raw = readOptionalString(value);
+  return raw === 'allowed' || raw === 'allowed_warning' || raw === 'rejected' ? raw : null;
+};
+
+/**
+ * `anthropic-ratelimit-unified-<창>-utilization|status|reset` 헤더에서 창들을 만든다.
+ * 이 파일의 헤더 확인 요청이 쓰고, 헤더 해석만 따로 확인하려고 테스트
+ * (`claude-usage.service.test.ts`)가 부른다.
+ *
+ * 모든 응답에 실려 오는 헤더라 계정 조회가 막힌 토큰으로도 읽힌다. 대신 모델별
+ * 주간 창(예: Fable)은 이 헤더에 오지 않는다. 초과 사용(`overage-*`)은 창 접두가
+ * 없는 별개 헤더라 여기서 걸리지 않는다.
+ */
+export function parseUnifiedRateLimitHeaders(
+  headers: Record<string, string | string[] | undefined>,
+  observedAt: string,
+): ProviderRateLimitWindow[] {
+  const prefix = 'anthropic-ratelimit-unified-';
+  const suffix = '-utilization';
+  const windows: ProviderRateLimitWindow[] = [];
+
+  for (const name of Object.keys(headers).sort()) {
+    const key = name.toLowerCase();
+    if (!key.startsWith(prefix) || !key.endsWith(suffix)) {
+      continue;
+    }
+    const claim = key.slice(prefix.length, -suffix.length);
+    if (!claim) {
+      continue;
+    }
+
+    // 헤더의 사용률은 이미 0..1 이다.
+    const utilization = Number(headers[name]);
+    const resetSeconds = Number(headers[`${prefix}${claim}-reset`]);
+    windows.push({
+      type: windowNameFromClaim(claim),
+      status: readHeaderStatus(headers[`${prefix}${claim}-status`]),
+      utilization: Number.isFinite(utilization) && utilization >= 0 ? Math.min(utilization, 1) : null,
+      resetsAt: Number.isFinite(resetSeconds) && resetSeconds > 0
+        ? new Date(resetSeconds * 1000).toISOString()
+        : null,
+      observedAt,
+    });
+  }
+  return windows;
+}
+
+/**
+ * 1토큰짜리 요청을 보내 응답 헤더만 읽는다. Claude Code 도 시작할 때 같은 식으로
+ * 한도를 확인한다. 아주 작지만 실제 요청이라 구독 사용량에 잡힌다 — 그래서 계정
+ * 조회가 실패했을 때만 부른다.
+ */
+const defaultProbeUsage = (
+  credentials: ClaudeCredentials,
+  observedAt: string,
+): Promise<ProviderRateLimitWindow[]> =>
+  new Promise((resolve, reject) => {
+    const target = new URL(MESSAGES_ENDPOINT);
+    const body = JSON.stringify({
+      model: PROBE_MODEL,
+      max_tokens: 1,
+      // OAuth 토큰으로 추론을 부를 때는 Claude Code 의 시스템 프롬프트가 있어야 받아 준다.
+      system: "You are Claude Code, Anthropic's official CLI for Claude.",
+      messages: [{ role: 'user', content: 'quota' }],
+    });
+    const request = https.request(
+      {
+        hostname: target.hostname,
+        path: target.pathname,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${credentials.accessToken}`,
+          'anthropic-beta': 'oauth-2025-04-20',
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'User-Agent': 'claude-cli (external, cli)',
+        },
+        timeout: REQUEST_TIMEOUT_MS,
+      },
+      (response) => {
+        // 본문은 필요 없지만 흘려보내야 소켓이 풀린다.
+        response.resume();
+        const status = response.statusCode ?? 0;
+        if (status < 200 || status >= 300) {
+          reject(new Error(`Claude usage probe failed with ${status}`));
+          return;
+        }
+        resolve(parseUnifiedRateLimitHeaders(response.headers, observedAt));
+      },
+    );
+
+    request.on('timeout', () => {
+      request.destroy(new Error('Claude usage probe timed out'));
+    });
+    request.on('error', reject);
+    request.end(body);
+  });
+
 export function createClaudeUsageService(
   dependencies: Partial<ClaudeUsageServiceDependencies> = {},
 ) {
   const {
     readCredentials = defaultReadCredentials,
     fetchUsage = defaultFetchUsage,
+    probeUsage = defaultProbeUsage,
     readCliUsage = () => claudeCliUsageService.getSnapshot(),
     now = () => Date.now(),
   } = dependencies;
 
-  let cached: { at: number; snapshot: ClaudeUsageSnapshot } | null = null;
+  /** 계정(configDir)마다 따로 캐싱한다 — 서로 다른 계정이 서로의 값을 가리면 안 된다. */
+  const cacheByAccount = new Map<string, { at: number; snapshot: ClaudeUsageSnapshot }>();
 
-  /** 계정에 직접 물어본 값. 자격증명을 못 읽거나 요청이 실패하면 빈 목록. */
-  const readAccountSnapshot = async (): Promise<ClaudeUsageSnapshot> => {
-    const credentials = await readCredentials();
+  /** 계정 조회가 막혔을 때 응답 헤더로 읽은 값. 이것도 실패하면 빈 목록. */
+  const readProbeSnapshot = async (
+    credentials: ClaudeCredentials,
+    observedAt: string,
+  ): Promise<ClaudeUsageSnapshot> => {
+    try {
+      const windows = await probeUsage(credentials, observedAt);
+      return { windows, planType: credentials.subscriptionType, source: 'live' };
+    } catch (error) {
+      console.warn('[Claude usage] Failed to probe usage headers:', error);
+      return { windows: [] };
+    }
+  };
+
+  /** 계정에 직접 물어본 값. 자격증명을 못 읽거나 요청이 실패하면 헤더로 읽은 값. */
+  const readAccountSnapshot = async (configDir?: string | null): Promise<ClaudeUsageSnapshot> => {
+    const credentials = await readCredentials(configDir);
     if (!credentials) {
       // 로그인하지 않은 상태와 실패를 구분하지 않는다. 물러설 곳이 같다.
       return { windows: [] };
     }
+
+    const observedAt = new Date(now()).toISOString();
 
     let usage: unknown;
     try {
       usage = await fetchUsage(credentials);
     } catch (error) {
       console.warn('[Claude usage] Failed to read usage:', error);
-      return { windows: [] };
+      return readProbeSnapshot(credentials, observedAt);
     }
 
     const payload = (usage ?? {}) as Record<string, unknown>;
-    const observedAt = new Date(now()).toISOString();
     const limits = Array.isArray(payload.limits) ? payload.limits : [];
 
     const windows = limits
@@ -280,16 +444,19 @@ export function createClaudeUsageService(
   return {
     /**
      * 화면에 그릴 창들. 계정에 직접 물어보고, 그 길이 막혀 있으면 CLI 에게
-     * `/usage` 를 물어본다. 둘 다 못 읽으면 빈 목록 — 부른 쪽이 쌓아 둔 이벤트로
-     * 물러설 수 있다.
+     * `/usage` 를 물어본다(서버 기본 계정을 물을 때만 — CLI 는 이 프로세스의
+     * 계정 하나만 보므로 다른 계정을 물을 땐 건너뛴다). 둘 다 못 읽으면 빈
+     * 목록 — 부른 쪽이 쌓아 둔 이벤트로 물러설 수 있다.
      */
-    async getSnapshot(): Promise<ClaudeUsageSnapshot> {
+    async getSnapshot(configDir?: string | null): Promise<ClaudeUsageSnapshot> {
+      const cacheKey = configDir ?? '';
+      const cached = cacheByAccount.get(cacheKey);
       if (cached && now() - cached.at < CACHE_TTL_MS) {
         return cached.snapshot;
       }
 
-      let snapshot = await readAccountSnapshot();
-      if (snapshot.windows.length === 0) {
+      let snapshot = await readAccountSnapshot(configDir);
+      if (snapshot.windows.length === 0 && !configDir) {
         const cli = await readCliUsage();
         if (cli.windows.length > 0) {
           snapshot = { windows: cli.windows, source: 'cli' };
@@ -299,14 +466,14 @@ export function createClaudeUsageService(
       // 빈 결과는 캐시하지 않는다. 로그인을 막 끝낸 직후에도 다음 요청이 바로
       // 값을 가져올 수 있어야 한다.
       if (snapshot.windows.length > 0) {
-        cached = { at: now(), snapshot };
+        cacheByAccount.set(cacheKey, { at: now(), snapshot });
       }
       return snapshot;
     },
 
     /** 테스트와, 로그인 직후처럼 캐시가 거짓이 되는 순간을 위해. */
     clearCache(): void {
-      cached = null;
+      cacheByAccount.clear();
     },
   };
 }

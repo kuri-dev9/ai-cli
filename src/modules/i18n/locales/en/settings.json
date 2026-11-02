@@ -164,6 +164,9 @@
     "enableLabel": "Enable bridge",
     "enableDescription": "Turn this off to stop polling Telegram without clearing the stored token.",
     "enableAriaLabel": "Enable Telegram bridge",
+    "notifyOnCompletionLabel": "Completion notifications",
+    "notifyOnCompletionDescription": "Also notify on Telegram when a 1:1 chat finishes, even without handoff turned on — sends the final answer. Rooms (multi-agent) have their own \"Telegram\" toggle inside the room view instead of this one.",
+    "notifyOnCompletionAriaLabel": "Completion notifications",
     "fromEnvironment": "Configured from the environment (.env)",
     "save": "Save",
     "saving": "Saving...",
@@ -532,7 +535,24 @@
       "button": "Login",
       "reLoginButton": "Re-login"
     },
-    "error": "Error: {{error}}"
+    "error": "Error: {{error}}",
+    "claudeAccounts": {
+      "title": "Claude accounts",
+      "description": "Register the Claude accounts logged in on this machine, so you can pick one when starting a new room or chat.",
+      "add": "+ Add account",
+      "edit": "Edit",
+      "editSave": "Save",
+      "editCancel": "Cancel",
+      "remove": "Remove",
+      "loadFailed": "Could not load the account list.",
+      "removeFailed": "Could not remove the account.",
+      "addFailed": "Could not add the account.",
+      "updateFailed": "Could not update the account.",
+      "defaultConfigDir": "Default (~/.claude)",
+      "labelPlaceholder": "Name (e.g. claude-work)",
+      "configDirPlaceholder": "CLAUDE_CONFIG_DIR path (leave blank for default ~/.claude)",
+      "save": "Add"
+    }
   },
   "permissions": {
     "title": "Permission Settings",
@@ -968,6 +988,10 @@
     "unsupported": {
       "title": "{{provider}} does not report usage limits",
       "description": "This CLI has no subscription limit to query, or runs on an API key you supplied."
+    },
+    "accounts": {
+      "loadFailed": "Could not load the account list.",
+      "loadingUsage": "Loading..."
     }
   }
 }

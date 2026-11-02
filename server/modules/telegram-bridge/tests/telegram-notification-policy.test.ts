@@ -13,6 +13,7 @@ import {
 } from '@/modules/database/index.js';
 import { startTelegramBridge } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
 import type { TelegramClient } from '@/modules/telegram-bridge/services/telegram-client.service.js';
+import { writeTelegramSettings } from '@/modules/telegram-bridge/services/telegram-settings.service.js';
 import { setSessionNotified } from '@/modules/telegram-bridge/services/telegram-state.service.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
 
@@ -188,6 +189,28 @@ test('세션 알림을 켜 두면 웹 작업도 끝날 때마다 간다', async 
     setSessionNotified(userId, SESSION_ID, false);
     await runTurn({ content: '세 번째' });
     assert.equal(sent.length, 2);
+  });
+});
+
+test('완료 알림을 켜면 넘기기 없이도 모든 웹 작업이 끝날 때마다 간다', async () => {
+  await withBridge(async ({ sent, runTurn }) => {
+    writeTelegramSettings({ notifyOnCompletion: true });
+
+    await runTurn({ content: '넘기지 않은 대화' });
+
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /완료/);
+  });
+});
+
+test('완료 알림을 끄면 다시 기본값(조용함)으로 돌아간다', async () => {
+  await withBridge(async ({ sent, runTurn }) => {
+    writeTelegramSettings({ notifyOnCompletion: true });
+    writeTelegramSettings({ notifyOnCompletion: false });
+
+    await runTurn({ content: '넘기지 않은 대화' });
+
+    assert.deepEqual(sent, []);
   });
 });
 

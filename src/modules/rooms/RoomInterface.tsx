@@ -11,9 +11,12 @@ import {
   createCachedDiffCalculator,
   grantClaudeToolPermission,
   normalizedToChatMessages,
+  resolveFollowIntent,
+  resolveScrolledUpAfterScroll,
   useChatComposerState,
   useChatProviderState,
 } from '@/modules/chat';
+import type { ScrollSample } from '@/modules/chat';
 import { ROOM_MAX_PARTICIPANTS } from '@/shared/constants';
 import { useWebSocket } from '@/shared/context/WebSocketContext';
 import { applyRoomDetailToIndex } from '@/shared/hooks/useRoomIndex';
@@ -232,6 +235,10 @@ export function RoomInterface({
   const liveCardRef = useRef<HTMLDivElement | null>(null);
   // Follow new content only while the user is already at the bottom.
   const followBottomRef = useRef(true);
+  // 직전에 확인한 스크롤 위치와 높이. 이번 스크롤이 어느 쪽으로 움직였는지 재는 기준.
+  const scrollSampleRef = useRef<ScrollSample | null>(null);
+  // 터치를 시작한 높이. 손가락이 움직인 방향을 재는 기준.
+  const touchStartYRef = useRef(0);
 
   const participants = useMemo(() => detail?.participants ?? [], [detail]);
   const formerParticipantIds = useMemo(
@@ -266,13 +273,42 @@ export function RoomInterface({
     const container = scrollRef.current;
     if (container && followBottomRef.current) {
       container.scrollTop = container.scrollHeight;
+      // 우리가 내린 것이다. 기준을 옮겨 두어야 이 스크롤을 사용자가 움직인 것으로 읽지 않는다.
+      scrollSampleRef.current = { top: container.scrollTop, height: container.scrollHeight };
     }
   }, [detail?.messages.length, liveTurns]);
 
+  /**
+   * 따라가기를 놓을지 붙을지 채팅과 같은 규칙으로 정한다.
+   *
+   * 바닥과의 거리만 보던 때는, 스트리밍 중에 천천히 위로 굴리면 한 번에 몇 px
+   * 밖에 움직이지 않아 늘 "바닥 근처" 였다. 그래서 글자가 붙을 때마다 바닥으로
+   * 도로 끌려 내려갔고, 세게 굴려 한 번에 선을 넘어야만 풀렸다. 이제 실제로
+   * 움직인 방향을 보고, 바닥에 직접 내려왔을 때만 다시 붙는다.
+   */
   const handleScroll = () => {
     const container = scrollRef.current;
     if (!container) return;
-    followBottomRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    followBottomRef.current = !resolveScrolledUpAfterScroll({
+      wasScrolledUp: !followBottomRef.current,
+      previous: scrollSampleRef.current,
+      top: scrollTop,
+      height: scrollHeight,
+      clientHeight,
+    });
+    scrollSampleRef.current = { top: scrollTop, height: scrollHeight };
+  };
+
+  /**
+   * 위로 굴리거나 끌어 올리는 입력은 그 자체로 결론이다 — 즉시 놓는다. `scroll`
+   * 이벤트까지 기다리면 그 사이 붙은 글자가 바닥으로 도로 끌어내린다.
+   * 이미 맨 위면 움직일 곳이 없으니 놓지 않는다.
+   */
+  const releaseFollowOnUpwardInput = (deltaY: number) => {
+    const container = scrollRef.current;
+    if (!container || container.scrollTop <= 0 || resolveFollowIntent(deltaY) !== 'release') return;
+    followBottomRef.current = false;
   };
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
@@ -923,6 +959,7 @@ export function RoomInterface({
               { key: 'discussion', label: t('rooms.discussion'), title: t('rooms.discussionTitle'), on: detail.room.discussion },
               { key: 'hostLed', label: t('rooms.hostLed'), title: t('rooms.hostLedTitle'), on: detail.room.hostLed },
               { key: 'autoCompact', label: t('rooms.autoCompact'), title: t('rooms.autoCompactTitle'), on: detail.room.autoCompact },
+              { key: 'notifyTelegram', label: t('rooms.notifyTelegram'), title: t('rooms.notifyTelegramTitle'), on: detail.room.notifyTelegram },
             ] as const).map((toggle) => (
               <button
                 key={toggle.key}
@@ -1002,7 +1039,20 @@ export function RoomInterface({
       </div>
 
       {/* Shared timeline */}
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        onWheel={(event) => releaseFollowOnUpwardInput(event.deltaY)}
+        onTouchStart={(event) => {
+          touchStartYRef.current = event.touches[0]?.clientY ?? 0;
+        }}
+        onTouchMove={(event) => {
+          // 손가락을 아래로 끌면 위로 스크롤된다. 채팅과 같이 8px 넘게 움직였을 때만 본다.
+          const moved = touchStartYRef.current - (event.touches[0]?.clientY ?? 0);
+          if (Math.abs(moved) > 8) releaseFollowOnUpwardInput(moved);
+        }}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         <div className="mx-auto max-w-4xl space-y-4 px-0 py-4 sm:px-4">
           <div className="space-y-2">
             <button

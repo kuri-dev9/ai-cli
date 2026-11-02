@@ -41,11 +41,19 @@ type InviteParticipantModalProps = {
 type InviteeInput = {
   provider: string;
   model: string | null;
+  /** 등록된 Claude 계정 id. Claude 가 아니면 비워 둔다. */
+  claudeAccountId?: string | null;
   displayName: string;
   roleName: string;
   rolePrompt?: string;
   persona?: string;
   status: 'active' | 'standby';
+};
+
+type ClaudeAccount = {
+  id: string;
+  label: string;
+  configDir: string | null;
 };
 
 /** 처음 룸을 만들 때 호스트에 미리 골라 두는 프리셋. 목록에서 지웠으면 아무것도 고르지 않는다. */
@@ -74,6 +82,8 @@ export default function InviteParticipantModal({
   // Form fields: the invitee's identity as the user types it.
   const [provider, setProvider] = useState<string>(providers[0] ?? 'claude');
   const [model, setModel] = useState('');
+  const [claudeAccountId, setClaudeAccountId] = useState('');
+  const [claudeAccounts, setClaudeAccounts] = useState<ClaudeAccount[]>([]);
   const [displayName, setDisplayName] = useState('');
   const [roleName, setRoleName] = useState('');
   const [rolePrompt, setRolePrompt] = useState('');
@@ -127,6 +137,27 @@ export default function InviteParticipantModal({
     };
   }, [open, provider, hasModelCatalog]);
 
+  // Claude 계정 목록. 다른 프로바이더를 고를 땐 쓰지 않아 열릴 때 한 번만 가져온다.
+  useEffect(() => {
+    if (!open || claudeAccounts.length > 0) return undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await api.providers.claudeAccounts();
+        const body = await readApiJson<{ data?: ClaudeAccount[] }>(response);
+        if (!cancelled && Array.isArray(body.data)) {
+          setClaudeAccounts(body.data);
+        }
+      } catch {
+        // 계정 선택 없이도 초대는 되니 조용히 넘어간다.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const applyHostPreset = (presetId: string) => {
     setHostPresetId(presetId);
     const preset = presets.find((candidate) => candidate.id === presetId);
@@ -160,6 +191,7 @@ export default function InviteParticipantModal({
     setProvider(next);
     // Model ids are provider-specific.
     setModel('');
+    setClaudeAccountId('');
   };
 
   // 처음 만들 때는 아직 룸이 없으니, 호스트가 쓸 이름도 겹치면 안 되는 이름이다.
@@ -219,6 +251,7 @@ export default function InviteParticipantModal({
   const buildInvitee = (): InviteeInput => ({
     provider,
     model: model || null,
+    claudeAccountId: provider === 'claude' ? (claudeAccountId || null) : null,
     displayName: trimmedName,
     roleName: roleName.trim(),
     rolePrompt: rolePrompt.trim() || undefined,
@@ -364,6 +397,22 @@ export default function InviteParticipantModal({
               ))}
             </select>
           </label>
+
+          {provider === 'claude' && claudeAccounts.length > 0 && (
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">{t('rooms.claudeAccount')}</span>
+              <select
+                value={claudeAccountId}
+                onChange={(event) => setClaudeAccountId(event.target.value)}
+                className={FIELD_CLASS}
+              >
+                <option value="">{t('rooms.claudeAccountDefault')}</option>
+                {claudeAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>{account.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <label className="block">

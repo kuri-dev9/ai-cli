@@ -42,6 +42,7 @@ const detail: RoomDetail = {
     discussion: true,
     hostLed: false,
     autoCompact: true,
+    notifyTelegram: false,
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [],

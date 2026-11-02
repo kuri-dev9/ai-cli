@@ -111,7 +111,11 @@ export type RoomTurnMode =
   | { kind: 'task'; task: RoomTask; leadName: string }
   | { kind: 'comment'; onName: string }
   | { kind: 'called'; byName: string | null; withNames: string[] }
-  | { kind: 'summary' };
+  | { kind: 'summary' }
+  /** 서버 재시작으로 끊긴 자기 차례를 마저 한다. */
+  | { kind: 'continue' }
+  /** 서버 재시작으로 끊긴 라운드를 방장이 이어 받는다. */
+  | { kind: 'resumed' };
 
 function buildModeInstructions(mode: RoomTurnMode, others: RoomParticipant[]): string | null {
   switch (mode.kind) {
@@ -145,6 +149,16 @@ function buildModeInstructions(mode: RoomTurnMode, others: RoomParticipant[]): s
         `파일 수정: 불가. 여럿이 동시에 돌므로 읽기·조사만 하세요. 넘김 표시는 쓰지 마세요${mode.byName ? ` — 답이 모이면 @${mode.byName} 에게 돌아갑니다` : ''}.`,
       ].join('\n');
     }
+    case 'continue':
+      return [
+        '[이어서] 서버가 다시 시작되면서 당신의 차례가 중간에 끊겼습니다. 당신 세션의 기록을 확인하고 하던 일을 마무리하세요.',
+        '끝나면 한 일과 결과를 요약해 보고하세요. 넘김 표시는 쓰지 마세요 — 이어서 진행하는 것은 방장의 몫입니다.',
+      ].join('\n');
+    case 'resumed':
+      return [
+        '[재시작] 서버가 다시 시작되면서 이번 라운드가 중간에 끊겼다가 이어집니다. 끊겼던 참가자들이 마무리한 답이 위에 있습니다.',
+        '당신의 차례도 끊겼다면 당신 세션의 기록을 확인하고 하던 일을 마저 하세요. 그런 다음 룸 기록을 보고 원래 하던 흐름대로 이어서 진행하세요.',
+      ].join('\n');
     case 'summary':
       return [
         '[정리] 맡긴 일이나 함께 부른 참가자의 답이 모두 모였습니다. 결과를 모아 정리하세요.',
@@ -166,7 +180,7 @@ function buildModeInstructions(mode: RoomTurnMode, others: RoomParticipant[]): s
 function buildTurnBudget(turn: { count: number; max: number }, mode: RoomTurnMode): string {
   const remaining = Math.max(0, turn.max - turn.count);
   const lines = [`[턴 ${turn.count}/${turn.max}] 이번 라운드에 남은 자동 턴: ${remaining}. 사용자가 도중에 늘리거나 줄일 수 있으니 이 숫자를 따르세요.`];
-  const writesHandoff = mode.kind === 'turn' || mode.kind === 'plan' || mode.kind === 'summary';
+  const writesHandoff = mode.kind === 'turn' || mode.kind === 'plan' || mode.kind === 'summary' || mode.kind === 'resumed';
   if (remaining === 0 && writesHandoff) {
     lines.push(`이번이 마지막 턴입니다. 다른 참가자에게 넘겨도 이어지지 않으니, 지금까지를 정리하고 마지막 줄에 "${ROOM_DONE_MARKER}" 를 쓰세요.`);
   }

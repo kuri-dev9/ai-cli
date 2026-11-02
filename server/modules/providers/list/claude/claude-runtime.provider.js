@@ -27,6 +27,7 @@ import {
   CLAUDE_PREDEFINED_MODELS,
   CLAUDE_ULTRACODE_EFFORT
 } from '@/modules/providers/list/claude/claude-models.provider.js';
+import { claudeAccountService } from '@/modules/providers/services/claude-account.service.js';
 import { claudeRateLimitService } from '@/modules/providers/services/claude-rate-limit.service.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import {
@@ -216,13 +217,30 @@ function matchesToolPermission(entry, toolName, input) {
 }
 
 function mapCliOptionsToSDK(options = {}) {
-  const { providerSessionId, cwd, toolsSettings, permissionMode, effort, resumeAnchorId, resumeFromScratch } = options;
+  const {
+    providerSessionId, cwd, toolsSettings, permissionMode, effort, resumeAnchorId, resumeFromScratch,
+    claudeAccountId,
+  } = options;
 
   const sdkOptions = {};
 
   // Forward all host env vars (e.g. ANTHROPIC_BASE_URL) to the subprocess.
   // Since SDK 0.2.113, options.env replaces process.env instead of overlaying it.
   sdkOptions.env = { ...process.env, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: String(BG_WAIT_CEILING_MS) };
+
+  // The session picked a registered Claude account (not this process's own
+  // `CLAUDE_CONFIG_DIR`) — point only this call's env at that account's
+  // config dir, instead of touching `process.env` and racing concurrent
+  // calls for other sessions/accounts. An unknown or removed account id
+  // falls back to the process default (`resolveAccount` returns undefined).
+  const account = claudeAccountService.resolveAccount(claudeAccountId);
+  if (account) {
+    if (account.configDir) {
+      sdkOptions.env.CLAUDE_CONFIG_DIR = account.configDir;
+    } else {
+      delete sdkOptions.env.CLAUDE_CONFIG_DIR;
+    }
+  }
 
   // Resolve the executable eagerly on Windows because the SDK uses raw child_process.spawn,
   // which does not reliably follow npm's shell wrappers like cross-spawn does.

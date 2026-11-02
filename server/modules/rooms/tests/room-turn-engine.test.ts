@@ -7,7 +7,9 @@ import test from 'node:test';
 import { closeConnection, initializeDatabase, roomsDb, sessionsDb } from '@/modules/database/index.js';
 import { roomsService } from '@/modules/rooms/services/rooms.service.js';
 import { roomTurnEngine } from '@/modules/rooms/services/room-turn-engine.service.js';
-import { chatRunRegistry, connectedClients } from '@/modules/websocket/index.js';
+import { startTelegramBridge } from '@/modules/telegram-bridge/index.js';
+import type { TelegramClient } from '@/modules/telegram-bridge/index.js';
+import { activeRunJournal, chatRunRegistry, connectedClients } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeWriter } from '@/shared/types.js';
 import { createNormalizedMessage } from '@/shared/utils.js';
 
@@ -80,10 +82,10 @@ async function withRoom(
     roomsDb.createRoom(
       { roomId: ROOM_ID, hostSessionId: HOST, projectPath: tempDirectory, permissionMode: 'ask', maxAutoTurns },
       [
-        { participant_id: 'p-host', session_id: HOST, provider: 'claude', model: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', persona: '', status: 'active', position: 0 },
-        { participant_id: 'p-rev', session_id: REVIEWER, provider: 'claude', model: 'sonnet', display_name: 'Claude2', role_name: '리뷰어', role_prompt: '깐깐하게 본다', persona: '', status: 'active', position: 1 },
+        { participant_id: 'p-host', session_id: HOST, provider: 'claude', model: null, claude_account_id: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', persona: '', status: 'active', position: 0 },
+        { participant_id: 'p-rev', session_id: REVIEWER, provider: 'claude', model: 'sonnet', claude_account_id: null, display_name: 'Claude2', role_name: '리뷰어', role_prompt: '깐깐하게 본다', persona: '', status: 'active', position: 1 },
         ...(collaboration.thirdParticipant
-          ? [{ participant_id: 'p-rev2', session_id: SECOND_REVIEWER, provider: 'claude', model: null, display_name: 'Claude3', role_name: '리뷰어2', role_prompt: '', persona: '', status: 'active' as const, position: 2 }]
+          ? [{ participant_id: 'p-rev2', session_id: SECOND_REVIEWER, provider: 'claude', model: null, claude_account_id: null, display_name: 'Claude3', role_name: '리뷰어2', role_prompt: '', persona: '', status: 'active' as const, position: 2 }]
           : []),
       ],
     );
@@ -271,7 +273,7 @@ test('the roster is capped and names stay unique', async () => {
     // 명단은 상한까지 채울 수 있다. 불리기 전까지 세션도 토큰도 쓰지 않아서다.
     for (let index = 3; index <= 10; index += 1) {
       roomsDb.addParticipant({
-        participant_id: `p-${index}`, room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+        participant_id: `p-${index}`, room_id: ROOM_ID, session_id: null, provider: 'claude', model: null, claude_account_id: null,
         display_name: `멤버${index}`, role_name: '테스터', role_prompt: '', persona: '', status: 'standby', position: index,
       });
     }
@@ -298,7 +300,7 @@ test('summoning a member tells the open screens, so the chip stops saying standb
     const calls: Call[] = [];
     roomTurnEngine.initialize(createRuntime({ [HOST]: ['체커가 봐줘 @체커'] }, calls));
     roomsDb.addParticipant({
-      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null, claude_account_id: null,
       display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 2,
     });
 
@@ -325,7 +327,7 @@ test('a roster member is summoned by name, answers, and returns to standby', asy
 
     // 명단에만 담긴 멤버. 세션이 아직 없다.
     roomsDb.addParticipant({
-      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null, claude_account_id: null,
       display_name: '체커', role_name: '리뷰어', role_prompt: '버그만 짚는다', persona: '', status: 'standby', position: 2,
     });
     const before = roomsService.getRoomDetail(ROOM_ID).participants.find((p) => p.displayName === '체커');
@@ -353,7 +355,7 @@ test('a roster member keeps the model and effort picked while it waited, once it
     const calls: Call[] = [];
     roomTurnEngine.initialize(createRuntime({ [HOST]: ['체커가 봐줘 @체커'] }, calls));
     roomsDb.addParticipant({
-      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: 'sonnet',
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: 'sonnet', claude_account_id: null,
       display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 2,
     });
 
@@ -381,7 +383,7 @@ test('a standby member sits out the rounds it is not called into', async () => {
     roomTurnEngine.initialize(createRuntime({ [HOST]: ['혼자 끝냈습니다 [DONE]'] }, calls));
 
     roomsDb.addParticipant({
-      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null, claude_account_id: null,
       display_name: '테스티', role_name: '테스터', role_prompt: '', persona: '', status: 'standby', position: 2,
     });
 
@@ -695,7 +697,7 @@ test('a standby participant comes back when it is mentioned again', async () => 
 test('a roster member that was never called is dropped outright, freeing its name', async () => {
   await withRoom(6, async () => {
     roomsDb.addParticipant({
-      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null, claude_account_id: null,
       display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 2,
     });
 
@@ -704,7 +706,7 @@ test('a roster member that was never called is dropped outright, freeing its nam
     // 행이 사라졌으므로 같은 이름을 다시 쓸 수 있다.
     assert.deepEqual(detail.formerParticipants, []);
     roomsDb.addParticipant({
-      participant_id: 'p-again', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null,
+      participant_id: 'p-again', room_id: ROOM_ID, session_id: null, provider: 'claude', model: null, claude_account_id: null,
       display_name: '체커', role_name: '리뷰어', role_prompt: '', persona: '', status: 'standby', position: 3,
     });
     assert.ok(roomsService.getRoomDetail(ROOM_ID).participants.some((p) => p.displayName === '체커'));
@@ -1093,7 +1095,7 @@ test('새 룸은 방장 주도와 자동 압축이 켜진 채로 만들어진다
     sessionsDb.createSession('defaults-host', 'claude', '/tmp', 'Host', now, now, null);
     roomsDb.createRoom(
       { roomId: otherRoom, hostSessionId: 'defaults-host', projectPath: '/tmp', permissionMode: 'ask', maxAutoTurns: 6 },
-      [{ participant_id: 'p-defaults', session_id: 'defaults-host', provider: 'claude', model: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', persona: '', status: 'active', position: 0 }],
+      [{ participant_id: 'p-defaults', session_id: 'defaults-host', provider: 'claude', model: null, claude_account_id: null, display_name: 'Claude', role_name: '설계자', role_prompt: '', persona: '', status: 'active', position: 0 }],
     );
     const { room } = roomsService.getRoomDetail(otherRoom);
     assert.equal(room.hostLed, true);
@@ -1181,4 +1183,176 @@ test('방장 주도에서 방장이 여럿을 함께 부르면 모두 답한 뒤
     assert.deepEqual(calls.slice(1, 3).map((call) => call.sessionId).sort(), [REVIEWER, SECOND_REVIEWER].sort());
     assert.equal(calls[3].sessionId, HOST);
   }, { hostLed: true, discussion: true, thirdParticipant: true });
+});
+
+test('라운드가 도는 동안 상태가 DB 에 적히고, 끝나면 지워진다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({ [HOST]: [async () => { await gate; return '끝났습니다 [DONE]'; }] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => calls.length === 1, 'host started');
+    const during = JSON.parse(roomsDb.getRoom(ROOM_ID)?.loop_state ?? 'null');
+    assert.deepEqual(during.active, [{ participantId: 'p-host', readOnly: false }]);
+    assert.equal(during.turnCount, 1);
+
+    release();
+    await waitFor(() => isIdle(), 'round done');
+    assert.equal(roomsDb.getRoom(ROOM_ID)?.loop_state, null);
+  });
+});
+
+test('서버가 내려가는 중에 끝난 라운드는 상태를 남겨 둔다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({ [HOST]: [async () => { await gate; return '끊겼습니다'; }] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => calls.length === 1, 'host started');
+    activeRunJournal.markStopping();
+    try {
+      release();
+      await waitFor(() => isIdle(), 'round done');
+      // 끊길 때 일하던 사람까지 그대로 남아야 다시 떠서 이어 줄 수 있다.
+      const kept = JSON.parse(roomsDb.getRoom(ROOM_ID)?.loop_state ?? 'null');
+      assert.deepEqual(kept.active, [{ participantId: 'p-host', readOnly: false }]);
+    } finally {
+      activeRunJournal.reset();
+    }
+  });
+});
+
+test('다시 뜬 뒤 끊긴 참가자가 같은 권한으로 마무리하고, 방장이 이어서 진행한다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [REVIEWER]: ['조사를 마쳤습니다'],
+      [HOST]: ['이어서 정리했습니다 [DONE]'],
+    }, calls));
+    roomsDb.setLoopState(ROOM_ID, JSON.stringify({
+      userId: 1,
+      turnCount: 2,
+      active: [{ participantId: 'p-rev', readOnly: true }, { participantId: 'p-host', readOnly: false }],
+      resumeCount: 0,
+    }));
+
+    assert.equal(roomTurnEngine.resumeAfterRestart(ROOM_ID, { maxResumes: 2 }), 'resumed');
+    await waitFor(() => isIdle() && calls.length === 2, 'resumed round done');
+
+    // 방장은 마무리 차례를 따로 받지 않는다. 이어서 진행하는 차례가 곧 방장의 몫이다.
+    assert.deepEqual(calls.map((call) => call.sessionId), [REVIEWER, HOST]);
+    assert.match(calls[0].command, /\[이어서\]/);
+    const tools = calls[0].options.toolsSettings as { disallowedTools: string[] };
+    assert.deepEqual(tools.disallowedTools, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+    assert.match(calls[1].command, /\[재시작\]/);
+    // 끊기기 전의 턴 수에서 이어 센다.
+    assert.match(calls[1].command, /\[턴 4\/6\]/);
+    assert.equal(roomsDb.getRoom(ROOM_ID)?.loop_state, null);
+  });
+});
+
+test('이미 두 번 이어 간 라운드는 더 이어 가지 않는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({}, calls));
+    roomsDb.setLoopState(ROOM_ID, JSON.stringify({ userId: 1, turnCount: 3, active: [], resumeCount: 2 }));
+
+    assert.equal(roomTurnEngine.resumeAfterRestart(ROOM_ID, { maxResumes: 2 }), 'skipped');
+    assert.equal(calls.length, 0);
+    assert.equal(roomsDb.getRoom(ROOM_ID)?.loop_state, null);
+  });
+});
+
+/** 폴링도 네트워크도 없는 가짜 텔레그램 클라이언트. 보낸 메시지만 모은다. */
+function createFakeTelegramClient(sent: string[]): TelegramClient {
+  return {
+    getUpdates: (_offset: number, signal?: AbortSignal) =>
+      new Promise((resolve) => {
+        signal?.addEventListener('abort', () => resolve([]), { once: true });
+      }),
+    getMe: async () => ({ username: 'test_bot' }),
+    sendMessage: async (_chatId: number, text: string) => {
+      sent.push(text);
+    },
+    requestTimeoutMs: 1_000,
+  } as unknown as TelegramClient;
+}
+
+test('방의 텔레그램 알림을 켜면 참가자 두 명의 턴이 끝나도 라운드가 끝날 때 한 번만 간다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['설계안: 세션 토큰 사용\n@Claude2'],
+      [REVIEWER]: ['확인했습니다.\n[DONE]'],
+    }, calls));
+
+    roomsDb.updateRoomSettings(ROOM_ID, { notifyTelegram: true });
+    const sent: string[] = [];
+    const bridge = startTelegramBridge({
+      botToken: 'test-token',
+      allowedChatIds: [4242],
+      runtime: {
+        hasRuntime: () => true,
+        run: async () => {},
+        abort: async () => true,
+        resolveToolApproval: () => {},
+        getPendingApprovalsForSession: () => [],
+      } as never,
+      client: createFakeTelegramClient(sent),
+    });
+
+    try {
+      roomsService.postUserMessage(ROOM_ID, { content: '로그인 기능 설계해줘' }, 1);
+      // 두 참가자가 다 답하고 라운드가 멈출 때까지 기다린다.
+      await waitFor(() => speakers().length === 3 && isIdle(), 'two turns');
+      // 라운드 알림은 setImmediate 로 미뤄진다.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const roundNotifications = sent.filter((message) => message.includes('🏁'));
+      assert.equal(roundNotifications.length, 1, '참가자 두 명의 턴이 아니라 라운드 전체에 한 번이어야 한다');
+    } finally {
+      bridge.stop();
+    }
+  });
+});
+
+test('방의 텔레그램 알림을 꺼 두면(기본값) 라운드가 끝나도 조용하다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['설계안: 세션 토큰 사용\n@Claude2'],
+      [REVIEWER]: ['확인했습니다.\n[DONE]'],
+    }, calls));
+
+    // notifyTelegram 은 건드리지 않는다 — 기본값(꺼짐) 그대로 둔다.
+    const sent: string[] = [];
+    const bridge = startTelegramBridge({
+      botToken: 'test-token',
+      allowedChatIds: [4242],
+      runtime: {
+        hasRuntime: () => true,
+        run: async () => {},
+        abort: async () => true,
+        resolveToolApproval: () => {},
+        getPendingApprovalsForSession: () => [],
+      } as never,
+      client: createFakeTelegramClient(sent),
+    });
+
+    try {
+      roomsService.postUserMessage(ROOM_ID, { content: '로그인 기능 설계해줘' }, 1);
+      await waitFor(() => speakers().length === 3 && isIdle(), 'two turns');
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.deepEqual(sent, []);
+    } finally {
+      bridge.stop();
+    }
+  });
 });

@@ -17,3 +17,6 @@ export { default as TokenUsageSummary } from '@/modules/chat/composer/TokenUsage
 export { default as CommandResultModal } from '@/modules/chat/modals/CommandResultModal';
 export { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState';
 export { useChatProviderState } from '@/modules/chat/hooks/useChatProviderState';
+// 스트리밍 중 바닥 따라가기 판정. 룸 타임라인도 채팅과 같은 규칙으로 따라간다.
+export { resolveFollowIntent, resolveScrolledUpAfterScroll } from '@/modules/chat/hooks/useChatSessionState';
+export type { ScrollSample } from '@/modules/chat/hooks/useChatSessionState';

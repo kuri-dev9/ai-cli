@@ -1307,6 +1307,12 @@ export type TelegramSettingsState = {
   botUsername: string | null;
   /** 폰에서 보낸 작업에 얼마나 허용할지. */
   permissionMode: TelegramPermissionMode;
+  /**
+   * 켜 두면 넘기기(핸드오프)를 켜지 않은 대화도, 룸 라운드도 끝날 때마다 완료
+   * 알림이 온다. 세션은 마지막 답까지 담아 보내고, 룸은 "끝났다"는 사실만
+   * 보낸다(누가 뭐라 답했는지는 화면에서 보면 된다).
+   */
+  notifyOnCompletion: boolean;
 };
 
 /** `PUT /api/telegram/settings` 에 올리는 변경분. 사용자가 건드린 항목만 담는다 — 특히 토큰 입력칸을 건드리지 않았으면 `botToken` 은 아예 넣지 않는다. */
@@ -1315,6 +1321,7 @@ export type TelegramSettingsUpdate = {
   allowedChatIds?: number[];
   enabled?: boolean;
   permissionMode?: TelegramPermissionMode;
+  notifyOnCompletion?: boolean;
 };
 
 /** `POST /api/telegram/test` 의 응답. 성공하면 봇 이름이, 실패하면 이유가 온다. */
@@ -1367,6 +1374,8 @@ export type RoomParticipant = {
   model: string | null;
   /** 세션이 생기기 전에 고른 추론 강도. 세션이 생긴 뒤에는 세션 쪽이 기준이다. */
   effort: string | null;
+  /** 세션이 생기기 전에 고른 등록된 Claude 계정 id. 세션이 생긴 뒤에는 바뀌지 않는다. */
+  claudeAccountId: string | null;
   displayName: string;
   roleName: string;
   /** 이 참가자가 무엇을 하는지. */
@@ -1464,6 +1473,8 @@ export type RoomDetail = {
     hostLed: boolean;
     /** Whether a participant session compacts itself before its turn once its context fills up. */
     autoCompact: boolean;
+    /** Whether Telegram gets a ping once a round fully finishes (not per participant turn). */
+    notifyTelegram: boolean;
     createdAt: string;
   };
   participants: RoomParticipant[];

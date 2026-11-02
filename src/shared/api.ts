@@ -503,6 +503,17 @@ export const api = {
     sessionTokenUsage: (sessionId: string) =>
       get(`/api/providers/sessions/${encodeURIComponent(sessionId)}/token-usage`),
     rateLimits: (provider: string) => get(`/api/providers/${provider}/rate-limits`),
+
+    claudeAccounts: () => get('/api/providers/claude/accounts'),
+    addClaudeAccount: (input: { label: string; configDir: string | null }) =>
+      post('/api/providers/claude/accounts', input),
+    updateClaudeAccount: (id: string, input: { label?: string; configDir?: string | null }) =>
+      patch(`/api/providers/claude/accounts/${encodeURIComponent(id)}`, input),
+    removeClaudeAccount: (id: string) =>
+      del(`/api/providers/claude/accounts/${encodeURIComponent(id)}`),
+    claudeAccountUsage: (id: string) =>
+      get(`/api/providers/claude/accounts/${encodeURIComponent(id)}/usage`),
+
     sessionActiveModel: (provider: string, sessionId: string) =>
       get(`/api/providers/${provider}/sessions/${encodeURIComponent(sessionId)}/active-model`),
     setSessionActiveModel: (provider: string, sessionId: string, model: string) =>

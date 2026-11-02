@@ -11,6 +11,8 @@ export { initializeRunStateBroadcast } from './services/run-state-broadcast.serv
 // runDetachedChatTurn: used by the scheduled-messages module to run a turn
 // from a timer, with no socket to stream to or report errors on.
 export { runDetachedChatTurn } from './services/chat-websocket.service.js';
+// 돌고 있는 실행의 기록. 서버가 다시 뜨면 run-recovery 모듈이 이걸로 끊긴 실행을 이어 간다.
+export { activeRunJournal } from './services/active-run-journal.service.js';
 // filterAttachmentsToUploadStore: used by the rooms module to keep only
 // uploaded files on a room message, the same trust boundary chat.send applies.
 export { filterAttachmentsToUploadStore } from './services/chat-websocket.service.js';

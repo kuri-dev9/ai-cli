@@ -13,6 +13,8 @@ type SessionRow = {
   model: string | null;
   /** Reasoning effort this session runs with; NULL until the app records one. */
   effort: string | null;
+  /** Registered Claude account this session runs with; NULL means the server default. */
+  claude_account_id: string | null;
   /** The app session this one was branched from; NULL unless it is a fork. */
   forked_from_session_id: string | null;
   isArchived: number;
@@ -56,7 +58,7 @@ type RecentSessionsPage = {
 };
 
 const SESSION_ROW_COLUMNS =
-  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, model, effort, forked_from_session_id, isArchived, created_at, updated_at';
+  'session_id, provider, provider_session_id, project_path, jsonl_path, custom_name, model, effort, claude_account_id, forked_from_session_id, isArchived, created_at, updated_at';
 
 const SQLITE_UTC_TIMESTAMP_REGEX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
@@ -484,6 +486,23 @@ export const sessionsDb = {
        SET effort = ?
        WHERE session_id = ?`
     ).run(effort, sessionId);
+  },
+
+  /**
+   * Records which registered Claude account a session runs with.
+   *
+   * Written once, the first time a turn for the session carries a choice —
+   * never afterward. Claude resumes a session from that account's own
+   * transcript folder, so changing the account on an existing session would
+   * make the resume target unreachable.
+   */
+  setSessionClaudeAccount(sessionId: string, claudeAccountId: string): void {
+    const db = getConnection();
+    db.prepare(
+      `UPDATE sessions
+       SET claude_account_id = ?
+       WHERE session_id = ?`
+    ).run(claudeAccountId, sessionId);
   },
 
   updateSessionCustomName(sessionId: string, customName: string): void {

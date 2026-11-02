@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownIcon } from 'lucide-react';
 
@@ -191,6 +191,31 @@ function ChatInterface({
     onNavigateToSession?.(sessionId);
   }, [setCurrentSessionId, onSessionEstablished, onNavigateToSession]);
 
+  // Claude 계정 선택. 새 대화(세션 없음)에서만 뜻이 있다 — 세션이 생기면 그
+  // 세션의 계정이 기준이라 이 값은 더 이상 쓰이지 않는다(buildSendOptions 참고).
+  const isNewClaudeChat = provider === 'claude' && !selectedSession && !currentSessionId;
+  const [claudeAccountId, setClaudeAccountId] = useState('');
+  const [claudeAccounts, setClaudeAccounts] = useState<Array<{ id: string; label: string }>>([]);
+  useEffect(() => {
+    if (!isNewClaudeChat || claudeAccounts.length > 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await api.providers.claudeAccounts();
+        const body = await response.json();
+        if (!cancelled && Array.isArray(body?.data)) {
+          setClaudeAccounts(body.data);
+        }
+      } catch (error) {
+        console.error('Failed to load Claude accounts:', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNewClaudeChat]);
+
   const {
     input,
     setInput,
@@ -254,6 +279,7 @@ function ChatInterface({
     cyclePermissionMode,
     currentProviderModel,
     currentProviderEffort,
+    currentClaudeAccountId: isNewClaudeChat ? claudeAccountId : undefined,
     isLoading: isProcessing,
     processingSessions,
     canAbortSession,
@@ -558,6 +584,24 @@ function ChatInterface({
               >
                 <ArrowDownIcon className="h-4 w-4" aria-hidden />
               </button>
+            </div>
+          )}
+
+          {isNewClaudeChat && claudeAccounts.length > 0 && (
+            <div className="mb-1.5 flex items-center justify-end gap-2 px-1 text-xs text-muted-foreground">
+              <span>{t('composer.claudeAccount', { defaultValue: 'Claude account' })}</span>
+              <select
+                value={claudeAccountId}
+                onChange={(event) => setClaudeAccountId(event.target.value)}
+                className="rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-foreground"
+              >
+                <option value="">
+                  {t('composer.claudeAccountDefault', { defaultValue: 'Default account' })}
+                </option>
+                {claudeAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>{account.label}</option>
+                ))}
+              </select>
             </div>
           )}
 

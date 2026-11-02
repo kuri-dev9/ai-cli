@@ -9,6 +9,13 @@ import type { AgentProvider } from '@/shared/types';
 import { Button, LLMProviderLogo, Pill, PillBar } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 
+type ClaudeAccount = {
+  id: string;
+  label: string;
+  /** `null` 은 `CLAUDE_CONFIG_DIR` 미설정 — 기본 `~/.claude`. */
+  configDir: string | null;
+};
+
 type RateLimitWindow = {
   type: string;
   status: 'allowed' | 'allowed_warning' | 'rejected' | null;
@@ -221,6 +228,126 @@ function ContextUsageSection({ sessionId }: { sessionId: string }) {
   );
 }
 
+type ClaudeAccountUsageEntry = {
+  account: ClaudeAccount;
+  snapshot: RateLimitSnapshot | null;
+  isLoading: boolean;
+  error: string | null;
+};
+
+const parseRateLimitPayload = (data: Record<string, unknown>): RateLimitSnapshot => ({
+  supported: data.supported !== false,
+  windows: Array.isArray(data.windows) ? data.windows as RateLimitWindow[] : [],
+  planType: typeof data.planType === 'string' ? data.planType : undefined,
+  source: data.source === 'events' || data.source === 'cli' ? data.source : 'live',
+});
+
+/**
+ * 등록된 Claude 계정 전부의 사용량을 한 번에 보여준다. 세션마다 다른 계정으로
+ * 돌 수 있게 된 뒤로는 "지금 쓰는 계정 하나"가 아니라 "쓸 수 있는 계정 전부"가
+ * 궁금한 화면이라, 계정별 카드로 나눈다. 계정을 추가/삭제하는 곳은 여기가
+ * 아니라 에이전트 탭이다 — 여기는 읽기 전용.
+ */
+function ClaudeAccountsUsageSection({ refreshKey }: { refreshKey: number }) {
+  const { t } = useTranslation('settings');
+  const [entries, setEntries] = useState<ClaudeAccountUsageEntry[]>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setIsLoadingAccounts(true);
+    setAccountsError(null);
+    try {
+      const response = await api.providers.claudeAccounts();
+      if (!response.ok) {
+        throw new Error(`Request failed with ${response.status}`);
+      }
+      const payload = await response.json();
+      const accounts: ClaudeAccount[] = Array.isArray(payload?.data) ? payload.data : [];
+      setEntries(accounts.map((account) => ({ account, snapshot: null, isLoading: true, error: null })));
+      setIsLoadingAccounts(false);
+
+      await Promise.all(accounts.map(async (account) => {
+        try {
+          const usageResponse = await api.providers.claudeAccountUsage(account.id);
+          if (!usageResponse.ok) {
+            throw new Error(`Request failed with ${usageResponse.status}`);
+          }
+          const usagePayload = await usageResponse.json();
+          const snapshot = parseRateLimitPayload(usagePayload?.data ?? {});
+          setEntries((previous) => previous.map((entry) => (
+            entry.account.id === account.id ? { ...entry, snapshot, isLoading: false } : entry
+          )));
+        } catch (usageError) {
+          console.error(`Failed to load usage for Claude account ${account.id}:`, usageError);
+          setEntries((previous) => previous.map((entry) => (
+            entry.account.id === account.id
+              ? { ...entry, isLoading: false, error: t('usage.loadFailed') }
+              : entry
+          )));
+        }
+      }));
+    } catch (loadError) {
+      console.error('Failed to load Claude accounts:', loadError);
+      setAccountsError(t('usage.accounts.loadFailed'));
+      setEntries([]);
+      setIsLoadingAccounts(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, refreshKey]);
+
+  if (isLoadingAccounts && entries.length === 0) {
+    return null;
+  }
+
+  if (accountsError) {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+        {accountsError}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {entries.map(({ account, snapshot, isLoading, error }) => {
+        const sortedWindows = snapshot ? sortWindows(snapshot.windows) : [];
+        return (
+          <div key={account.id} className="space-y-3 rounded-lg border border-border p-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-foreground">{account.label}</span>
+              {snapshot?.planType && (
+                <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                  {t('usage.plan', { plan: snapshot.planType })}
+                </span>
+              )}
+            </div>
+
+            {error && <p className="text-xs text-destructive">{error}</p>}
+            {!error && isLoading && (
+              <p className="text-xs text-muted-foreground">{t('usage.accounts.loadingUsage')}</p>
+            )}
+            {!error && !isLoading && sortedWindows.length === 0 && (
+              <p className="text-xs text-muted-foreground">{t('usage.empty.descriptionLive')}</p>
+            )}
+            {sortedWindows.length > 0 && (
+              <div className="space-y-4">
+                {sortedWindows.map((usageWindow) => (
+                  <RateLimitWindowBar key={usageWindow.type} window={usageWindow} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Rendered by Settings for the "usage" tab, showing subscription limit windows. */
 export default function UsageSettingsTab() {
   const { t, i18n } = useTranslation('settings');
@@ -229,8 +356,14 @@ export default function UsageSettingsTab() {
   const [snapshot, setSnapshot] = useState<RateLimitSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [claudeRefreshKey, setClaudeRefreshKey] = useState(0);
 
   const loadUsage = useCallback(async () => {
+    // Claude 는 계정별 카드(ClaudeAccountsUsageSection)가 스스로 불러온다.
+    if (provider === 'claude') {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -239,13 +372,7 @@ export default function UsageSettingsTab() {
         throw new Error(`Request failed with ${response.status}`);
       }
       const payload = await response.json();
-      const data = payload?.data ?? {};
-      setSnapshot({
-        supported: data.supported !== false,
-        windows: Array.isArray(data.windows) ? data.windows as RateLimitWindow[] : [],
-        planType: typeof data.planType === 'string' ? data.planType : undefined,
-        source: data.source === 'events' || data.source === 'cli' ? data.source : 'live',
-      });
+      setSnapshot(parseRateLimitPayload(payload?.data ?? {}));
     } catch (loadError) {
       console.error('Failed to load usage limits:', loadError);
       setError(t('usage.loadFailed'));
@@ -280,6 +407,14 @@ export default function UsageSettingsTab() {
     ? t('usage.disclaimer')
     : t('usage.disclaimerLive');
 
+  const handleRefresh = () => {
+    if (provider === 'claude') {
+      setClaudeRefreshKey((key) => key + 1);
+      return;
+    }
+    loadUsage();
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
@@ -290,8 +425,8 @@ export default function UsageSettingsTab() {
             <p className="text-sm text-muted-foreground">{t('usage.description')}</p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={loadUsage} disabled={isLoading}>
-          <RefreshCw className={cn('mr-2 h-4 w-4', isLoading && 'animate-spin')} />
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={provider !== 'claude' && isLoading}>
+          <RefreshCw className={cn('mr-2 h-4 w-4', provider !== 'claude' && isLoading && 'animate-spin')} />
           {t('usage.refresh')}
         </Button>
       </div>
@@ -310,49 +445,55 @@ export default function UsageSettingsTab() {
         ))}
       </PillBar>
 
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          {error}
-        </div>
-      )}
+      {provider === 'claude' ? (
+        <ClaudeAccountsUsageSection refreshKey={claudeRefreshKey} />
+      ) : (
+        <>
+          {error && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+              {error}
+            </div>
+          )}
 
-      {!error && isUnsupported && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-sm font-medium text-foreground">
-            {t('usage.unsupported.title', { provider: PROVIDER_NAMES[provider] })}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">{t('usage.unsupported.description')}</p>
-        </div>
-      )}
+          {!error && isUnsupported && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">
+                {t('usage.unsupported.title', { provider: PROVIDER_NAMES[provider] })}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">{t('usage.unsupported.description')}</p>
+            </div>
+          )}
 
-      {!error && !isLoading && !isUnsupported && sortedWindows.length === 0 && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4">
-          <p className="text-sm font-medium text-foreground">{t('usage.empty.title')}</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t('usage.empty.descriptionLive')}
-          </p>
-        </div>
-      )}
+          {!error && !isLoading && !isUnsupported && sortedWindows.length === 0 && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">{t('usage.empty.title')}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t('usage.empty.descriptionLive')}
+              </p>
+            </div>
+          )}
 
-      {sortedWindows.length > 0 && (
-        <div className="space-y-5 rounded-lg border border-border p-4">
-          {snapshot?.planType && (
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              {t('usage.plan', { plan: snapshot.planType })}
+          {sortedWindows.length > 0 && (
+            <div className="space-y-5 rounded-lg border border-border p-4">
+              {snapshot?.planType && (
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  {t('usage.plan', { plan: snapshot.planType })}
+                </p>
+              )}
+              {sortedWindows.map((usageWindow) => (
+                <RateLimitWindowBar key={usageWindow.type} window={usageWindow} />
+              ))}
+            </div>
+          )}
+
+          {!isUnsupported && (
+            <p className="text-xs text-muted-foreground">
+              {lastObservedAt
+                ? `${disclaimer} · ${t('usage.lastUpdated', { time: lastObservedAt })}`
+                : disclaimer}
             </p>
           )}
-          {sortedWindows.map((usageWindow) => (
-            <RateLimitWindowBar key={usageWindow.type} window={usageWindow} />
-          ))}
-        </div>
-      )}
-
-      {!isUnsupported && (
-        <p className="text-xs text-muted-foreground">
-          {lastObservedAt
-            ? `${disclaimer} · ${t('usage.lastUpdated', { time: lastObservedAt })}`
-            : disclaimer}
-        </p>
+        </>
       )}
 
       {sessionId && (

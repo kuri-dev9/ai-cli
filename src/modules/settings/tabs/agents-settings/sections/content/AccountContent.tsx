@@ -1,13 +1,235 @@
-import { Eye, EyeOff, LogIn } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Eye, EyeOff, LogIn, Pencil, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Badge, Button, LLMProviderLogo } from '@/shared/ui';
+import { api } from '@/shared/api';
+import { Badge, Button, Input, LLMProviderLogo } from '@/shared/ui';
 import { PROVIDER_CONNECTION_TONES } from '@/shared/constants';
 import type { AgentProvider, ProviderAuthStatus } from '@/shared/types';
 import SettingsToggle from '@/modules/settings/SettingsToggle';
 import { setProviderEnabled } from '@/shared/providerVisibility';
 import { readProviderConnectionTone } from '@/shared/utils';
 import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
+
+type ClaudeAccount = {
+  id: string;
+  label: string;
+  /** `null` 은 `CLAUDE_CONFIG_DIR` 미설정 — 기본 `~/.claude`. */
+  configDir: string | null;
+};
+
+/**
+ * 이 PC에 로그인된 Claude 계정을 등록해 두면, 방/대화를 새로 시작할 때 그중
+ * 하나를 고를 수 있다. 전환 개념은 없다 — 등록만 여기서 하고, 실제로 어느
+ * 계정을 쓸지는 세션을 만드는 자리(방 초대, 새 대화)에서 고른다.
+ */
+function ClaudeAccountsManager() {
+  const { t } = useTranslation('settings');
+  const [accounts, setAccounts] = useState<ClaudeAccount[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newConfigDir, setNewConfigDir] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editConfigDir, setEditConfigDir] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await api.providers.claudeAccounts();
+      if (!response.ok) {
+        throw new Error(`Request failed with ${response.status}`);
+      }
+      const payload = await response.json();
+      setAccounts(Array.isArray(payload?.data) ? payload.data as ClaudeAccount[] : []);
+    } catch (loadError) {
+      console.error('Failed to load Claude accounts:', loadError);
+      setError(t('agents.claudeAccounts.loadFailed'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleRemove = useCallback(async (id: string) => {
+    setError(null);
+    try {
+      const response = await api.providers.removeClaudeAccount(id);
+      if (!response.ok) {
+        throw new Error(`Request failed with ${response.status}`);
+      }
+      await load();
+    } catch (removeError) {
+      console.error('Failed to remove Claude account:', removeError);
+      setError(t('agents.claudeAccounts.removeFailed'));
+    }
+  }, [load, t]);
+
+  const handleStartEdit = useCallback((account: ClaudeAccount) => {
+    setEditingId(account.id);
+    setEditLabel(account.label);
+    setEditConfigDir(account.configDir ?? '');
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null);
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    const label = editLabel.trim();
+    if (!editingId || !label) {
+      return;
+    }
+    setIsUpdating(true);
+    setError(null);
+    try {
+      const response = await api.providers.updateClaudeAccount(editingId, {
+        label,
+        configDir: editConfigDir.trim() || null,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed with ${response.status}`);
+      }
+      setEditingId(null);
+      await load();
+    } catch (updateError) {
+      console.error('Failed to update Claude account:', updateError);
+      setError(t('agents.claudeAccounts.updateFailed'));
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [editConfigDir, editLabel, editingId, load, t]);
+
+  const handleAdd = useCallback(async () => {
+    const label = newLabel.trim();
+    if (!label) {
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      const response = await api.providers.addClaudeAccount({
+        label,
+        configDir: newConfigDir.trim() || null,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed with ${response.status}`);
+      }
+      setNewLabel('');
+      setNewConfigDir('');
+      setShowAddForm(false);
+      await load();
+    } catch (addError) {
+      console.error('Failed to add Claude account:', addError);
+      setError(t('agents.claudeAccounts.addFailed'));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [load, newConfigDir, newLabel, t]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-medium text-foreground">{t('agents.claudeAccounts.title')}</h4>
+          <p className="text-xs text-muted-foreground">{t('agents.claudeAccounts.description')}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setShowAddForm((previous) => !previous)}>
+          {t('agents.claudeAccounts.add')}
+        </Button>
+      </div>
+
+      {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
+
+      <div className="mt-3 space-y-2">
+        {accounts.map((account) => (
+          editingId === account.id ? (
+            <div key={account.id} className="space-y-2 rounded-md border border-dashed border-border p-3">
+              <Input
+                placeholder={t('agents.claudeAccounts.labelPlaceholder')}
+                value={editLabel}
+                onChange={(event) => setEditLabel(event.target.value)}
+              />
+              <Input
+                placeholder={t('agents.claudeAccounts.configDirPlaceholder')}
+                value={editConfigDir}
+                onChange={(event) => setEditConfigDir(event.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleSaveEdit} disabled={isUpdating || !editLabel.trim()}>
+                  {t('agents.claudeAccounts.editSave')}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={handleCancelEdit} disabled={isUpdating}>
+                  {t('agents.claudeAccounts.editCancel')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div
+              key={account.id}
+              className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+            >
+              <div className="min-w-0">
+                <span className="truncate text-sm font-medium text-foreground">{account.label}</span>
+                <p className="truncate text-xs text-muted-foreground">
+                  {account.configDir ?? t('agents.claudeAccounts.defaultConfigDir')}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleStartEdit(account)}
+                  aria-label={t('agents.claudeAccounts.edit')}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleRemove(account.id)}
+                  aria-label={t('agents.claudeAccounts.remove')}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )
+        ))}
+      </div>
+
+      {showAddForm && (
+        <div className="mt-3 space-y-2 rounded-md border border-dashed border-border p-3">
+          <Input
+            placeholder={t('agents.claudeAccounts.labelPlaceholder')}
+            value={newLabel}
+            onChange={(event) => setNewLabel(event.target.value)}
+          />
+          <Input
+            placeholder={t('agents.claudeAccounts.configDirPlaceholder')}
+            value={newConfigDir}
+            onChange={(event) => setNewConfigDir(event.target.value)}
+          />
+          <Button size="sm" onClick={handleAdd} disabled={isSaving || !newLabel.trim()}>
+            {t('agents.claudeAccounts.save')}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type AccountContentProps = {
   agent: AgentProvider;
@@ -160,6 +382,8 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
           )}
         </div>
       </div>
+
+      {agent === 'claude' && <ClaudeAccountsManager />}
     </div>
   );
 }

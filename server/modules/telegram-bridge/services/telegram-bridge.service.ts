@@ -1,3 +1,4 @@
+import { roomsDb, sessionsDb } from '@/modules/database/index.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import type { NormalizedMessage } from '@/shared/types.js';
@@ -139,8 +140,10 @@ function readErrors(sessionId: string): string[] {
  * 1. 텔레그램에서 시작한 실행은 무조건 보낸다. 사용자가 폰 앞에서 답을
  *    기다리고 있고, 이게 브리지가 존재하는 이유다. 알림 설정이 꺼져 있어도
  *    막지 않는다.
- * 2. 웹 실행은 넘기기를 켜 둔 대화의 것만 보낸다.
- * 3. 그 밖의 웹 실행은 세션 알림을 켜 둔 동안에만 보낸다.
+ * 2. "완료 알림"(`notifyOnCompletion`)을 켜 뒀으면 세션을 가리지 않고 전부
+ *    보낸다 — 넘기기(핸드오프)와 달리 승인 요청까지 폰으로 넘기지는 않고,
+ *    끝났다는 결과만 알리는 가벼운 모드다.
+ * 3. 그 밖의 웹 실행은 넘기기를 켜 둔 대화의 것만 보낸다.
  *
  * 어느 것도 아니면 조용하다. 기본이 조용한 쪽이어야 한다 — 브라우저에서
  * 대화할 때마다 폰이 울리면 알림 전체가 소음이 되고, 정작 기다리던 회신을
@@ -148,6 +151,9 @@ function readErrors(sessionId: string): string[] {
  */
 export function shouldRelayCompletion(sessionId: string): boolean {
   if (chatRunRegistry.describeRunOrigin(sessionId)?.origin === 'telegram') {
+    return true;
+  }
+  if (readTelegramSettings().notifyOnCompletion) {
     return true;
   }
   return isSessionHandedToTelegram(sessionId);
@@ -175,6 +181,31 @@ export function announceRelayHandoff(enabled: boolean): void {
   void activeBroadcast?.(enabled
     ? '📎 이 대화를 이어받았습니다. 그냥 답장하면 여기로 들어갑니다.'
     : '🔇 이 대화를 놓았습니다. 브라우저에서 이어집니다.');
+}
+
+/**
+ * 룸 라운드가 완전히 끝났을 때(참가자 한 명의 답이 아니라 전체) 한 줄로 알린다.
+ *
+ * `room-turn-engine.service.ts` 가 라운드가 더 돌지 않고 멈추는 순간에만 부른다.
+ * 이 방의 `notifyTelegram`(방 설정 — 헤더의 협업 토글 중 하나)이 꺼져 있거나
+ * 브리지가 안 떠 있으면 조용히 넘어간다. 1:1 대화의 전역 "완료 알림"
+ * (`notifyOnCompletion`)과는 별개다 — 방은 여럿이 같이 쓰므로 방마다 따로
+ * 켜고 끌 수 있어야 한다. 내용(누가 뭐라 답했는지)은 담지 않는다 — 방은
+ * 참가자가 여럿이라 누구 답을 보여줘야 할지가 애매하고, 결과는 화면에서
+ * 보면 되니 여기서는 "끝났다"는 사실만 알리면 된다.
+ */
+export function notifyTelegramRoundFinished(roomId: string): void {
+  if (!activeBroadcast) {
+    return;
+  }
+
+  const room = roomsDb.getRoom(roomId);
+  if (!room || !room.notify_telegram) {
+    return;
+  }
+
+  const roomLabel = sessionsDb.getSessionById(room.host_session_id)?.custom_name || roomId;
+  void activeBroadcast(`🏁 방 "${roomLabel}" 라운드가 끝났습니다.`);
 }
 
 /**

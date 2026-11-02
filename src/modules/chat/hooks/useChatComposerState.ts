@@ -45,6 +45,8 @@ type UseChatComposerStateArgs = {
    */
   currentProviderModel: string;
   currentProviderEffort: string;
+  /** Claude 계정 id. 새 대화(세션 없음)에서 고른 값만 뜻이 있다 — 세션이 있으면 이미 정해졌다. */
+  currentClaudeAccountId?: string;
   isLoading: boolean;
   processingSessions?: SessionActivityMap;
   canAbortSession: boolean;
@@ -219,6 +221,7 @@ export function useChatComposerState({
   resolvePermissionModeForProvider,
   currentProviderModel,
   currentProviderEffort,
+  currentClaudeAccountId,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -700,14 +703,21 @@ export function useChatComposerState({
     return {
       model: currentProviderModel,
       effort: currentProviderEffort,
+      // 세션이 이미 있으면 계정은 그 세션에 적힌 것으로 정해져 있다 — 새 대화를
+      // 시작할 때 고른 값만 보낼 의미가 있다.
+      ...(selectedSession || currentSessionId || !currentClaudeAccountId
+        ? {}
+        : { claudeAccountId: currentClaudeAccountId }),
       permissionMode: resolvePermissionModeForProvider(provider, permissionMode),
       toolsSettings,
       skipPermissions: toolsSettings?.skipPermissions || false,
       sessionSummary: getNotificationSessionSummary(selectedSession, currentInput),
     };
   }, [
+    currentClaudeAccountId,
     currentProviderEffort,
     currentProviderModel,
+    currentSessionId,
     permissionMode,
     provider,
     resolvePermissionModeForProvider,

@@ -33,11 +33,12 @@ const roomDetail: RoomDetail = {
     discussion: true,
     hostLed: false,
     autoCompact: true,
+    notifyTelegram: false,
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [
-    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, effort: null, displayName: '설계자', roleName: '설계', rolePrompt: '', persona: '', status: 'active', position: 0, isHost: true, permissionMode: 'ask' },
-    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, effort: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', persona: '', status: 'active', position: 1, isHost: false, permissionMode: 'ask' },
+    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, effort: null, claudeAccountId: null, displayName: '설계자', roleName: '설계', rolePrompt: '', persona: '', status: 'active', position: 0, isHost: true, permissionMode: 'ask' },
+    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, effort: null, claudeAccountId: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', persona: '', status: 'active', position: 1, isHost: false, permissionMode: 'ask' },
   ],
   formerParticipants: [],
   messages: [
@@ -272,5 +273,39 @@ describe('RoomInterface', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '의견' }));
     await waitFor(() => expect(roomCalls.find((call) => call.name === 'update')?.args).toEqual(['room-1', { discussion: false }]));
+  });
+
+  it('lets go of the bottom on a small upward scroll while a turn streams, and follows again only back at the bottom', async () => {
+    await renderRoom();
+    const timeline = document.querySelector('div.min-h-0.flex-1.overflow-y-auto') as HTMLDivElement;
+    // jsdom 은 배치를 하지 않는다. 높이와 위치를 직접 들고 있는다.
+    let height = 2000;
+    let top = 1500;
+    Object.defineProperty(timeline, 'scrollHeight', { configurable: true, get: () => height });
+    Object.defineProperty(timeline, 'clientHeight', { configurable: true, get: () => 500 });
+    Object.defineProperty(timeline, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => { top = value; } });
+    fireEvent.scroll(timeline);
+
+    emit({
+      kind: 'room_state',
+      roomId: 'room-1',
+      state: { ...roomDetail.state, status: 'running', activeParticipantId: 'p-rev', activeSessionId: 'rev-session', activeParticipantIds: ['p-rev'], activeSessionIds: ['rev-session'], phase: 'turn', turnCount: 2 },
+    });
+
+    // 트랙패드로 몇 px 만 올렸다. 바닥에서 10px 이라 거리만 보면 아직 "바닥 근처" 다.
+    fireEvent.wheel(timeline, { deltaY: -10 });
+    top = 1490;
+    fireEvent.scroll(timeline);
+
+    height = 2100;
+    emit({ kind: 'text', role: 'assistant', id: 'a1', sessionId: 'rev-session', content: '검토 중입니다', seq: 1, timestamp: '2026-10-25T00:00:04.000Z' });
+    expect(top).toBe(1490);
+
+    // 바닥까지 직접 내려오면 다시 따라간다.
+    top = height - 500;
+    fireEvent.scroll(timeline);
+    height = 2200;
+    emit({ kind: 'text', role: 'assistant', id: 'a2', sessionId: 'rev-session', content: '계속 검토 중', seq: 2, timestamp: '2026-10-25T00:00:05.000Z' });
+    expect(top).toBe(2200);
   });
 });

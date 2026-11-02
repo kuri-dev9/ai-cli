@@ -60,6 +60,7 @@ import {
     telegramRoutes,
 } from './modules/telegram-bridge/index.js';
 import { roomsRoutes, roomTurnEngine } from './modules/rooms/index.js';
+import { abortRunsForShutdown, beginShutdown, resumeInterruptedWork } from './modules/run-recovery/index.js';
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
@@ -438,6 +439,13 @@ async function startServer() {
             // 브라우저 밖에서 시작된 턴(텔레그램·예약 메시지)도 열려 있는
             // 화면에 "돌고 있음"이 보이게 한다.
             initializeRunStateBroadcast();
+            // 서버가 내려가며 끊긴 대화와 룸을 이어 간다. 런타임·텔레그램·룸
+            // 엔진이 모두 준비된 뒤여야 한다.
+            try {
+                resumeInterruptedWork(providerRuntimeService);
+            } catch (err) {
+                console.error('[RunRecovery] Failed to resume interrupted work:', getErrorMessage(err));
+            }
 
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {
@@ -447,6 +455,9 @@ async function startServer() {
 
         // Clean up plugin processes on shutdown
         const shutdownRuntimeServices = async () => {
+            // 가장 먼저 한다. 이 뒤로 끝나는 실행과 룸 라운드는 "끊긴 것" 으로
+            // 남아 다시 뜰 때 이어 간다.
+            beginShutdown();
             // 이 두 줄은 종료 핸들러 바깥에 있어서 서버가 뜨자마자 실행됐다.
             // 그 시점에는 감시자도 디스패처도 아직 시작 전이라 아무 일도 하지
             // 않았고, 정작 종료할 때는 둘 다 정리되지 않은 채로 남았다.
@@ -454,6 +465,12 @@ async function startServer() {
             closeScheduledMessageDispatcher();
             closeTelegramBridge();
             roomTurnEngine.close();
+            // 돌고 있는 실행을 끊는다. 텔레그램을 닫은 뒤라 "중단됨" 알림은 가지 않는다.
+            try {
+                await abortRunsForShutdown(providerRuntimeService);
+            } catch (err) {
+                console.error('[RunRecovery] Error stopping runs during shutdown:', getErrorMessage(err));
+            }
             try {
                 await browserUseService.stopAllSessions();
             } catch (err) {

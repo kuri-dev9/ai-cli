@@ -21,6 +21,10 @@ export type RoomRow = {
   host_led: number;
   /** 1 이면 맥락이 많이 찬 참가자 세션을 차례 전에 스스로 줄인다. */
   auto_compact: number;
+  /** 1 이면 라운드가 완전히 끝났을 때 텔레그램으로 알린다. */
+  notify_telegram: number;
+  /** 차례가 도는 중인 룸의 상태 JSON. 서버가 다시 뜨면 이것으로 이어 간다. 쉬는 룸은 NULL. */
+  loop_state?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -43,6 +47,8 @@ export type RoomParticipantRow = {
   model: string | null;
   /** 세션이 생기기 전에 고른 추론 강도. 처음 불릴 때 세션에 옮긴다. */
   effort: string | null;
+  /** 세션이 생기기 전에 고른 Claude 계정. 처음 불릴 때 세션에 옮기고 그 뒤로는 바꾸지 않는다. */
+  claude_account_id: string | null;
   display_name: string;
   role_name: string;
   role_prompt: string;
@@ -86,9 +92,9 @@ export type RoomMessageRow = {
   created_at: string;
 };
 
-const PARTICIPANT_COLUMNS = `participant_id, room_id, session_id, provider, model, effort, display_name,
-  role_name, role_prompt, persona, role_dirty, status, position, last_seen_message_id, permission_mode,
-  joined_at, left_at`;
+const PARTICIPANT_COLUMNS = `participant_id, room_id, session_id, provider, model, effort, claude_account_id,
+  display_name, role_name, role_prompt, persona, role_dirty, status, position, last_seen_message_id,
+  permission_mode, joined_at, left_at`;
 
 export const roomsDb = {
   /**
@@ -106,8 +112,8 @@ export const roomsDb = {
     );
     const insertParticipant = db.prepare(
       `INSERT INTO room_participants
-         (participant_id, room_id, session_id, provider, model, display_name, role_name, role_prompt, persona, status, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (participant_id, room_id, session_id, provider, model, claude_account_id, display_name, role_name, role_prompt, persona, status, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     db.transaction(() => {
       insertRoom.run(room.roomId, room.hostSessionId, room.projectPath, room.permissionMode, room.maxAutoTurns);
@@ -118,6 +124,7 @@ export const roomsDb = {
           participant.session_id,
           participant.provider,
           participant.model,
+          participant.claude_account_id,
           participant.display_name,
           participant.role_name,
           participant.role_prompt,
@@ -133,8 +140,8 @@ export const roomsDb = {
     getConnection()
       .prepare(
         `INSERT INTO room_participants
-           (participant_id, room_id, session_id, provider, model, display_name, role_name, role_prompt, persona, status, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (participant_id, room_id, session_id, provider, model, claude_account_id, display_name, role_name, role_prompt, persona, status, position)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         participant.participant_id,
@@ -142,6 +149,7 @@ export const roomsDb = {
         participant.session_id,
         participant.provider,
         participant.model,
+        participant.claude_account_id,
         participant.display_name,
         participant.role_name,
         participant.role_prompt,
@@ -201,10 +209,13 @@ export const roomsDb = {
   },
 
   /**
-   * 세션이 없는 명단 멤버의 모델·추론 강도를 고친다. 준 칸만 바뀐다. 세션이
-   * 생긴 뒤에는 세션 쪽 설정이 기준이라 여기를 쓰지 않는다.
+   * 세션이 없는 명단 멤버의 모델·추론 강도·Claude 계정을 고친다. 준 칸만
+   * 바뀐다. 세션이 생긴 뒤에는 세션 쪽 설정이 기준이라 여기를 쓰지 않는다.
    */
-  updateParticipantModel(participantId: string, selection: { model?: string; effort?: string }): void {
+  updateParticipantModel(
+    participantId: string,
+    selection: { model?: string; effort?: string; claudeAccountId?: string },
+  ): void {
     const assignments: string[] = [];
     const values: unknown[] = [];
     if (selection.model !== undefined) {
@@ -214,6 +225,10 @@ export const roomsDb = {
     if (selection.effort !== undefined) {
       assignments.push('effort = ?');
       values.push(selection.effort);
+    }
+    if (selection.claudeAccountId !== undefined) {
+      assignments.push('claude_account_id = ?');
+      values.push(selection.claudeAccountId);
     }
     if (assignments.length === 0) {
       return;
@@ -330,6 +345,7 @@ export const roomsDb = {
       discussion?: boolean;
       hostLed?: boolean;
       autoCompact?: boolean;
+      notifyTelegram?: boolean;
     },
   ): void {
     const db = getConnection();
@@ -345,6 +361,9 @@ export const roomsDb = {
     if (settings.autoCompact !== undefined) {
       db.prepare('UPDATE rooms SET auto_compact = ? WHERE room_id = ?').run(settings.autoCompact ? 1 : 0, roomId);
     }
+    if (settings.notifyTelegram !== undefined) {
+      db.prepare('UPDATE rooms SET notify_telegram = ? WHERE room_id = ?').run(settings.notifyTelegram ? 1 : 0, roomId);
+    }
     if (settings.permissionMode !== undefined) {
       db.prepare('UPDATE rooms SET permission_mode = ? WHERE room_id = ?').run(settings.permissionMode, roomId);
     }
@@ -352,6 +371,21 @@ export const roomsDb = {
       db.prepare('UPDATE rooms SET max_auto_turns = ? WHERE room_id = ?').run(settings.maxAutoTurns, roomId);
     }
     this.touchRoom(roomId);
+  },
+
+  /**
+   * 차례가 도는 룸의 상태를 적는다. `null` 이면 지운다 — 라운드가 끝났다.
+   * `updated_at` 은 건드리지 않는다. 사이드바가 그 값으로 룸을 줄 세운다.
+   */
+  setLoopState(roomId: string, state: string | null): void {
+    getConnection().prepare('UPDATE rooms SET loop_state = ? WHERE room_id = ?').run(state, roomId);
+  },
+
+  /** 서버가 내려갈 때 차례가 돌고 있던 룸. */
+  listRoomsWithLoopState(): RoomRow[] {
+    return getConnection()
+      .prepare('SELECT * FROM rooms WHERE loop_state IS NOT NULL ORDER BY room_id')
+      .all() as RoomRow[];
   },
 
   touchRoom(roomId: string): void {

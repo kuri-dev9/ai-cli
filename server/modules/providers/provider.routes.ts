@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 
+import { claudeAccountService } from '@/modules/providers/services/claude-account.service.js';
 import { claudeRateLimitService } from '@/modules/providers/services/claude-rate-limit.service.js';
 import { codexRateLimitService } from '@/modules/providers/services/codex-rate-limit.service.js';
 import { claudeUsageService } from '@/modules/providers/services/claude-usage.service.js';
@@ -880,6 +881,96 @@ router.get(
     }
 
     res.json(createApiSuccessResponse({ supported: false, windows: [] }));
+  }),
+);
+
+/** 둘 다 선택: 빈 문자열은 `CLAUDE_CONFIG_DIR` 미설정(기본 `~/.claude`)으로 본다. */
+const parseClaudeAccountCreatePayload = (payload: unknown): { label: string; configDir: string | null } => {
+  if (!payload || typeof payload !== 'object') {
+    throw new AppError('Request body must be an object.', {
+      code: 'INVALID_REQUEST_BODY',
+      statusCode: 400,
+    });
+  }
+
+  const body = payload as Record<string, unknown>;
+  const label = typeof body.label === 'string' ? body.label.trim() : '';
+  const configDir = typeof body.configDir === 'string' ? body.configDir.trim() : '';
+  if (!label) {
+    throw new AppError('label is required.', {
+      code: 'CLAUDE_ACCOUNT_LABEL_REQUIRED',
+      statusCode: 400,
+    });
+  }
+
+  return { label, configDir: configDir || null };
+};
+
+/** 수정은 둘 다 선택 — 준 칸만 바꾼다. `configDir` 는 빈 문자열이면 명시적으로 기본값(null)으로 되돌린다. */
+const parseClaudeAccountUpdatePayload = (payload: unknown): { label?: string; configDir?: string | null } => {
+  if (!payload || typeof payload !== 'object') {
+    throw new AppError('Request body must be an object.', {
+      code: 'INVALID_REQUEST_BODY',
+      statusCode: 400,
+    });
+  }
+
+  const body = payload as Record<string, unknown>;
+  const changes: { label?: string; configDir?: string | null } = {};
+  if (typeof body.label === 'string') {
+    changes.label = body.label;
+  }
+  if (typeof body.configDir === 'string') {
+    changes.configDir = body.configDir.trim() || null;
+  }
+  return changes;
+};
+
+router.get(
+  '/claude/accounts',
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createApiSuccessResponse(claudeAccountService.listAccounts()));
+  }),
+);
+
+router.post(
+  '/claude/accounts',
+  asyncHandler(async (req: Request, res: Response) => {
+    const input = parseClaudeAccountCreatePayload(req.body);
+    const account = claudeAccountService.addAccount(input);
+    res.status(201).json(createApiSuccessResponse(account));
+  }),
+);
+
+router.patch(
+  '/claude/accounts/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = readPathParam(req.params.id, 'id');
+    const changes = parseClaudeAccountUpdatePayload(req.body);
+    const account = claudeAccountService.updateAccount(id, changes);
+    res.json(createApiSuccessResponse(account));
+  }),
+);
+
+router.delete(
+  '/claude/accounts/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = readPathParam(req.params.id, 'id');
+    claudeAccountService.removeAccount(id);
+    res.json(createApiSuccessResponse({ id }));
+  }),
+);
+
+router.get(
+  '/claude/accounts/:id/usage',
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = readPathParam(req.params.id, 'id');
+    const account = claudeAccountService.resolveAccount(id);
+    if (!account) {
+      throw new AppError('Account not found.', { code: 'CLAUDE_ACCOUNT_NOT_FOUND', statusCode: 404 });
+    }
+    const snapshot = await claudeUsageService.getSnapshot(account.configDir);
+    res.json(createApiSuccessResponse({ supported: true, ...snapshot }));
   }),
 );
 

@@ -56,6 +56,8 @@ const PROVIDER_LABELS: Record<string, string> = {
 type ParticipantInput = {
   provider: string;
   model?: string | null;
+  /** 등록된 Claude 계정(claude_accounts 의 id). Claude 가 아니면 무시된다. */
+  claudeAccountId?: string | null;
   displayName: string;
   roleName: string;
   rolePrompt?: string | null;
@@ -109,6 +111,7 @@ function buildDetail(room: RoomRow): RoomDetail {
       discussion: room.discussion !== 0,
       hostLed: room.host_led !== 0,
       autoCompact: room.auto_compact !== 0,
+      notifyTelegram: room.notify_telegram !== 0,
       createdAt: toIsoTimestamp(room.created_at),
     },
     participants: roomsDb.listParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
@@ -189,16 +192,26 @@ async function assertProviderUsable(provider: string): Promise<LLMProvider> {
  * 참가자의 모델·추론 강도를 고친다. 세션이 있으면 세션에 적는다 — 차례는
  * 세션 설정으로 돈다. 아직 불린 적 없는 명단 멤버는 세션이 없으니 명단에
  * 적어 두고, 처음 불려 세션이 생길 때 옮긴다.
+ *
+ * Claude 계정은 세션이 생긴 뒤에는 바꾸지 않는다 — 세션이 있으면 `claudeAccountId`
+ * 는 조용히 무시된다. 계정을 바꾸면 그 세션의 transcript 를 못 찾아 이어가기가
+ * 깨지기 때문이다.
  */
 function updateParticipantSelection(
   current: RoomParticipantRow,
   model: string | undefined,
   effort: string | undefined,
+  claudeAccountId: string | undefined,
 ): void {
   const nextModel = model?.trim() || undefined;
   const nextEffort = effort?.trim() || undefined;
   if (!current.session_id) {
-    roomsDb.updateParticipantModel(current.participant_id, { model: nextModel, effort: nextEffort });
+    const nextClaudeAccountId = claudeAccountId?.trim() || undefined;
+    roomsDb.updateParticipantModel(current.participant_id, {
+      model: nextModel,
+      effort: nextEffort,
+      claudeAccountId: nextClaudeAccountId,
+    });
     return;
   }
   const provider = current.provider as LLMProvider;
@@ -269,9 +282,18 @@ export const roomsService = {
     const inviteeName = resolveDisplayName(input.participant.displayName, provider, [hostName]);
     const inviteeRole = requireRoleName(input.participant.roleName);
     const inviteeModel = input.participant.model?.trim() || null;
+    const inviteeClaudeAccountId = provider === 'claude' ? (input.participant.claudeAccountId?.trim() || null) : null;
 
     const projectPath = hostSession.project_path;
-    const inviteeSessionId = createParticipantSession(provider, projectPath, inviteeName, inviteeRole, inviteeModel);
+    const inviteeSessionId = createParticipantSession(
+      provider,
+      projectPath,
+      inviteeName,
+      inviteeRole,
+      inviteeModel,
+      null,
+      inviteeClaudeAccountId,
+    );
     const roomId = randomUUID();
 
     roomsDb.createRoom(
@@ -288,6 +310,7 @@ export const roomsService = {
           session_id: input.hostSessionId,
           provider: hostSession.provider,
           model: hostSession.model,
+          claude_account_id: hostSession.claude_account_id,
           display_name: hostName,
           role_name: hostRole,
           role_prompt: input.host?.rolePrompt?.trim() ?? '',
@@ -300,6 +323,7 @@ export const roomsService = {
           session_id: inviteeSessionId,
           provider,
           model: inviteeModel,
+          claude_account_id: inviteeClaudeAccountId,
           display_name: inviteeName,
           role_name: inviteeRole,
           role_prompt: input.participant.rolePrompt?.trim() ?? '',
@@ -335,11 +359,12 @@ export const roomsService = {
     const displayName = resolveDisplayName(input.displayName, provider, takenNames);
     const roleName = requireRoleName(input.roleName);
     const model = input.model?.trim() || null;
+    const claudeAccountId = provider === 'claude' ? (input.claudeAccountId?.trim() || null) : null;
     const status = input.status === 'active' ? 'active' : 'standby';
     // 명단에만 담는 멤버는 세션을 만들지 않는다. 한 번도 불리지 않으면 아무
     // 비용도 들지 않아야 명단을 넉넉히 둘 수 있다.
     const sessionId = status === 'active'
-      ? createParticipantSession(provider, room.project_path, displayName, roleName, model)
+      ? createParticipantSession(provider, room.project_path, displayName, roleName, model, null, claudeAccountId)
       : null;
 
     roomsDb.addParticipant({
@@ -348,6 +373,7 @@ export const roomsService = {
       session_id: sessionId,
       provider,
       model,
+      claude_account_id: claudeAccountId,
       display_name: displayName,
       role_name: roleName,
       role_prompt: input.rolePrompt?.trim() ?? '',
@@ -369,6 +395,7 @@ export const roomsService = {
       discussion?: boolean;
       hostLed?: boolean;
       autoCompact?: boolean;
+      notifyTelegram?: boolean;
     },
   ): RoomDetail {
     requireRoom(roomId);
@@ -408,6 +435,7 @@ export const roomsService = {
       persona?: string;
       model?: string;
       effort?: string;
+      claudeAccountId?: string;
     },
   ): RoomDetail {
     const room = requireRoom(roomId);
@@ -415,8 +443,8 @@ export const roomsService = {
     if (settings.permissionMode !== undefined) {
       roomsDb.updateParticipantPermission(participantId, settings.permissionMode);
     }
-    if (settings.model !== undefined || settings.effort !== undefined) {
-      updateParticipantSelection(current, settings.model, settings.effort);
+    if (settings.model !== undefined || settings.effort !== undefined || settings.claudeAccountId !== undefined) {
+      updateParticipantSelection(current, settings.model, settings.effort, settings.claudeAccountId);
     }
 
     const profile: { displayName?: string; roleName?: string; rolePrompt?: string; persona?: string } = {};

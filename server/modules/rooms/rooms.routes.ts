@@ -33,6 +33,7 @@ function readParticipant(value: unknown) {
   return {
     provider: readRequiredString(record.provider, 'participant.provider'),
     model: readOptionalString(record.model),
+    claudeAccountId: readOptionalString(record.claudeAccountId),
     displayName: readOptionalString(record.displayName) ?? '',
     roleName: readRequiredString(record.roleName, 'participant.roleName'),
     rolePrompt: readOptionalString(record.rolePrompt),
@@ -114,6 +115,7 @@ router.patch(
         persona: readOptionalString(body.persona) ?? undefined,
         model: readOptionalString(body.model) ?? undefined,
         effort: readOptionalString(body.effort) ?? undefined,
+        claudeAccountId: readOptionalString(body.claudeAccountId) ?? undefined,
       },
     );
     res.json(createApiSuccessResponse(detail));
@@ -142,6 +144,7 @@ router.patch(
       discussion: typeof body.discussion === 'boolean' ? body.discussion : undefined,
       hostLed: typeof body.hostLed === 'boolean' ? body.hostLed : undefined,
       autoCompact: typeof body.autoCompact === 'boolean' ? body.autoCompact : undefined,
+      notifyTelegram: typeof body.notifyTelegram === 'boolean' ? body.notifyTelegram : undefined,
     });
     res.json(createApiSuccessResponse(detail));
   }),

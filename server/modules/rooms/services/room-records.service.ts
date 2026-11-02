@@ -44,6 +44,7 @@ export function toRoomParticipant(row: RoomParticipantRow, room: RoomRow): RoomP
     provider: row.provider,
     model: row.model,
     effort: row.effort ?? null,
+    claudeAccountId: row.claude_account_id ?? null,
     displayName: row.display_name,
     roleName: row.role_name,
     rolePrompt: row.role_prompt,

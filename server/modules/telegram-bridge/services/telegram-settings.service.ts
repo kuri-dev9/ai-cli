@@ -19,6 +19,7 @@ import type { TelegramPermissionMode } from '@/modules/websocket/index.js';
 const TOKEN_KEY = 'telegram.botToken';
 const CHAT_IDS_KEY = 'telegram.allowedChatIds';
 const ENABLED_KEY = 'telegram.enabled';
+const NOTIFY_ON_COMPLETION_KEY = 'telegram.notifyOnCompletion';
 /** `<botId>:<username>` 형태로 넣는다. 아래 `readCachedBotUsername` 참고. */
 const BOT_USERNAME_KEY = 'telegram.botUsername';
 
@@ -38,6 +39,12 @@ export type TelegramSettings = {
    * 두 군데에 같은 뜻의 코드를 두지 않으려고 여기서는 읽고 쓰기만 한다.
    */
   permissionMode: TelegramPermissionMode;
+  /**
+   * 켜 두면 넘기기(핸드오프)나 텔레그램에서 시작한 턴이 아니어도, 1:1 대화 턴과
+   * 룸 라운드가 끝날 때마다 완료 알림을 보낸다. 기본은 꺼짐 — 브라우저에서
+   * 평소처럼 대화할 때마다 폰이 울리면 알림이 소음이 된다.
+   */
+  notifyOnCompletion: boolean;
 };
 
 function parseChatIds(raw: string | null | undefined): number[] {
@@ -62,6 +69,7 @@ export function readTelegramSettings(): TelegramSettings {
     : parseChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS);
 
   const storedEnabled = appConfigDb.get(ENABLED_KEY);
+  const storedNotifyOnCompletion = appConfigDb.get(NOTIFY_ON_COMPLETION_KEY);
 
   return {
     botToken,
@@ -70,6 +78,7 @@ export function readTelegramSettings(): TelegramSettings {
     fromEnvironment,
     botUsername: readCachedBotUsername(botToken),
     permissionMode: parseTelegramPermissionMode(appConfigDb.get(TELEGRAM_PERMISSION_MODE_KEY)),
+    notifyOnCompletion: storedNotifyOnCompletion === 'true',
   };
 }
 
@@ -78,6 +87,7 @@ export function writeTelegramSettings(updates: {
   allowedChatIds?: number[];
   enabled?: boolean;
   permissionMode?: TelegramPermissionMode;
+  notifyOnCompletion?: boolean;
 }): TelegramSettings {
   if (updates.botToken !== undefined) {
     appConfigDb.set(TOKEN_KEY, updates.botToken.trim());
@@ -91,6 +101,9 @@ export function writeTelegramSettings(updates: {
   if (updates.permissionMode !== undefined) {
     // 모르는 값이 저장되면 그때부터 조용히 `ask` 로 읽힌다. 들어올 때 거른다.
     appConfigDb.set(TELEGRAM_PERMISSION_MODE_KEY, parseTelegramPermissionMode(updates.permissionMode));
+  }
+  if (updates.notifyOnCompletion !== undefined) {
+    appConfigDb.set(NOTIFY_ON_COMPLETION_KEY, updates.notifyOnCompletion ? 'true' : 'false');
   }
   return readTelegramSettings();
 }

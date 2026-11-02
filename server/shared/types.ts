@@ -1517,6 +1517,11 @@ export type RoomParticipant = {
   model: string | null;
   /** 세션이 생기기 전에 고른 추론 강도. 세션이 생긴 뒤에는 세션 쪽이 기준이다. */
   effort: string | null;
+  /**
+   * 세션이 생기기 전에 고른 등록된 Claude 계정(claude_accounts 의 id).
+   * 세션이 생긴 뒤에는 세션 쪽이 기준이고, 다시 바꿀 수 없다.
+   */
+  claudeAccountId: string | null;
   /** `@이름` 으로 부르는 이름. 공백과 `@` 없이, 룸 안에서 겹치지 않는다. */
   displayName: string;
   roleName: string;
@@ -1633,6 +1638,8 @@ export type RoomDetail = {
     hostLed: boolean;
     /** 참가자 세션의 맥락이 많이 차면 그 차례 전에 스스로 줄이는지. */
     autoCompact: boolean;
+    /** 라운드가 완전히 끝났을 때(참가자 한 명이 아니라 전체) 텔레그램으로 알리는지. */
+    notifyTelegram: boolean;
     createdAt: string;
   };
   participants: RoomParticipant[];

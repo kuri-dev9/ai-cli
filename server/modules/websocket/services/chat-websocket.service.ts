@@ -1,9 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import type { WebSocket } from 'ws';
 
 import { appConfigDb, sessionsDb } from '@/modules/database/index.js';
+import type { ActiveRunOwner } from '@/modules/database/index.js';
 import { providerModelsService, sessionsService } from '@/modules/providers/index.js';
+import { activeRunJournal } from '@/modules/websocket/services/active-run-journal.service.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import type { ChatRunOrigin } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
@@ -307,6 +310,8 @@ async function dispatchRun(
   extraRuntimeOptions: AnyRecord = {},
   beforeRun?: (run: NonNullable<ReturnType<typeof chatRunRegistry.startRun>>) => void | Promise<void>,
   origin: ChatRunOrigin = 'web',
+  /** 일지에 적을 것. 룸 차례면 `owner: 'room'`, 끊긴 것을 이어 가는 실행이면 몇 번째인지. */
+  journal: { owner?: ActiveRunOwner; resumeCount?: number } = {},
 ): Promise<{ started: boolean; error: string | null }> {
   const provider = session.provider as LLMProvider;
 
@@ -343,6 +348,15 @@ async function dispatchRun(
   if (typeof clientOptions.effort === 'string' && clientOptions.effort.trim()) {
     providerModelsService.setSessionEffort(provider, sessionId, clientOptions.effort);
   }
+  // Claude 계정은 세션에 한 번만 적는다 — 처음 턴에서 고른 값을 그대로 쓰고,
+  // 이미 적혀 있으면(둘째 턴부터, 또는 방 참가자 세션이 미리 적어 둔 경우)
+  // 클라이언트가 뭘 보내든 무시한다. 계정을 바꾸면 그 세션의 Claude
+  // transcript 를 못 찾아 이어가기가 깨지기 때문이다.
+  const claudeAccountId = session.claude_account_id
+    || (typeof clientOptions.claudeAccountId === 'string' ? clientOptions.claudeAccountId.trim() : '') || null;
+  if (!session.claude_account_id && claudeAccountId) {
+    sessionsDb.setSessionClaudeAccount(sessionId, claudeAccountId);
+  }
 
   const attachmentCandidates = [
     ...normalizeAttachmentDescriptors(clientOptions.images),
@@ -371,6 +385,9 @@ async function dispatchRun(
     sessionId,
     cwd: clientOptions.cwd ?? session.project_path ?? undefined,
     projectPath: session.project_path ?? clientOptions.projectPath,
+    // 위에서 정한 값으로 덮는다 — 세션에 이미 적힌 계정이 있으면 클라이언트가
+    // 뭘 보냈든 그게 이긴다.
+    claudeAccountId: claudeAccountId ?? undefined,
     // 폰으로 넘어간 턴은 승인을 물을 자리가 없다. 승인 요청은 붙어 있는
     // 브라우저로만 그려지고, 텔레그램에는 아무것도 뜨지 않은 채 55초 뒤 거부로
     // 끝난다. 얼마나 허용할지는 설정 화면에서 고른다 —
@@ -407,6 +424,19 @@ async function dispatchRun(
     }));
   }
 
+  // 서버가 내려가 끊기면 다시 떴을 때 이 기록으로 이어 간다. 끝나면 지운다.
+  const journalRunId = randomUUID();
+  activeRunJournal.recordStart({
+    sessionId,
+    runId: journalRunId,
+    provider,
+    origin,
+    owner: journal.owner ?? 'chat',
+    userId,
+    options: clientOptions,
+    resumeCount: journal.resumeCount ?? 0,
+  });
+
   let failure: string | null = null;
   try {
     // Runs only now that the session is reserved, because an edit rewinds the
@@ -425,6 +455,7 @@ async function dispatchRun(
     // a queued message can start the session's next run before this promise
     // settles, and the session-keyed completeRun would kill that new run.
     chatRunRegistry.completeRunIfCurrent(run, { exitCode: 1 });
+    activeRunJournal.recordFinish(sessionId, journalRunId);
   }
 
   return { started: true, error: failure };
@@ -700,6 +731,10 @@ export async function runDetachedChatTurn(
      * 답을 기다리고 있는 실행만 무조건 회신하기 위해서다.
      */
     origin?: ChatRunOrigin;
+    /** 누가 이어 갈 실행인지. 룸 차례는 `room` — 서버가 다시 뜨면 룸 엔진이 이어 간다. */
+    owner?: ActiveRunOwner;
+    /** 끊긴 실행을 이어 가는 것이면 몇 번째로 이어 가는지. */
+    resumeCount?: number;
   },
   dependencies: ChatWebSocketDependencies,
 ): Promise<{ started: boolean; error: string | null }> {
@@ -740,6 +775,7 @@ export async function runDetachedChatTurn(
     {},
     undefined,
     input.origin ?? 'web',
+    { owner: input.owner, resumeCount: input.resumeCount },
   );
 }
 

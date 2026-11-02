@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createClaudeUsageService } from '@/modules/providers/services/claude-usage.service.js';
+import {
+  createClaudeUsageService,
+  parseUnifiedRateLimitHeaders,
+} from '@/modules/providers/services/claude-usage.service.js';
 import type { ProviderRateLimitWindow } from '@/shared/types.js';
 
 /** 실제 `GET /api/oauth/usage` 응답에서 이 서비스가 보는 부분만. */
@@ -40,10 +43,14 @@ function createService(options: {
   usage?: unknown;
   credentials?: { accessToken: string; subscriptionType?: string } | null;
   fail?: boolean;
+  /** 헤더로 읽었을 때 돌아올 창들. 기본은 빈 목록이라 테스트가 실제 요청을 보내지 않는다. */
+  probeWindows?: ProviderRateLimitWindow[];
+  probeFail?: boolean;
   /** CLI 로 물러섰을 때 돌아올 창들. 기본은 빈 목록이라 테스트가 CLI 를 띄우지 않는다. */
   cliWindows?: ProviderRateLimitWindow[];
 } = {}) {
   let fetchCount = 0;
+  let probeCount = 0;
   let cliCount = 0;
   let clock = 1_790_400_000_000;
   const service = createClaudeUsageService({
@@ -58,6 +65,13 @@ function createService(options: {
       }
       return options.usage ?? usageResponse();
     },
+    probeUsage: async () => {
+      probeCount += 1;
+      if (options.probeFail) {
+        throw new Error('probe boom');
+      }
+      return options.probeWindows ?? [];
+    },
     readCliUsage: async () => {
       cliCount += 1;
       return { windows: options.cliWindows ?? [] };
@@ -67,6 +81,7 @@ function createService(options: {
   return {
     service,
     fetchCount: () => fetchCount,
+    probeCount: () => probeCount,
     cliCount: () => cliCount,
     advance: (milliseconds: number) => {
       clock += milliseconds;
@@ -190,4 +205,107 @@ test('아무 길로도 못 읽으면 캐시하지 않고 다음 요청에서 다
   // 로그인을 막 끝낸 직후에도 다음 요청이 바로 값을 가져와야 한다.
   assert.equal(harness.fetchCount(), 2);
   assert.equal(harness.cliCount(), 2);
+});
+
+const probeWindow: ProviderRateLimitWindow = {
+  type: 'seven_day',
+  status: 'allowed',
+  utilization: 0.29,
+  resetsAt: null,
+  observedAt: '2026-09-26T00:00:00.000Z',
+};
+
+test('계정 조회가 막히면 응답 헤더로 읽고, 그것이 되면 CLI 를 부르지 않는다', async () => {
+  const harness = createService({ fail: true, probeWindows: [probeWindow], cliWindows: [cliWindow] });
+
+  const snapshot = await harness.service.getSnapshot();
+
+  assert.equal(snapshot.source, 'live');
+  assert.deepEqual(snapshot.windows, [probeWindow]);
+  assert.equal(harness.cliCount(), 0);
+});
+
+test('계정 조회가 되면 헤더 확인 요청을 보내지 않는다', async () => {
+  // 헤더 확인은 실제 추론 요청이라 사용량에 잡힌다. 필요할 때만 보내야 한다.
+  const harness = createService({ probeWindows: [probeWindow] });
+
+  await harness.service.getSnapshot();
+
+  assert.equal(harness.probeCount(), 0);
+});
+
+test('헤더 확인도 실패하면 CLI 로 물러선다', async () => {
+  const harness = createService({ fail: true, probeFail: true, cliWindows: [cliWindow] });
+
+  const snapshot = await harness.service.getSnapshot();
+
+  assert.equal(snapshot.source, 'cli');
+  assert.deepEqual(snapshot.windows, [cliWindow]);
+});
+
+test('unified 헤더에서 창 이름·사용률·상태·초기화 시각을 읽는다', () => {
+  // 2026-10-02 에 setup-token 토큰으로 받은 실제 응답 헤더에서 한도 관련 부분만.
+  const windows = parseUnifiedRateLimitHeaders({
+    'anthropic-ratelimit-unified-status': 'allowed',
+    'anthropic-ratelimit-unified-reset': '1790949000',
+    'anthropic-ratelimit-unified-representative-claim': 'five_hour',
+    'anthropic-ratelimit-unified-5h-status': 'allowed',
+    'anthropic-ratelimit-unified-5h-utilization': '0.01',
+    'anthropic-ratelimit-unified-5h-reset': '1790949000',
+    'anthropic-ratelimit-unified-7d-status': 'allowed_warning',
+    'anthropic-ratelimit-unified-7d-utilization': '0.29',
+    'anthropic-ratelimit-unified-7d-reset': '1791277200',
+    'anthropic-ratelimit-unified-overage-status': 'rejected',
+    'anthropic-ratelimit-unified-fallback-percentage': '0.5',
+    'content-type': 'application/json',
+  }, '2026-10-02T09:00:00.000Z');
+
+  assert.deepEqual(windows, [
+    {
+      type: 'five_hour',
+      status: 'allowed',
+      utilization: 0.01,
+      resetsAt: new Date(1790949000 * 1000).toISOString(),
+      observedAt: '2026-10-02T09:00:00.000Z',
+    },
+    {
+      type: 'seven_day',
+      status: 'allowed_warning',
+      utilization: 0.29,
+      resetsAt: new Date(1791277200 * 1000).toISOString(),
+      observedAt: '2026-10-02T09:00:00.000Z',
+    },
+  ]);
+});
+
+test('계정(configDir)마다 캐시를 따로 들고, 기본 계정 캐시를 건드리지 않는다', async () => {
+  const harness = createService();
+
+  await harness.service.getSnapshot();
+  await harness.service.getSnapshot('/Users/linalee/.claude-work');
+  assert.equal(harness.fetchCount(), 2);
+
+  // 둘 다 한 번 더 불러도 각자의 캐시를 쓴다.
+  await harness.service.getSnapshot();
+  await harness.service.getSnapshot('/Users/linalee/.claude-work');
+  assert.equal(harness.fetchCount(), 2);
+});
+
+test('기본이 아닌 계정을 물을 땐 CLI 로 물러서지 않는다 — CLI 는 이 프로세스의 계정 하나만 본다', async () => {
+  const harness = createService({ fail: true, cliWindows: [cliWindow] });
+
+  const snapshot = await harness.service.getSnapshot('/Users/linalee/.claude-work');
+
+  assert.deepEqual(snapshot.windows, []);
+  assert.equal(harness.cliCount(), 0);
+});
+
+test('모델별 주간 헤더는 이벤트가 쓰던 이름으로 옮긴다', () => {
+  const [window] = parseUnifiedRateLimitHeaders({
+    'anthropic-ratelimit-unified-7d_opus-utilization': '0.5',
+  }, '2026-10-02T09:00:00.000Z');
+
+  assert.equal(window.type, 'seven_day_opus');
+  assert.equal(window.status, null);
+  assert.equal(window.resetsAt, null);
 });

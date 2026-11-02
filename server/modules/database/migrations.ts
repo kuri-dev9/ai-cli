@@ -1,6 +1,7 @@
 import { Database } from 'better-sqlite3';
 
 import {
+  ACTIVE_RUNS_TABLE_SCHEMA_SQL,
   APP_CONFIG_TABLE_SCHEMA_SQL,
   LAST_SCANNED_AT_SQL,
   NOTIFICATION_CHANNEL_ENDPOINTS_TABLE_SCHEMA_SQL,
@@ -464,6 +465,22 @@ const addSessionEffortColumn = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'sessions', columnNames, 'effort', 'TEXT');
 };
 
+/**
+ * Adds the `claude_account_id` column to `sessions` and `room_participants`,
+ * recording which registered Claude account (CLAUDE_CONFIG_DIR) a session or
+ * pending roster pick runs with. NULL for existing rows: the server default
+ * is the correct reading for a session that predates multiple accounts.
+ */
+const addClaudeAccountIdColumns = (db: Database): void => {
+  const sessionColumns = getTableInfo(db, 'sessions').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'sessions', sessionColumns, 'claude_account_id', 'TEXT');
+
+  if (tableExists(db, 'room_participants')) {
+    const participantColumns = getTableInfo(db, 'room_participants').map((column) => column.name);
+    addColumnToTableIfNotExists(db, 'room_participants', participantColumns, 'claude_account_id', 'TEXT');
+  }
+};
+
 const ensureProjectsForSessionPaths = (db: Database): void => {
   if (!tableExists(db, 'sessions')) {
     return;
@@ -565,6 +582,7 @@ const addRoomSettingsColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'discussion', 'INTEGER NOT NULL DEFAULT 1');
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'host_led', 'INTEGER NOT NULL DEFAULT 1');
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'auto_compact', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'notify_telegram', 'INTEGER NOT NULL DEFAULT 0');
 };
 
 /**
@@ -632,7 +650,11 @@ export const runMigrations = (db: Database) => {
     db.exec(ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL);
     db.exec(ROOM_MESSAGES_TABLE_SCHEMA_SQL);
     addRoomSettingsColumns(db);
+    addClaudeAccountIdColumns(db);
     stripRoomPrefixFromSessionNames(db);
+    // 서버가 내려갔다 떠도 하던 일을 이어 가기 위한 기록.
+    db.exec(ACTIVE_RUNS_TABLE_SCHEMA_SQL);
+    addColumnToTableIfNotExists(db, 'rooms', getTableInfo(db, 'rooms').map((column) => column.name), 'loop_state', 'TEXT');
     db.exec(ROOM_INDEXES_SQL);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
