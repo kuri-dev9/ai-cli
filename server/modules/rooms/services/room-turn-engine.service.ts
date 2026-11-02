@@ -1,4 +1,4 @@
-import { roomsDb, sessionsDb } from '@/modules/database/index.js';
+import { roomsDb, scheduledMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import type { RoomRow } from '@/modules/database/index.js';
 import { providerTokenUsageService, sessionsService } from '@/modules/providers/index.js';
 import { isSessionHandedToTelegram, notifyTelegramRoundFinished } from '@/modules/telegram-bridge/index.js';
@@ -16,7 +16,10 @@ import {
   nextParticipantAfter,
   parseAssignments,
   parseHandoff,
+  parseScheduleCancels,
+  parseSchedules,
   pickSpeakersForUserMessage,
+  shortScheduleId,
 } from '@/modules/rooms/services/room-prompt.service.js';
 import type { RoomHandoff, RoomTurnMode } from '@/modules/rooms/services/room-prompt.service.js';
 import {
@@ -33,6 +36,7 @@ import {
 } from '@/modules/rooms/services/room-records.service.js';
 import type {
   AnyRecord,
+  LLMProvider,
   NormalizedMessage,
   RoomAttachment,
   RoomMessage,
@@ -84,6 +88,17 @@ type RoomLoopState = {
    * 멈추지 않은 채 기다리던 글로 넘어간다.
    */
   interruptedSessions: Set<string>;
+  /**
+   * 일하는 세션마다, 그 차례를 기다리는 루프를 풀어 주는 손잡이. 끼어들기는
+   * 프로바이더 실행이 끝나기를 기다리지 않고 이것으로 루프를 놓아 준다 — 실행이
+   * 끊기지 않고 매달리면 루프가 그 세션 하나에 무한정 묶이던 것을 막는다.
+   */
+  releaseWaiters: Map<string, () => void>;
+  /**
+   * 라운드가 도는 중에 사용자가 쉬고 있는 참가자에게 보낸 글을 그 자리에서 받는
+   * 차례들. 라운드는 이것들이 끝날 때까지 닫히지 않는다.
+   */
+  sideTurns: Set<Promise<void>>;
   /** 마지막으로 글을 보낸 사용자. 참가자 턴을 그 사용자 이름으로 돌린다. */
   userId: string | number | null;
   /** `active` 중 읽기 전용으로 일하는 참가자. 끊겼다 이어 갈 때 같은 권한으로 돌린다. */
@@ -192,6 +207,8 @@ function getLoop(roomId: string): RoomLoopState {
       turnCount: 0,
       pendingUserMessage: false,
       interruptedSessions: new Set(),
+      releaseWaiters: new Map(),
+      sideTurns: new Set(),
       userId: null,
       readOnlyActive: new Set(),
       inRound: false,
@@ -402,7 +419,7 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
   const isFirstTurn = lastSeen === 0 && !unread.some((message) => message.speaker === me.participantId);
   // 사용자가 참가자 설정을 고친 뒤 아직 알리지 않았으면 이번 차례에 다시 안내한다.
   const roleChanged = !isFirstTurn && Boolean(meRow?.role_dirty);
-  const priorContext = isFirstTurn && !me.isHost ? await readPriorContext(room) : null;
+  const priorContext = isFirstTurn && !me.isOrigin ? await readPriorContext(room) : null;
   const readThroughId = unread.at(-1)?.id ?? lastSeen;
 
   // 상한은 도는 중에도 바뀔 수 있어 차례마다 새로 읽는다.
@@ -419,6 +436,11 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
     mode: options.mode,
     turn: { count: loop.turnCount, max: maxAutoTurns },
     hostLed: host ? { hostName: host.displayName } : null,
+    schedules: scheduledMessagesDb.listPendingForSession(room.host_session_id).map((row) => ({
+      id: row.id,
+      at: new Date(row.scheduled_for),
+      content: row.content,
+    })),
   });
   if (isFirstTurn || roleChanged) {
     // 안내가 프롬프트에 실렸으므로 표시를 내린다. 차례가 실패해도 다시 보내지는
@@ -531,7 +553,12 @@ async function runTurnInSession(
   const model = session?.model || me.model;
   const effort = session?.effort;
   const claudeAccountId = session?.claude_account_id || me.claudeAccountId;
-  return runDetachedChatTurn(
+  // 끼어들기가 오면 실행이 끝나기를 기다리지 않고 바로 놓는다. 끊긴 실행이 뒤늦게
+  // 끝나도 그 결과는 버린다 — 이 차례는 이미 중단으로 남는다.
+  const released = new Promise<{ started: boolean; error: string | null }>((resolve) => {
+    loop.releaseWaiters.set(me.sessionId, () => resolve({ started: true, error: null }));
+  });
+  const run = runDetachedChatTurn(
     {
       sessionId: me.sessionId,
       userId: loop.userId,
@@ -548,6 +575,11 @@ async function runTurnInSession(
     },
     { runtime, isSessionHandedToTelegram },
   );
+  try {
+    return await Promise.race([run, released]);
+  } finally {
+    loop.releaseWaiters.delete(me.sessionId);
+  }
 }
 
 /** `[PASS]` 한 줄뿐인 답인지. 의견 차례에서 보탤 말이 없다는 뜻이다. */
@@ -622,7 +654,65 @@ function recordTurnReply(
   });
   const message = toRoomMessage(row);
   broadcastRoomFrame({ kind: 'room_message', roomId: room.room_id, message });
+  if (status === 'complete') {
+    // 예약 줄은 답의 어디에 있어도 읽는다. 중간에 적고 마지막엔 요약만 남기는 답이 있다.
+    scheduleFollowUps(room, me, loop, texts.all);
+  }
   return { message, handoff, assignments };
+}
+
+/**
+ * 답에 남긴 예약 줄을 예약 메시지로 건다. 원래 대화 세션 앞으로 걸어 두면, 때가
+ * 됐을 때 예약 디스패처가 그 세션이 룸인 것을 보고 룸 메시지로 올린다 — 그래서
+ * 서버가 그 사이 내려갔다 떠도 예약은 남는다. 사용자 화면의 예약 목록에도 같이
+ * 보여 취소할 수 있다.
+ */
+function scheduleFollowUps(room: RoomRow, me: RoomParticipant, loop: RoomLoopState, text: string): void {
+  // 지우기를 먼저 한다. "지우고 새로 걸기" 가 한 답에 함께 오면 새 예약이 남아야 한다.
+  const cancelIds = parseScheduleCancels(text);
+  const pendingBefore = scheduledMessagesDb.listPendingForSession(room.host_session_id);
+  let changed = false;
+  for (const shortId of cancelIds) {
+    // 짧은 번호로 찾는다. 두 개 이상에 걸리면 무엇을 지울지 모르므로 손대지 않는다.
+    const matches = pendingBefore.filter((row) => shortScheduleId(row.id).startsWith(shortId) || row.id.toLowerCase().startsWith(shortId));
+    if (matches.length !== 1) {
+      console.warn('[Rooms] 예약 취소 번호가 맞지 않아 지우지 않았습니다', { roomId: room.room_id, shortId, matches: matches.length });
+      continue;
+    }
+    if (scheduledMessagesDb.cancel(matches[0].user_id, matches[0].id)) {
+      changed = true;
+    }
+  }
+
+  const schedules = parseSchedules(text, me, new Date());
+  if (schedules.length > 0) {
+    const userId = Number(loop.userId);
+    if (!Number.isInteger(userId)) {
+      console.warn('[Rooms] 예약을 건 사용자를 알 수 없어 예약하지 않았습니다', { roomId: room.room_id, participantId: me.participantId });
+    } else {
+      const pending = scheduledMessagesDb.listPendingForSession(room.host_session_id);
+      const sameMinute = (a: Date, b: Date) => Math.floor(a.getTime() / 60_000) === Math.floor(b.getTime() / 60_000);
+      for (const schedule of schedules) {
+        // 이미 걸린 것과 같은 분·같은 내용이면 다시 걸지 않는다. 참가자가 차례마다
+        // 같은 예약 줄을 되풀이해 적어 같은 예약이 여러 번 쌓이던 것을 막는다.
+        if (pending.some((row) => row.content === schedule.content && sameMinute(new Date(row.scheduled_for), schedule.at))) {
+          continue;
+        }
+        pending.push(scheduledMessagesDb.create({
+          userId,
+          sessionId: room.host_session_id,
+          content: schedule.content,
+          options: { roomScheduledBy: me.participantId },
+          scheduledFor: schedule.at,
+        }));
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    broadcastRoomFrame({ kind: 'room_updated', roomId: room.room_id });
+  }
 }
 
 function latestUserMessageText(roomId: string): string {
@@ -792,6 +882,43 @@ async function runCommentRound(
  * 자동 턴은 차례 하나, 분담 한 번, 동시 호출 한 번(동시에 몇 명이 일하든)을
  * 각각 하나로 센다.
  */
+/**
+ * 라운드가 도는 중에 쉬고 있는 참가자가 사용자 글을 바로 받는 차례. 일하던
+ * 참가자와 동시에 돈다. 한 명이면 평소처럼(파일도 고칠 수 있게), 여럿을 함께
+ * 불렀으면 함께 부르기처럼 읽기 전용으로 답한다.
+ *
+ * 이 답의 넘김 표시는 따라가지 않는다. 흐름은 원래 라운드가 쥐고 있고, 이 답은
+ * 다음 차례의 참가자들이 대화 기록으로 읽는다.
+ */
+function startSideTurn(room: RoomRow, targets: RoomParticipant[], loop: RoomLoopState): void {
+  const task: Promise<void> = (async () => {
+    loop.turnCount += 1;
+    broadcastState(room);
+    if (targets.length > 1) {
+      await runGroupCall(room, null, targets, loop);
+      return;
+    }
+    await runParticipantTurn(room, targets[0], loop, {
+      mode: { kind: 'turn' },
+      readOnly: false,
+      turnKind: 'reply',
+      readAssignments: false,
+      dropPass: false,
+    });
+  })()
+    .catch((error: unknown) => {
+      console.error('[Rooms] 사용자 글을 바로 받는 차례가 실패했습니다', {
+        roomId: room.room_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    })
+    .finally(() => {
+      loop.sideTurns.delete(task);
+      broadcastState(room);
+    });
+  loop.sideTurns.add(task);
+}
+
 async function runLoop(roomId: string): Promise<void> {
   const loop = getLoop(roomId);
   loop.running = true;
@@ -1056,6 +1183,10 @@ async function runLoop(roomId: string): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[Rooms] Room loop failed', { roomId, error: message });
   } finally {
+    // 사용자 글을 바로 받아 돌던 차례가 남아 있으면 끝날 때까지 라운드를 닫지 않는다.
+    while (loop.sideTurns.size > 0) {
+      await Promise.allSettled([...loop.sideTurns]);
+    }
     loop.running = false;
     loop.active.clear();
     loop.readOnlyActive.clear();
@@ -1091,12 +1222,30 @@ async function runLoop(roomId: string): Promise<void> {
  */
 async function abortActiveRuns(loop: RoomLoopState, markInterrupted: boolean): Promise<void> {
   await Promise.all([...loop.active.values()].map(async (sessionId) => {
-    const run = chatRunRegistry.getRun(sessionId);
-    if (!run || run.status !== 'running' || !runtime) return;
+    // 이미 끊는 중인 세션이다(사용자 글이 자동으로 끊은 뒤 끼어들기를 또 누른 경우).
+    if (markInterrupted && loop.interruptedSessions.has(sessionId)) return;
     if (markInterrupted) loop.interruptedSessions.add(sessionId);
-    // `chat.abort` 와 같은 모양이다.
-    const aborted = await runtime.abort(run.provider, sessionId);
-    chatRunRegistry.completeRun(sessionId, { exitCode: aborted ? 0 : 1, aborted: true });
+    // 실행 기록부가 "실행 중" 이라고 할 때만 끊던 것을, 기록부와 상관없이 끊는다.
+    // 기록부가 먼저 끝났다고 적었는데 프로바이더 실행은 매달려 있는 경우가 있었고,
+    // 그때 끼어들기가 아무 일도 하지 않아 루프가 그 차례에 묶여 있었다.
+    const run = chatRunRegistry.getRun(sessionId);
+    const provider = run?.provider ?? sessionsDb.getSessionById(sessionId)?.provider;
+    if (runtime && provider) {
+      try {
+        // `chat.abort` 와 같은 모양이다.
+        const aborted = await runtime.abort(provider as LLMProvider, sessionId);
+        if (run && run.status === 'running') {
+          chatRunRegistry.completeRun(sessionId, { exitCode: aborted ? 0 : 1, aborted: true });
+        }
+      } catch (error) {
+        console.warn('[Rooms] 실행을 끊지 못했습니다. 루프는 그대로 놓습니다', {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    // 실행이 끊겼든 아니든 루프는 이 차례를 기다리지 않는다.
+    loop.releaseWaiters.get(sessionId)?.();
   }));
 }
 
@@ -1111,7 +1260,7 @@ async function runHostCommand(roomId: string, commandMessageId: number, content:
   loop.phase = 'turn';
   try {
     const room = roomsDb.getRoom(roomId);
-    const found = room ? loadParticipants(room).find((participant) => participant.isHost) : undefined;
+    const found = room ? loadParticipants(room).find((participant) => participant.isOrigin) : undefined;
     // 호스트는 룸이 되기 전의 원래 대화라 세션이 반드시 있다.
     if (!room || !found?.sessionId) {
       return;
@@ -1255,7 +1404,10 @@ export const roomTurnEngine = {
     room: RoomRow,
     content: string,
     userId: string | number | null,
-    options: { attachments?: RoomAttachment[]; hostCommand?: boolean } = {},
+    options: {
+      attachments?: RoomAttachment[];
+      hostCommand?: boolean;
+    } = {},
   ): { message: RoomMessage; state: RoomRuntimeState } {
     const loop = getLoop(room.room_id);
     const attachments = options.attachments ?? [];
@@ -1282,9 +1434,21 @@ export const roomTurnEngine = {
     if (options.hostCommand) {
       void runHostCommand(room.room_id, message.id, content, attachments);
     } else {
-      loop.pendingUserMessage = true;
       if (!loop.running) {
+        loop.pendingUserMessage = true;
         void runLoop(room.room_id);
+      } else {
+        // 라운드가 도는 중이다. 일하는 참가자는 그대로 두고, 글을 받을 참가자(이름을
+        // 부른 참가자, 없으면 방장)가 쉬고 있으면 그 자리에서 바로 받게 한다. 받을
+        // 참가자가 지금 일하는 바로 그 참가자라면 한 세션에서 두 실행을 돌릴 수
+        // 없으므로 그 차례 뒤로 줄을 선다 — 급하면 "지금 끼어들기" 로 끊는다.
+        const targets = pickSpeakersForUserMessage(content, listRoster(room));
+        const allFree = targets.length > 0 && targets.every((target) => !loop.active.has(target.participantId));
+        if (allFree) {
+          startSideTurn(room, targets, loop);
+        } else {
+          loop.pendingUserMessage = true;
+        }
       }
     }
     broadcastState(room);

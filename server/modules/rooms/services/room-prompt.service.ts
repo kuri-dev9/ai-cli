@@ -1,4 +1,8 @@
+import { parseScheduleTime } from '@/shared/schedule-time.js';
 import type { RoomMessage, RoomParticipant, RoomTask } from '@/shared/types.js';
+
+// 예약 시각 읽기는 `/예약` 명령과 같이 쓴다. 테스트가 이 모듈에서 부르므로 다시 내보낸다.
+export { parseScheduleTime };
 
 /**
  * 룸 턴에 보낼 프롬프트를 만들고, 돌아온 답에서 "다음은 누구"를 읽는다.
@@ -86,7 +90,95 @@ export function buildRoleBrief(
     '- 사용자의 지시가 다른 참가자의 의견보다 우선합니다.',
     `- 답의 마지막 줄에는 반드시 다음 중 하나만 쓰세요: "@이름"(그 참가자에게 넘김), "${ROOM_PASS_MARKER}"(덧붙일 말 없음), "${ROOM_DONE_MARKER}"(작업이 끝나 사용자 확인이 필요함).`,
     `- 여럿에게 동시에 물으려면 마지막 줄에 이름만 "@이름 @이름" 처럼 함께 적으세요. 모두 동시에 답하고(파일은 고치지 않습니다), 답이 모이면 당신에게 차례가 돌아옵니다.`,
+    `- ${SCHEDULE_RULE}`,
   ].join('\n');
+}
+
+/**
+ * 기다려야 하는 일의 규칙. `sleep` 이나 폴링 반복문으로 차례를 붙잡고 있으면 룸
+ * 전체가 그동안 "답하는 중" 으로 멈추고, 명령 하나가 10분에서 끊겨 다시 걸기를
+ * 되풀이한다. 그래서 예약 줄을 남기고 차례를 끝내게 한다.
+ */
+const SCHEDULE_RULE = '나중에 할 일(장애가 끝난 뒤 분석 등)은 sleep·폴링 반복문으로 기다리지 마세요. 답에 "[예약 14:50] 할 일" 줄을 남기고 차례를 끝내면, 그 시각에 그 글이 룸 메시지로 다시 와 차례가 시작됩니다. 시각은 "14:50", "2026-11-02 14:50", "+20분", "+2시간" 으로 쓰고, 할 일에 "@이름" 이 없으면 당신에게 옵니다. 그때 아직 이르면 다시 예약하세요. 이미 걸린 예약은 다시 적지 말고, 필요 없어진 예약은 "[예약취소 #번호]" 줄로 지우세요(바꾸려면 지우고 새로 거세요).';
+
+/** 한 답에서 받는 예약 수. 실수로 줄줄이 적은 예약이 룸을 뒤덮지 않게. */
+const MAX_SCHEDULES_PER_REPLY = 5;
+/** 예약할 수 있는 가장 먼 시각. 그보다 먼 것은 거의 틀림없이 잘못 읽은 시각이다. */
+const MAX_SCHEDULE_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 예약 줄. 목록 기호(`-`, `1.`), 인용(`>`), 굵게(`**`), 코드(`` ` ``)로 감싸 써도
+ * 읽는다 — 참가자가 꾸며 쓴 줄을 놓쳐 예약이 말없이 사라지는 일이 실제로 있었다.
+ */
+/** `[예약취소 #a1b2c3]`. 번호는 걸린 예약 목록에 붙은 짧은 번호다. 여러 개를 한 줄에 적어도 된다. */
+const SCHEDULE_CANCEL_LINE = /\[(?:예약\s*취소|cancel\s*schedule|unschedule)\s+((?:#?[0-9a-f]{4,}[\s,]*)+)\]/giu;
+
+/** 예약 번호. 프롬프트에 보이는 것과 취소 줄이 같은 길이를 쓴다. */
+export function shortScheduleId(id: string): string {
+  return id.replace(/-/g, '').slice(0, 6);
+}
+
+/** 답에서 취소할 예약 번호들을 읽는다. 앞의 `#` 은 떼고 소문자로 맞춘다. */
+export function parseScheduleCancels(text: string): string[] {
+  const ids = new Set<string>();
+  for (const match of text.matchAll(SCHEDULE_CANCEL_LINE)) {
+    for (const token of match[1].split(/[\s,]+/)) {
+      const id = token.replace(/^#/, '').toLowerCase();
+      if (id.length >= 4) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * 이 룸에 걸린 예약. 참가자가 이미 걸린 것을 또 걸거나, 지울 것을 지우지 못하던
+ * 것은 무엇이 걸려 있는지 몰랐기 때문이다. 매 차례 붙인다.
+ */
+export function buildScheduleSection(
+  schedules: Array<{ id: string; at: Date; content: string }>,
+  now: Date,
+): string | null {
+  if (schedules.length === 0) return null;
+  const lines = schedules.map((schedule) => {
+    const sameDay = schedule.at.toDateString() === now.toDateString();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const time = `${pad(schedule.at.getHours())}:${pad(schedule.at.getMinutes())}`;
+    const when = sameDay ? time : `${schedule.at.getMonth() + 1}/${schedule.at.getDate()} ${time}`;
+    return `- #${shortScheduleId(schedule.id)} ${when} ${clip(schedule.content.replace(/\s+/g, ' '), 160)}`;
+  });
+  return [
+    `[걸린 예약 ${schedules.length}개] 다시 적지 마세요. 필요 없어진 것은 "[예약취소 #번호]" 로 지우세요.`,
+    ...lines,
+  ].join('\n');
+}
+
+const SCHEDULE_LINE = /^[\s>*_`-]*(?:\d+[.)]\s*)?[*_`]*\[(?:예약|schedule)\s+([^\]]+?)\s*\][*_`]*\s*(.+?)[*_`]*\s*$/iu;
+
+/**
+ * 답에서 예약 줄을 읽는다. 지난 시각이나 너무 먼 시각, 못 읽는 시각은 버린다.
+ * 할 일에 `@이름` 이 없으면 적은 참가자 자신에게 돌아오도록 이름을 붙인다.
+ */
+export function parseSchedules(
+  text: string,
+  me: Pick<RoomParticipant, 'displayName'>,
+  now: Date,
+): Array<{ at: Date; content: string }> {
+  const schedules: Array<{ at: Date; content: string }> = [];
+  for (const line of text.split('\n')) {
+    const match = SCHEDULE_LINE.exec(line);
+    if (!match) continue;
+    const at = parseScheduleTime(match[1], now);
+    // 방금 지난 시각은 읽는 쪽이 지금으로 바꿔 준다. 그보다 이른 것은 버린다.
+    if (!at || at.getTime() < now.getTime() || at.getTime() - now.getTime() > MAX_SCHEDULE_AHEAD_MS) continue;
+    const task = match[2].trim();
+    if (!task) continue;
+    const content = task.includes('@') ? task : `@${me.displayName} ${task}`;
+    // 작업 중에 남긴 말과 마지막 말에 같은 줄을 두 번 쓰는 일이 흔하다.
+    if (schedules.some((schedule) => schedule.content === content && schedule.at.getTime() === at.getTime())) continue;
+    schedules.push({ at, content });
+    if (schedules.length >= MAX_SCHEDULES_PER_REPLY) break;
+  }
+  return schedules;
 }
 
 function buildReminder(me: RoomParticipant, standby: RoomParticipant[] = []): string {
@@ -97,7 +189,8 @@ function buildReminder(me: RoomParticipant, standby: RoomParticipant[] = []): st
     .map((participant) => `@${participant.displayName}(${participant.roleName})`)
     .join(', ');
   const callableLine = callable ? `\n부를 수 있는 멤버: ${callable}` : '';
-  return `[팀 룸] 당신은 "@${me.displayName}"(${me.roleName}) 입니다. 마지막 줄에 "@이름", "${ROOM_PASS_MARKER}", "${ROOM_DONE_MARKER}" 중 하나를 쓰세요.${callableLine}`;
+  // 예약 규칙은 짧게라도 매번 붙인다. 이 규칙이 생기기 전에 역할 안내를 받은 세션도 알아야 한다.
+  return `[팀 룸] 당신은 "@${me.displayName}"(${me.roleName}) 입니다. 마지막 줄에 "@이름", "${ROOM_PASS_MARKER}", "${ROOM_DONE_MARKER}" 중 하나를 쓰세요. 기다릴 일은 sleep 대신 "[예약 14:50] 할 일" 줄로 남기세요.${callableLine}`;
 }
 
 /**
@@ -259,6 +352,8 @@ export function buildTurnPrompt(input: {
   turn?: { count: number; max: number } | null;
   /** 방장 주도 룸이면 방장 이름. 아니면 null. */
   hostLed?: { hostName: string } | null;
+  /** 이 룸에 걸려 있는, 아직 나가지 않은 예약. */
+  schedules?: Array<{ id: string; at: Date; content: string }>;
 }): string {
   const { me, participants, isFirstTurn } = input;
   const mode = input.mode ?? { kind: 'turn' };
@@ -289,6 +384,10 @@ export function buildTurnPrompt(input: {
   }
   if (input.hostLed) {
     sections.push(buildHostLedNotice(me, input.hostLed.hostName));
+  }
+  const scheduleSection = buildScheduleSection(input.schedules ?? [], new Date());
+  if (scheduleSection) {
+    sections.push(scheduleSection);
   }
   if (input.turn) {
     sections.push(buildTurnBudget(input.turn, mode));

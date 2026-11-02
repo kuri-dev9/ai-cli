@@ -5,7 +5,12 @@ import test from 'node:test';
 
 import express from 'express';
 
+import { splitScheduleSpec } from '@/shared/schedule-time.js';
+
 import { createCommandsRouter } from '../commands.routes.js';
+
+// `/예약` 이 건 예약. 실제 저장소 대신 여기 쌓는다.
+const scheduled: Array<{ userId: number; sessionId: string; content: string; scheduledFor: string }> = [];
 
 /**
  * Stands in for `providerModelsService`. `resolveSessionModel` mirrors the real
@@ -38,12 +43,8 @@ function createModelsService(sessionModels: Record<string, string> = {}) {
   };
 }
 
-async function executeCommand(
-  commandName: string,
-  context: Record<string, unknown>,
-  sessionModels: Record<string, string> = {},
-): Promise<Record<string, unknown>> {
-  const router = createCommandsRouter({
+function createRouter(sessionModels: Record<string, string> = {}) {
+  return createCommandsRouter({
     fileSystem: {
       readFile: async () => JSON.stringify({ name: 'claude-code-ui', version: '0.0.0-test' }),
     } as unknown as typeof import('node:fs/promises'),
@@ -55,8 +56,30 @@ async function executeCommand(
       memoryUsage: () => ({ rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }),
       version: 'v22', platform: 'linux', pid: 1,
     },
+    scheduler: {
+      schedule: (input) => {
+        scheduled.push(input);
+        return { id: `s-${scheduled.length}`, scheduledFor: input.scheduledFor, content: input.content };
+      },
+      splitScheduleSpec,
+    },
   });
-  const app = express().use(express.json()).use('/api/commands', router);
+}
+
+async function executeCommand(
+  commandName: string,
+  context: Record<string, unknown>,
+  sessionModels: Record<string, string> = {},
+): Promise<Record<string, unknown>> {
+  const router = createRouter(sessionModels);
+  const app = express()
+    .use(express.json())
+    // 실제 서버에서는 인증 미들웨어가 붙인다.
+    .use((req, _res, next) => {
+      (req as express.Request & { user?: { id: number } }).user = { id: 7 };
+      next();
+    })
+    .use('/api/commands', router);
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   try {
@@ -112,3 +135,59 @@ test('cost and status commands report the same resolved model as /models', async
   assert.equal((cost.data as { model: string }).model, 'haiku');
   assert.equal((status.data as { model: string }).model, 'haiku');
 });
+
+test('/예약 은 AI 를 거치지 않고 지금 대화에 예약을 건다', async () => {
+  scheduled.length = 0;
+  const before = Date.now();
+  const result = await executeCommandWithArgs('/예약', ['+1분', '테스트', '한번', '찍어줘'], { sessionId: 'session-1' });
+
+  const data = result.data as { error?: boolean; message: string };
+  assert.equal(data.error, undefined);
+  assert.match(data.message, /⏰ 예약됨: .* → 테스트 한번 찍어줘/);
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].userId, 7);
+  assert.equal(scheduled[0].sessionId, 'session-1');
+  assert.equal(scheduled[0].content, '테스트 한번 찍어줘');
+  const dueIn = new Date(scheduled[0].scheduledFor).getTime() - before;
+  assert.ok(dueIn >= 59_000 && dueIn <= 61_000);
+});
+
+test('/예약 은 시각이나 할 일이 없거나 대화가 없으면 이유를 말하고 걸지 않는다', async () => {
+  scheduled.length = 0;
+  const noTime = await executeCommandWithArgs('/예약', ['언젠가', '해줘'], { sessionId: 'session-1' });
+  const noTask = await executeCommandWithArgs('/예약', ['14:50'], { sessionId: 'session-1' });
+  const noSession = await executeCommandWithArgs('/schedule', ['+5m', 'test'], {});
+
+  assert.match((noTime.data as { message: string }).message, /시각을 읽지 못했습니다/);
+  assert.match((noTask.data as { message: string }).message, /무엇을 할지/);
+  assert.match((noSession.data as { message: string }).message, /대화가 시작되지 않았습니다/);
+  assert.equal(scheduled.length, 0);
+});
+
+async function executeCommandWithArgs(
+  commandName: string,
+  args: string[],
+  context: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const router = createRouter();
+  const app = express()
+    .use(express.json())
+    .use((req, _res, next) => {
+      (req as express.Request & { user?: { id: number } }).user = { id: 7 };
+      next();
+    })
+    .use('/api/commands', router);
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/commands/execute`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ commandName, args, context }),
+    });
+    assert.equal(response.status, 200);
+    return await response.json() as Record<string, unknown>;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}

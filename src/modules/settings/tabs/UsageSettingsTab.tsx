@@ -339,6 +339,17 @@ function ClaudeAccountsUsageSection({ refreshKey }: { refreshKey: number }) {
                 {sortedWindows.map((usageWindow) => (
                   <RateLimitWindowBar key={usageWindow.type} window={usageWindow} />
                 ))}
+                {/*
+                  계정에 직접 읽은 값에 5시간 창이 없으면 Anthropic 이 지금 그 창을
+                  매기지 않는 것이다(API·응답 헤더·CLI `/usage` 모두 주간 창만 준다).
+                  말없이 빠지면 화면이 놓친 것처럼 보여 이유를 적어 둔다.
+                */}
+                {snapshot?.source !== 'events' && !sortedWindows.some((usageWindow) => usageWindow.type === 'five_hour') && (
+                  <div className="space-y-1">
+                    <span className="text-sm font-medium text-foreground">{t('usage.windows.fiveHour')}</span>
+                    <p className="text-xs text-muted-foreground">{t('usage.fiveHourNotReported')}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -18,6 +18,11 @@ type CommandsRouterDependencies = {
     platform: NodeJS.Platform;
     pid: number;
   };
+  /** `/예약` 이 쓰는 예약 메시지 저장소와 시각 읽기. */
+  scheduler: {
+    schedule(input: { userId: number; sessionId: string; content: string; scheduledFor: string }): { id: string; scheduledFor: string; content: string };
+    splitScheduleSpec(text: string, now: Date): { at: Date; rest: string } | null;
+  };
 };
 
 /** Creates Commands routes around explicit filesystem, model-catalog, and runtime adapters. */
@@ -27,6 +32,7 @@ const os = { homedir: dependencies.homeDirectory };
 const APP_ROOT = dependencies.appRoot;
 const providerModelsService = dependencies.models;
 const process = dependencies.runtime;
+const scheduler = dependencies.scheduler;
 const router = express.Router();
 
 const MODEL_PROVIDERS = ["claude", "cursor", "codex", "opencode"];
@@ -205,7 +211,64 @@ const builtInCommands = [
     namespace: "builtin",
     metadata: { type: "builtin" },
   },
+  {
+    name: "/예약",
+    description: "지금 대화에 메시지를 예약합니다. 예: /예약 14:50 분석 시작, /예약 +10분 테스트 한번 찍어줘",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/schedule",
+    description: "Schedule a message to this conversation. e.g. /schedule 14:50 run the analysis, /schedule +10m run the test",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
 ];
+
+/**
+ * `/예약 <시각> <할 일>`. AI 를 거치지 않고 지금 대화에 예약 메시지를 건다. 때가
+ * 되면 그 글이 이 대화로 보내진다 — 룸이면 룸 메시지로 올라가 이름을 부른
+ * 참가자가 받는다.
+ */
+function scheduleCommand(args, context) {
+  const text = (args || []).join(" ").trim();
+  const usage = "사용법: /예약 <시각> <할 일>\n시각: 14:50, 2026-11-02 14:50, +10분, 10분 뒤, 2시간 후";
+  const fail = (message) => ({ type: "builtin", action: "schedule", data: { error: true, message } });
+
+  if (!context?.sessionId) {
+    return fail("아직 대화가 시작되지 않았습니다. 먼저 한 마디를 보낸 뒤 예약해 주세요.");
+  }
+  const userId = Number(context?.userId);
+  if (!Number.isInteger(userId)) {
+    return fail("로그인한 사용자를 알 수 없어 예약하지 못했습니다.");
+  }
+  const split = scheduler.splitScheduleSpec(text, new Date());
+  if (!split) {
+    return fail(`시각을 읽지 못했습니다.\n${usage}`);
+  }
+  if (!split.rest) {
+    return fail(`무엇을 할지 적어 주세요.\n${usage}`);
+  }
+  try {
+    const scheduled = scheduler.schedule({
+      userId,
+      sessionId: context.sessionId,
+      content: split.rest,
+      scheduledFor: split.at.toISOString(),
+    });
+    return {
+      type: "builtin",
+      action: "schedule",
+      data: {
+        message: `⏰ 예약됨: ${split.at.toLocaleString("ko-KR")} → ${split.rest}`,
+        scheduledFor: scheduled.scheduledFor,
+        content: scheduled.content,
+      },
+    };
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+}
 
 /**
  * Built-in command handlers
@@ -260,6 +323,9 @@ Custom commands can be created in:
   },
 
   "/models": (args, context) => executeModelsCommand(args, context, providerModelsService),
+
+  "/예약": (args, context) => scheduleCommand(args, context),
+  "/schedule": (args, context) => scheduleCommand(args, context),
 
   "/cost": async (args, context) => {
     const tokenUsage = context?.tokenUsage || {};
@@ -522,7 +588,8 @@ router.post("/execute", async (req, res) => {
     const handler = builtInHandlers[commandName];
     if (handler) {
       try {
-        const result = await handler(args, context);
+        // 예약처럼 사용자 몫으로 무언가를 남기는 명령은 누가 보냈는지 알아야 한다.
+        const result = await handler(args, { ...context, userId: req.user?.id });
         return res.json({
           ...result,
           command: commandName,

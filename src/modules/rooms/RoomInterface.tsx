@@ -15,6 +15,7 @@ import {
   resolveScrolledUpAfterScroll,
   useChatComposerState,
   useChatProviderState,
+  useScheduledMessages,
 } from '@/modules/chat';
 import type { ScrollSample } from '@/modules/chat';
 import { ROOM_MAX_PARTICIPANTS } from '@/shared/constants';
@@ -67,6 +68,8 @@ type RoomInterfaceProps = {
 };
 
 const MAX_AUTO_TURN_CHOICES = [3, 5, 10, 20];
+/** 바닥에서 이만큼 넘게 올라가 있으면 "맨 아래로" 버튼을 띄운다. 조금 굴린 정도로는 띄우지 않는다. */
+const SCROLL_BUTTON_THRESHOLD_PX = 240;
 
 /**
  * The workspace header leaves an empty spot with this id, left of the tabs. The
@@ -195,6 +198,7 @@ export function RoomInterface({
     updateSettings,
     updateParticipant,
     removeParticipant,
+    setLeader,
     applyDetail,
     answerPermission,
   } = useRoom(hostSessionId);
@@ -239,6 +243,8 @@ export function RoomInterface({
   const scrollSampleRef = useRef<ScrollSample | null>(null);
   // 터치를 시작한 높이. 손가락이 움직인 방향을 재는 기준.
   const touchStartYRef = useRef(0);
+  // 바닥에서 한참 떨어져 있으면 "맨 아래로" 버튼을 띄운다. 따라가기(ref)와 달리 화면이 다시 그려져야 한다.
+  const [farFromBottom, setFarFromBottom] = useState(false);
 
   const participants = useMemo(() => detail?.participants ?? [], [detail]);
   const formerParticipantIds = useMemo(
@@ -298,6 +304,15 @@ export function RoomInterface({
       clientHeight,
     });
     scrollSampleRef.current = { top: scrollTop, height: scrollHeight };
+    const far = scrollHeight - scrollTop - clientHeight > SCROLL_BUTTON_THRESHOLD_PX;
+    setFarFromBottom((previous) => (previous === far ? previous : far));
+  };
+
+  const scrollToBottom = () => {
+    const container = scrollRef.current;
+    if (!container) return;
+    followBottomRef.current = true;
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   };
 
   /**
@@ -349,6 +364,10 @@ export function RoomInterface({
   // Command output and upload failures the composer would add to a chat
   // transcript; a room has no local transcript, so they show as the notice.
   const showComposerMessage = useCallback((message: ChatMessage) => {
+    // `/예약` 성공은 입력창 위 예약 목록에 바로 보이므로 오류 자리에 띄우지 않는다.
+    if (typeof message.content === 'string' && message.content.startsWith('⏰')) {
+      return;
+    }
     if (typeof message.content === 'string' && message.content) {
       setActionError(message.content);
     }
@@ -378,6 +397,26 @@ export function RoomInterface({
     setPendingPermissionRequests: ignorePermissionRequests,
     submitOverride: submitToRoom,
   });
+
+  /*
+   * 예약은 원래 대화 세션 앞으로 건다. 때가 되면 서버가 그 세션이 룸인 것을
+   * 보고 룸 메시지로 올린다. 참가자가 답에 남긴 예약 줄도 같은 목록에 들어오므로,
+   * 타임라인이 움직일 때마다 다시 읽는다.
+   */
+  const { scheduledMessages, schedule: scheduleMessage, cancel: cancelScheduledMessage, refresh: refreshScheduled } =
+    useScheduledMessages(hostSessionId);
+  // 참가자가 건 예약은 답이 올라온 뒤에 저장되고 룸 갱신 신호가 따라온다. 그 신호로
+  // 룸을 다시 읽을 때마다(detail 이 바뀔 때마다) 목록도 다시 읽는다.
+  useEffect(() => {
+    void refreshScheduled();
+  }, [refreshScheduled, detail]);
+  const handleScheduleMessage = useCallback(async (scheduledFor: Date) => {
+    const content = composer.input.trim();
+    if (!content) return;
+    if (await scheduleMessage({ content, scheduledFor })) {
+      composer.handleClearInput();
+    }
+  }, [composer, scheduleMessage]);
 
   const updateMentionFromCaret = (text: string, caret: number) => {
     setMention(findMentionQuery(text, caret));
@@ -627,7 +666,7 @@ export function RoomInterface({
           <>
             <ParticipantBadge
               participant={participant}
-              hostLabel={t('rooms.host')}
+              hostLabel={t('rooms.leader')}
               leftLabel={formerParticipantIds.has(message.speaker) ? t('rooms.formerParticipant') : undefined}
             />
             {kindLabel && <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{kindLabel}</span>}
@@ -657,14 +696,14 @@ export function RoomInterface({
           message.handoff.kind === 'mention' ? (
             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
               <ArrowRight className="h-3.5 w-3.5" />
-              <ParticipantBadge participant={handoffTarget} hostLabel={t('rooms.host')} />
+              <ParticipantBadge participant={handoffTarget} hostLabel={t('rooms.leader')} />
               {t('rooms.handoffTo')}
             </span>
           ) : message.handoff.kind === 'group' ? (
             <span className="inline-flex flex-wrap items-center gap-1.5 text-muted-foreground">
               <ArrowRight className="h-3.5 w-3.5" />
               {message.handoff.participantIds.map((participantId) => (
-                <ParticipantBadge key={participantId} participant={participantsById.get(participantId)} hostLabel={t('rooms.host')} />
+                <ParticipantBadge key={participantId} participant={participantsById.get(participantId)} hostLabel={t('rooms.leader')} />
               ))}
               {t('rooms.handoffGroup')}
             </span>
@@ -733,7 +772,7 @@ export function RoomInterface({
         <div className="mx-auto mb-2 flex max-w-[54.25rem] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-border/50 bg-card/80 px-3 py-1.5 text-xs">
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
           {activeParticipants.map((participant) => (
-            <ParticipantBadge key={participant.participantId} participant={participant} hostLabel={t('rooms.host')} />
+            <ParticipantBadge key={participant.participantId} participant={participant} hostLabel={t('rooms.leader')} />
           ))}
           <span className="text-muted-foreground">{phaseLabel}</span>
           <button
@@ -833,6 +872,7 @@ export function RoomInterface({
                 onChangeRosterSelection={(changes) => updateParticipant(settingsParticipant.participantId, changes)}
                 onCompact={() => void runAction(() => compact(settingsParticipant.participantId))}
                 onLeave={() => handleLeave(settingsParticipant.participantId)}
+                onMakeLeader={() => void runAction(() => setLeader(settingsParticipant.participantId))}
                 onOpenSession={() => {
                   setMembersOpen(false);
                   openParticipantSession(settingsParticipant.sessionId);
@@ -869,7 +909,7 @@ export function RoomInterface({
                   >
                     <ParticipantBadge
                       participant={participant}
-                      hostLabel={t('rooms.host')}
+                      hostLabel={t('rooms.leader')}
                       standbyLabel={t('rooms.standby')}
                     />
                     {isParticipantActive(participant.participantId) && (
@@ -929,7 +969,7 @@ export function RoomInterface({
               }}
               className={cn('flex w-full px-3 py-1.5 text-left', index === mentionIndex && 'bg-accent')}
             >
-              <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
+              <ParticipantBadge participant={participant} hostLabel={t('rooms.leader')} />
             </button>
           </li>
         );
@@ -1086,7 +1126,7 @@ export function RoomInterface({
                     message={message}
                     prevMessage={index === 0 ? null : historyMessages[index - 1]}
                     createDiff={createDiff}
-                    provider={participants.find((participant) => participant.isHost)?.provider ?? 'claude'}
+                    provider={participants.find((participant) => participant.isOrigin)?.provider ?? 'claude'}
                     selectedProject={selectedProject}
                     onFileOpen={onFileOpen}
                     showRawParameters={showRawParameters}
@@ -1118,7 +1158,7 @@ export function RoomInterface({
                   live={isRunning}
                   header={(
                     <>
-                      <ParticipantBadge participant={participant} hostLabel={t('rooms.host')} />
+                      <ParticipantBadge participant={participant} hostLabel={t('rooms.leader')} />
                       {phaseChip && <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{phaseChip}</span>}
                       {isRunning && (
                         <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -1168,6 +1208,23 @@ export function RoomInterface({
             );
           })}
         </div>
+      </div>
+
+      {/* 타임라인 바닥 위에 뜨는 "맨 아래로" 버튼. 높이 0 칸에 걸어 두어 레이아웃을 밀지 않는다. */}
+      <div className="relative h-0">
+        {farFromBottom && (
+          <div className="pointer-events-none absolute -top-11 left-0 right-0 z-20 flex justify-center">
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              aria-label={t('rooms.scrollToBottom')}
+              title={t('rooms.scrollToBottom')}
+              className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-border/50 bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ArrowDown className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* The same composer a chat uses; permission prompts ride in its banner. */}
@@ -1229,6 +1286,9 @@ export function RoomInterface({
         sendByCtrlEnter={sendByCtrlEnter}
         aboveInput={composerNotices}
         inputPopover={mentionList}
+        scheduledMessages={scheduledMessages}
+        onScheduleMessage={handleScheduleMessage}
+        onCancelScheduledMessage={cancelScheduledMessage}
       />
 
       <CommandResultModal

@@ -37,8 +37,8 @@ const roomDetail: RoomDetail = {
     createdAt: '2026-10-25T00:00:00.000Z',
   },
   participants: [
-    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, effort: null, claudeAccountId: null, displayName: '설계자', roleName: '설계', rolePrompt: '', persona: '', status: 'active', position: 0, isHost: true, permissionMode: 'ask' },
-    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, effort: null, claudeAccountId: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', persona: '', status: 'active', position: 1, isHost: false, permissionMode: 'ask' },
+    { participantId: 'p-host', roomId: 'room-1', sessionId: 'host-session', provider: 'claude', model: null, effort: null, claudeAccountId: null, displayName: '설계자', roleName: '설계', rolePrompt: '', persona: '', status: 'active', position: 0, isHost: true, isOrigin: true, permissionMode: 'ask' },
+    { participantId: 'p-rev', roomId: 'room-1', sessionId: 'rev-session', provider: 'codex', model: null, effort: null, claudeAccountId: null, displayName: '리뷰어', roleName: '리뷰', rolePrompt: '', persona: '', status: 'active', position: 1, isHost: false, isOrigin: false, permissionMode: 'ask' },
   ],
   formerParticipants: [],
   messages: [
@@ -61,6 +61,13 @@ vi.mock('@/shared/api', async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      scheduledMessages: {
+        ...actual.api.scheduledMessages,
+        list: () => ok([{
+          id: '3f2a9c1e-0000-4000-8000-000000000000', sessionId: 'host-session', content: '@리뷰어 다시 보기',
+          options: {}, scheduledFor: new Date(Date.now() + 20 * 60_000).toISOString(), status: 'pending', failureReason: null, createdAt: '',
+        }]),
+      },
       rooms: {
         ...actual.api.rooms,
         list: () => ok({ rooms: [] }),
@@ -307,5 +314,23 @@ describe('RoomInterface', () => {
     height = 2200;
     emit({ kind: 'text', role: 'assistant', id: 'a2', sessionId: 'rev-session', content: '계속 검토 중', seq: 2, timestamp: '2026-10-25T00:00:05.000Z' });
     expect(top).toBe(2200);
+  });
+
+  it('opens the schedules from the toolbar above the input and closes them on an outside click', async () => {
+    await renderRoom();
+    const trigger = await screen.findByRole('button', { name: /^예약 1/ });
+    expect(screen.queryByRole('dialog', { name: '예약 1개' })).toBeNull();
+
+    fireEvent.click(trigger);
+    const panel = screen.getByRole('dialog', { name: '예약 1개' });
+    expect(within(panel).getByText('@리뷰어')).toBeTruthy();
+    expect(within(panel).getByText('#3f2a9c')).toBeTruthy();
+
+    // 창 안을 눌러도 닫히지 않는다.
+    fireEvent.pointerDown(panel);
+    expect(screen.getByRole('dialog', { name: '예약 1개' })).toBeTruthy();
+    // 바깥을 누르면 닫힌다.
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '예약 1개' })).toBeNull());
   });
 });

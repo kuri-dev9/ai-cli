@@ -1355,7 +1355,7 @@ export type TelegramChatDiscovery = {
 
 //----------------- TEAM ROOMS ------------
 
-/** One AI member of a team room: a real ai-cli session plus the name, role and prompt it speaks under. `isHost` marks the session the room was created from. */
+/** One AI member of a team room: a real ai-cli session plus the name, role and prompt it speaks under. `isOrigin` marks the session the room was created from, `isHost` the current leader (방장). */
 /**
  * 참가자가 룸에서 어떤 상태인지.
  *
@@ -1384,7 +1384,10 @@ export type RoomParticipant = {
   persona: string;
   status: RoomParticipantStatus;
   position: number;
+  /** 방장. 기본은 원래 대화의 참가자지만 다른 참가자에게 넘길 수 있다. */
   isHost: boolean;
+  /** 룸으로 바뀐 원래 대화. 룸이 이 세션에 붙어 있어 뺄 수 없다. */
+  isOrigin: boolean;
   /** Permission preset this participant's turns run with; the room's preset unless set per participant. */
   permissionMode: RoomPermissionMode;
 };
@@ -1510,8 +1513,10 @@ export type RoomParticipantInput = {
 /** Body of `POST /api/rooms`: converts the host session into a room and adds the first invitee. */
 export type CreateRoomInput = {
   hostSessionId: string;
-  host?: { displayName?: string; roleName?: string; rolePrompt?: string; persona?: string };
-  participant: RoomParticipantInput;
+  /** `model`·`claudeAccountId` 는 아직 한 번도 돌지 않은 새 세션일 때만 적용된다. */
+  host?: { displayName?: string; roleName?: string; rolePrompt?: string; persona?: string; model?: string | null; claudeAccountId?: string | null };
+  /** 새 대화로 여는 룸은 방장 혼자서도 시작할 수 있어 비워 둘 수 있다. */
+  participant?: RoomParticipantInput;
 };
 
 // ---------------------------

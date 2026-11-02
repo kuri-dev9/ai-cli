@@ -12,6 +12,7 @@ import type {
 import { useDropzone } from 'react-dropzone';
 
 import { api } from '@/shared/api';
+import { notifyScheduledMessagesChanged } from '@/modules/chat/composer/useScheduledMessages';
 import { PROVIDER_PERMISSION_PREFERENCE_KEYS } from '@/shared/constants';
 import { readUserPreference } from '@/shared/userSettings';
 import { isImageAttachment } from '@/shared/utils';
@@ -403,6 +404,18 @@ export function useChatComposerState({
 
         case 'config':
           onShowSettings?.();
+          break;
+
+        case 'schedule':
+          // `/예약` 은 서버가 이미 걸었다. 결과를 알리고, 입력창 위 예약 목록을 다시 읽게 한다.
+          addMessage({
+            type: 'assistant',
+            content: String(data?.message ?? ''),
+            timestamp: Date.now(),
+          });
+          if (!data?.error) {
+            notifyScheduledMessagesChanged();
+          }
           break;
 
         default:

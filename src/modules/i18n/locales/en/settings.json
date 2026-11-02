@@ -971,7 +971,7 @@
       "descriptionLive": "Check that you are signed in, then refresh. The limits could not be read."
     },
     "windows": {
-      "fiveHour": "Current session",
+      "fiveHour": "Current session (5h)",
       "sevenDay": "Current week (all models)",
       "sevenDayOpus": "Current week (Opus)",
       "sevenDaySonnet": "Current week (Sonnet)",
@@ -992,6 +992,7 @@
     "accounts": {
       "loadFailed": "Could not load the account list.",
       "loadingUsage": "Loading..."
-    }
+    },
+    "fiveHourNotReported": "No 5-hour limit applies to this account right now. Anthropic reported only weekly limits."
   }
 }

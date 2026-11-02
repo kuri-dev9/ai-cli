@@ -1495,7 +1495,8 @@ export type RoomPermissionMode = 'ask' | 'read' | 'full';
 
 /**
  * 룸 참가자 한 명. 각자 실제 앱 세션 하나를 가진다. 같은 프로바이더·모델이라도
- * 역할이 다르면 별개의 참가자다. `isHost` 는 룸으로 바뀐 원래 대화다.
+ * 역할이 다르면 별개의 참가자다. `isOrigin` 은 룸으로 바뀐 원래 대화,
+ * `isHost` 는 방장이다.
  *
  * Rooms 모듈의 서비스·턴 엔진·프롬프트 빌더가 같이 쓰고, 그대로 화면에 내려간다.
  */
@@ -1531,7 +1532,10 @@ export type RoomParticipant = {
   persona: string;
   status: RoomParticipantStatus;
   position: number;
+  /** 방장. 기본은 원래 대화의 참가자지만 다른 참가자에게 넘길 수 있다. */
   isHost: boolean;
+  /** 룸으로 바뀐 원래 대화. 룸이 이 세션에 붙어 있어 빼거나 바꿀 수 없다. */
+  isOrigin: boolean;
   /** 이 참가자의 차례에 쓰는 권한. 따로 정하지 않았으면 룸 설정과 같다. */
   permissionMode: RoomPermissionMode;
 };

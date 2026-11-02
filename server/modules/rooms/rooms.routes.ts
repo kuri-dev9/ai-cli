@@ -82,8 +82,11 @@ router.post(
         roleName: readOptionalString(host.roleName),
         rolePrompt: readOptionalString(host.rolePrompt),
         persona: readOptionalString(host.persona),
+        model: readOptionalString(host.model),
+        claudeAccountId: readOptionalString(host.claudeAccountId),
       },
-      participant: readParticipant(body.participant),
+      // 새 대화로 여는 룸은 방장(원래 세션) 혼자서도 시작할 수 있다.
+      participant: body.participant ? readParticipant(body.participant) : null,
     });
     res.status(201).json(createApiSuccessResponse(detail));
   }),
@@ -117,6 +120,17 @@ router.patch(
         effort: readOptionalString(body.effort) ?? undefined,
         claudeAccountId: readOptionalString(body.claudeAccountId) ?? undefined,
       },
+    );
+    res.json(createApiSuccessResponse(detail));
+  }),
+);
+
+router.post(
+  '/:roomId/leader',
+  asyncHandler(async (req: Request, res: Response) => {
+    const detail = roomsService.setLeader(
+      readRequiredString(req.params.roomId, 'roomId'),
+      readRequiredString(readBody(req).participantId, 'participantId'),
     );
     res.json(createApiSuccessResponse(detail));
   }),

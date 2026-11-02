@@ -80,17 +80,27 @@ export function returnSummonedToStandby(roomId: string): void {
   broadcastRoomFrame({ kind: 'room_updated', roomId });
 }
 
+/**
+ * 방장은 라운드가 도는 중에도 넘길 수 있어, 턴 엔진이 쥐고 있는 행 대신 지금
+ * 저장된 행으로 누가 방장인지 읽는다.
+ */
+function readCurrentRoom(room: RoomRow): RoomRow {
+  return roomsDb.getRoom(room.room_id) ?? room;
+}
+
 /** 지금 차례가 돌아오는 참가자. 명단에서 기다리는 멤버는 빠진다. */
 export function listActiveParticipants(room: RoomRow): RoomParticipant[] {
+  const current = readCurrentRoom(room);
   return roomsDb
     .listParticipants(room.room_id)
-    .map((row: RoomParticipantRow) => toRoomParticipant(row, room))
+    .map((row: RoomParticipantRow) => toRoomParticipant(row, current))
     .filter((participant) => participant.status !== 'standby');
 }
 
 /** 룸에 속한 전원. 명단에서 기다리는 멤버까지 포함한다. */
 export function listRoster(room: RoomRow): RoomParticipant[] {
-  return roomsDb.listParticipants(room.room_id).map((row: RoomParticipantRow) => toRoomParticipant(row, room));
+  const current = readCurrentRoom(room);
+  return roomsDb.listParticipants(room.room_id).map((row: RoomParticipantRow) => toRoomParticipant(row, current));
 }
 
 /** 명단에서 기다리는 멤버만. 프롬프트에 "부를 수 있는 멤버"로 적는다. */

@@ -971,7 +971,7 @@
       "descriptionLive": "로그인 상태를 확인한 뒤 새로고침해 주세요. 한도를 읽어오지 못했습니다."
     },
     "windows": {
-      "fiveHour": "현재 세션",
+      "fiveHour": "현재 세션 (5시간)",
       "sevenDay": "이번 주 (전체 모델)",
       "sevenDayOpus": "이번 주 (Opus)",
       "sevenDaySonnet": "이번 주 (Sonnet)",
@@ -992,6 +992,7 @@
     "accounts": {
       "loadFailed": "계정 목록을 불러오지 못했습니다.",
       "loadingUsage": "불러오는 중..."
-    }
+    },
+    "fiveHourNotReported": "지금은 이 계정에 5시간 한도가 걸려 있지 않습니다. Anthropic이 주간 한도만 보고했습니다."
   }
 }

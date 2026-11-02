@@ -8,6 +8,11 @@ import {
   nextParticipantAfter,
   parseAssignments,
   parseHandoff,
+  buildScheduleSection,
+  parseScheduleCancels,
+  parseScheduleTime,
+  parseSchedules,
+  shortScheduleId,
   pickSpeakerForUserMessage,
   pickSpeakersForUserMessage,
 } from '@/modules/rooms/services/room-prompt.service.js';
@@ -29,6 +34,7 @@ function participant(id: string, displayName: string, position: number, extra: P
     status: 'active',
     position,
     isHost: position === 0,
+    isOrigin: position === 0,
     permissionMode: 'ask',
     ...extra,
   };
@@ -206,4 +212,66 @@ test('each turn mode adds its own instructions', () => {
   assert.match(buildTurnPrompt({ ...base, mode: { kind: 'comment', onName: 'Codex' } }), /방금 @Codex 의 답/);
   assert.match(buildTurnPrompt({ ...base, mode: { kind: 'summary' } }), /\[정리\]/);
   assert.doesNotMatch(buildTurnPrompt(base), /\[분담\]|\[맡은 일\]|\[의견\]|\[정리\]/);
+});
+
+test('예약 시각은 상대·시각·날짜로 읽고, 지난 시각만 적으면 내일로 본다', () => {
+  const now = new Date(2026, 10, 2, 14, 33);
+  assert.equal(parseScheduleTime('+20분', now)?.getTime(), new Date(2026, 10, 2, 14, 53).getTime());
+  assert.equal(parseScheduleTime('2시간 후', now)?.getTime(), new Date(2026, 10, 2, 16, 33).getTime());
+  assert.equal(parseScheduleTime('14:50', now)?.getTime(), new Date(2026, 10, 2, 14, 50).getTime());
+  assert.equal(parseScheduleTime('09:00', now)?.getTime(), new Date(2026, 10, 3, 9, 0).getTime());
+  assert.equal(parseScheduleTime('2026-11-03 10:05', now)?.getTime(), new Date(2026, 10, 3, 10, 5).getTime());
+  assert.equal(parseScheduleTime('곧', now), null);
+  assert.equal(parseScheduleTime('25:00', now), null);
+});
+
+test('답의 예약 줄을 읽고, 이름이 없으면 적은 참가자에게 돌아오게 한다', () => {
+  const now = new Date(2026, 10, 2, 14, 33);
+  const schedules = parseSchedules([
+    '장애가 끝나면 보겠습니다.',
+    '[예약 14:51] 장애 66 끝났는지 보고 분석 시작',
+    '- [schedule +30m] @리오 16번 주입',
+    '[예약 2020-01-01 10:00] 지난 시각은 버린다',
+    '[예약 언젠가] 못 읽는 시각도 버린다',
+    '[DONE]',
+  ].join('\n'), { displayName: '케이' }, now);
+
+  assert.deepEqual(schedules.map((schedule) => schedule.content), ['@케이 장애 66 끝났는지 보고 분석 시작', '@리오 16번 주입']);
+  assert.equal(schedules[0].at.getTime(), new Date(2026, 10, 2, 14, 51).getTime());
+  assert.equal(schedules[1].at.getTime(), new Date(2026, 10, 2, 15, 3).getTime());
+});
+
+test('역할 안내와 짧은 알림 모두 sleep 대신 예약하라고 알린다', () => {
+  const me = participant('a', '케이', 0);
+  const prompt = buildTurnPrompt({ me, participants: [me], delta: [], isFirstTurn: true, mode: { kind: 'turn' }, turn: { count: 1, max: 6 } } as never);
+  assert.match(prompt, /\[예약 14:50\] 할 일/);
+});
+
+test('꾸며 쓴 예약 줄도 읽고, 방금 지난 시각은 내일이 아니라 지금으로 본다', () => {
+  const now = new Date(2026, 10, 2, 14, 46);
+  const schedules = parseSchedules([
+    '**[예약 14:45]** 테스트 한번 찍기',
+    '> `[예약 +1분]` @리오 확인',
+    '1. [예약 15:10] 정리',
+  ].join('\n'), { displayName: '케이' }, now);
+
+  assert.deepEqual(schedules.map((schedule) => schedule.content), ['@케이 테스트 한번 찍기', '@리오 확인', '@케이 정리']);
+  assert.equal(schedules[0].at.getTime(), now.getTime());
+  // 한참 지난 시각은 여전히 내일이다.
+  assert.equal(parseScheduleTime('14:00', now)?.getTime(), new Date(2026, 10, 3, 14, 0).getTime());
+});
+
+test('예약 취소 줄에서 번호들을 읽는다', () => {
+  assert.deepEqual(parseScheduleCancels('정리합니다.\n[예약취소 #A1B2C3]\n- `[예약 취소 #d4e5f6, #0a0b0c]`\n[DONE]'), ['a1b2c3', 'd4e5f6', '0a0b0c']);
+  assert.deepEqual(parseScheduleCancels('[예약 14:50] 이건 취소가 아니다'), []);
+});
+
+test('걸린 예약은 짧은 번호와 함께 프롬프트에 실린다', () => {
+  const now = new Date(2026, 10, 2, 18, 0);
+  const id = '3f2a9c1e-0000-4000-8000-000000000000';
+  const section = buildScheduleSection([{ id, at: new Date(2026, 10, 2, 18, 29), content: '@리오 F-68 대조' }], now);
+  assert.equal(shortScheduleId(id), '3f2a9c');
+  assert.match(section ?? '', /\[걸린 예약 1개\] 다시 적지 마세요/);
+  assert.match(section ?? '', /- #3f2a9c 18:29 @리오 F-68 대조/);
+  assert.equal(buildScheduleSection([], now), null);
 });

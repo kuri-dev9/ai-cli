@@ -140,6 +140,16 @@ export function useRoom(hostSessionId: string) {
     return body.data ?? null;
   }, []);
 
+  /** 방장을 이 참가자에게 넘긴다. */
+  const setLeader = useCallback(async (participantId: string) => {
+    if (!roomIdRef.current) return;
+    const response = await api.rooms.setLeader(roomIdRef.current, participantId);
+    const body = await readApiJson<{ data?: RoomDetail }>(response);
+    if (body.data) {
+      dispatch({ type: 'detail_loaded', detail: body.data });
+    }
+  }, []);
+
   const updateSettings = useCallback(async (changes: {
     maxAutoTurns?: number;
     splitWork?: boolean;
@@ -192,6 +202,7 @@ export function useRoom(hostSessionId: string) {
     compact,
     updateParticipant,
     removeParticipant,
+    setLeader,
     applyDetail,
     answerPermission,
   };

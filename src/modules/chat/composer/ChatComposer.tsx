@@ -33,7 +33,11 @@ import PermissionRequestsBanner from '@/modules/chat/composer/PermissionRequests
 import TokenUsageSummary from '@/modules/chat/composer/TokenUsageSummary';
 import QueuedMessageCard from '@/modules/chat/composer/QueuedMessageCard';
 import { ScheduleMessagePopover } from '@/modules/chat/composer/ScheduleMessagePopover';
-import { ScheduledMessageList } from '@/modules/chat/composer/ScheduledMessageList';
+import {
+  ScheduledMessagesPanel,
+  ScheduledMessagesTrigger,
+  hasVisibleSchedules,
+} from '@/modules/chat/composer/ScheduledMessageList';
 import ComposerModelMenu from '@/modules/chat/composer/ComposerModelMenu';
 import ComposerPermissionMenu from '@/modules/chat/composer/ComposerPermissionMenu';
 
@@ -208,6 +212,30 @@ export default function ChatComposer({
   const { t } = useTranslation('chat');
   const fileDropdownRef = useRef<HTMLDivElement | null>(null);
   const selectedFileRef = useRef<HTMLDivElement | null>(null);
+  // 예약 창. 도구줄의 버튼으로 열고, 창과 버튼 밖을 누르거나 Esc 를 누르면 닫는다.
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const scheduleTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const schedulePanelRef = useRef<HTMLDivElement | null>(null);
+  const showSchedules = Boolean(scheduledMessages && onCancelScheduledMessage && hasVisibleSchedules(scheduledMessages));
+  const schedulePanelOpen = scheduleOpen && showSchedules;
+  useEffect(() => {
+    if (!schedulePanelOpen) return undefined;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (schedulePanelRef.current?.contains(target) || scheduleTriggerRef.current?.contains(target)) return;
+      setScheduleOpen(false);
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setScheduleOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [schedulePanelOpen]);
   const commandMenuPosition = useMemo(() => {
     if (!isCommandMenuOpen) {
       return { top: 0, left: 16, bottom: 90 };
@@ -290,8 +318,10 @@ export default function ChatComposer({
       ? t('input.stop')
       : t('input.send');
 
+  // z-20: 이 칸은 `contain` 때문에 따로 쌓인다. z 없이 두면 위로 띄운 예약 창·활동 표시가
+  // 타임라인의 고정 헤더(sticky z-10) 아래로 깔려 가로로 잘려 보인다.
   return (
-    <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-2 pt-0 sm:px-4 sm:pb-4 md:px-4 md:pb-6">
+    <div className="chat-composer-shell relative z-20 flex-shrink-0 px-2 pb-2 pt-0 sm:px-4 sm:pb-4 md:px-4 md:pb-6">
       {!hasPendingPermissions && (
         <div className="pointer-events-none absolute bottom-full left-1/2 z-10 w-[calc(100%-1rem)] max-w-[54.25rem] -translate-x-1/2 translate-y-px bg-transparent sm:w-[calc(100%-2rem)]">
           <ActivityIndicator activity={activity} onAbort={onAbortSession} isInputFocused={isInputFocused} />
@@ -306,13 +336,6 @@ export default function ChatComposer({
             handleGrantToolPermission={handleGrantToolPermission}
           />
         </div>
-      )}
-
-      {scheduledMessages && onCancelScheduledMessage && (
-        <ScheduledMessageList
-          scheduledMessages={scheduledMessages}
-          onCancel={onCancelScheduledMessage}
-        />
       )}
 
       {isEditingSentMessage && (
@@ -357,6 +380,14 @@ export default function ChatComposer({
 
       {!hasQuestionPanel && <div className="relative mx-auto max-w-[54.25rem]">
         {inputPopover}
+        {schedulePanelOpen && scheduledMessages && onCancelScheduledMessage && (
+          <ScheduledMessagesPanel
+            ref={schedulePanelRef}
+            scheduledMessages={scheduledMessages}
+            onCancel={onCancelScheduledMessage}
+            onClose={() => setScheduleOpen(false)}
+          />
+        )}
         {showFileDropdown && filteredFiles.length > 0 && (
           <div
             ref={fileDropdownRef}
@@ -497,6 +528,15 @@ export default function ChatComposer({
                 </span>
               )}
             </PromptInputButton>
+
+            {showSchedules && scheduledMessages && (
+              <ScheduledMessagesTrigger
+                ref={scheduleTriggerRef}
+                scheduledMessages={scheduledMessages}
+                open={schedulePanelOpen}
+                onToggle={() => setScheduleOpen((value) => !value)}
+              />
+            )}
 
             {hasInput && (
               <PromptInputButton

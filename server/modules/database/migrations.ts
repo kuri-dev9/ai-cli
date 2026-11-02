@@ -583,6 +583,7 @@ const addRoomSettingsColumns = (db: Database): void => {
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'host_led', 'INTEGER NOT NULL DEFAULT 1');
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'auto_compact', 'INTEGER NOT NULL DEFAULT 1');
   addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'notify_telegram', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'leader_participant_id', 'TEXT');
 };
 
 /**

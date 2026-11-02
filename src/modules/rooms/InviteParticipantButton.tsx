@@ -56,7 +56,11 @@ export function InviteParticipantButton({
     return null;
   }
 
-  const resolveHostSessionId = async (): Promise<string> => {
+  /**
+   * 새 대화면 방장으로 고른 사람이 곧 이 세션이라, 그 사람의 프로바이더로
+   * 세션을 연다. 이미 있는 대화는 그 대화가 그대로 원래 세션이 된다.
+   */
+  const resolveHostSessionId = async (requestedProvider?: string): Promise<string> => {
     if (sessionId) {
       return sessionId;
     }
@@ -64,7 +68,9 @@ export function InviteParticipantButton({
       return createdHostRef.current.sessionId;
     }
 
-    const provider = readHostProvider();
+    const provider = requestedProvider && (ROOM_INVITABLE_PROVIDERS as readonly string[]).includes(requestedProvider)
+      ? requestedProvider as LLMProvider
+      : readHostProvider();
     const response = await api.providers.createSession({
       provider,
       projectPath: project.fullPath || project.path || '',
@@ -111,7 +117,7 @@ export function InviteParticipantButton({
       <InviteParticipantModal
         open={open}
         onOpenChange={setOpen}
-        target={{ kind: 'create', resolveHostSessionId }}
+        target={{ kind: 'create', fresh: !sessionId, resolveHostSessionId }}
         takenNames={[]}
         onInvited={handleInvited}
       />

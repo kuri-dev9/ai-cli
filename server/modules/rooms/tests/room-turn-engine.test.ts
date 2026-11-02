@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, roomsDb, sessionsDb } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, roomsDb, scheduledMessagesDb, sessionsDb, userDb } from '@/modules/database/index.js';
+import { dispatchDueScheduledMessages } from '@/modules/scheduled-messages/index.js';
 import { roomsService } from '@/modules/rooms/services/rooms.service.js';
 import { roomTurnEngine } from '@/modules/rooms/services/room-turn-engine.service.js';
 import { startTelegramBridge } from '@/modules/telegram-bridge/index.js';
@@ -201,14 +202,14 @@ test('everyone else passing ends the round', async () => {
   });
 });
 
-test('a message sent mid-turn is picked up at the next turn and redirects the room', async () => {
+test('a message sent mid-turn to an idle participant is answered right away, alongside the running turn', async () => {
   await withRoom(6, async () => {
     const calls: Call[] = [];
     let release: () => void = () => {};
     const hostReplyGate = new Promise<void>((resolve) => { release = resolve; });
 
     roomTurnEngine.initialize(createRuntime({
-      [HOST]: [async () => { await hostReplyGate; return '구현 중… @Claude'; }],
+      [HOST]: [async () => { await hostReplyGate; return '구현 끝 [DONE]'; }],
       [REVIEWER]: ['테스트부터 보겠습니다 [DONE]'],
     }, calls));
 
@@ -217,13 +218,14 @@ test('a message sent mid-turn is picked up at the next turn and redirects the ro
 
     const { state } = roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 테스트도 같이 봐줘' }, 1);
     assert.equal(state.status, 'running');
-    assert.equal(state.pendingUserMessage, true);
+    // 리뷰어는 쉬고 있으니 기다리지 않고 바로 받는다.
+    assert.equal(state.pendingUserMessage, false);
+    await waitFor(() => calls.length === 2, 'reviewer started alongside');
+    assert.match(calls[1].command, /테스트도 같이 봐줘/);
     release();
 
-    await waitFor(() => isIdle() && speakers().length === 4, 'redirected turn');
-    // 호스트가 자기 자신을 넘겼더라도 사용자 지목이 이긴다.
+    await waitFor(() => isIdle() && speakers().length === 4, 'both finished');
     assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER]);
-    assert.match(calls[1].command, /테스트도 같이 봐줘/);
   });
 });
 
@@ -528,13 +530,13 @@ test('interrupting aborts the current speaker and moves straight to the waiting 
     const gate = new Promise<void>((resolve) => { release = resolve; });
 
     roomTurnEngine.initialize(createRuntime({
-      [HOST]: [async () => { await gate; return '길게 쓰던 답 @Claude'; }],
-      [REVIEWER]: ['바로 볼게요 [DONE]'],
+      [HOST]: [async () => { await gate; return '길게 쓰던 답 @Claude'; }, '바로 볼게요 [DONE]'],
     }, calls, aborts));
 
     roomsService.postUserMessage(ROOM_ID, { content: '오래 걸리는 일' }, 1);
     await waitFor(() => calls.length === 1, 'host turn started');
-    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 잠깐, 이것부터' }, 1);
+    // 이름이 없으니 방장(호스트)이 받을 글이다. 호스트가 일하는 중이라 기다린다.
+    roomsService.postUserMessage(ROOM_ID, { content: '잠깐, 이것부터' }, 1);
 
     const interrupting = roomsService.interrupt(ROOM_ID);
     release();
@@ -543,11 +545,90 @@ test('interrupting aborts the current speaker and moves straight to the waiting 
 
     assert.deepEqual(aborts, [HOST]);
     const rows = roomsDb.listMessages(ROOM_ID);
-    assert.deepEqual(rows.map((row) => row.speaker), ['user', 'user', 'p-host', 'p-rev']);
-    // 끊긴 답은 실패가 아니라 중단이고, 루프는 멈추지 않고 지목된 참가자로 넘어간다.
+    assert.deepEqual(rows.map((row) => row.speaker), ['user', 'user', 'p-host', 'p-host']);
+    // 끊긴 답은 실패가 아니라 중단이고, 루프는 멈추지 않고 기다리던 글로 넘어간다.
     assert.equal(rows[2].status, 'aborted');
     assert.equal(rows[3].status, 'complete');
-    assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER]);
+    assert.deepEqual(calls.map((call) => call.sessionId), [HOST, HOST]);
+  });
+});
+
+test('일하는 참가자가 있어도 사용자가 부른 쉬는 참가자는 끊지 않고 바로 받는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    const aborts: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await gate; return '길게 끝냈습니다 [DONE]'; }],
+      [REVIEWER]: ['테스트 받았습니다 [DONE]'],
+    }, calls, aborts));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '오래 걸리는 일' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 test. 대답만 해줘' }, 1);
+
+    // 호스트가 아직 일하는 중인데 리뷰어가 먼저 답한다. 아무도 끊기지 않는다.
+    await waitFor(() => speakers().includes('p-rev'), 'reviewer answered alongside');
+    assert.deepEqual(aborts, []);
+    assert.equal(roomTurnEngine.getState(ROOM_ID, 0).status, 'running');
+    assert.match(calls[1].command, /대답만 해줘/);
+
+    release();
+    await waitFor(() => isIdle() && speakers().length === 4, 'host finished');
+    const rows = roomsDb.listMessages(ROOM_ID);
+    assert.deepEqual(rows.map((row) => [row.speaker, row.status]), [
+      ['user', 'complete'], ['user', 'complete'], ['p-rev', 'complete'], ['p-host', 'complete'],
+    ]);
+  });
+});
+
+test('받을 참가자가 지금 일하는 바로 그 참가자면 끊지 않고 그 차례 뒤에 받는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    const aborts: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await gate; return '첫 일 끝 [DONE]'; }, '다음 것도 했습니다 [DONE]'],
+    }, calls, aborts));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '일 시작' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    // 이름이 없으니 방장(호스트)이 받는데, 호스트는 지금 일하는 중이다.
+    roomsService.postUserMessage(ROOM_ID, { content: '이것도 이어서 해줘' }, 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(aborts, []);
+    assert.equal(roomTurnEngine.getState(ROOM_ID, 0).pendingUserMessage, true);
+
+    release();
+    await waitFor(() => isIdle() && speakers().length === 4, 'host took it after');
+    assert.deepEqual(roomsDb.listMessages(ROOM_ID).map((row) => [row.speaker, row.status]), [
+      ['user', 'complete'], ['user', 'complete'], ['p-host', 'complete'], ['p-host', 'complete'],
+    ]);
+    assert.match(calls[1].command, /이것도 이어서 해줘/);
+  });
+});
+
+test('끼어들기는 끊어도 끝나지 않는 실행이라도 놓고 기다리던 글로 넘어간다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    const aborts: string[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      // 끊겨도 끝나지 않는 실행. 예전에는 이 차례에 루프가 무한정 묶였다.
+      [HOST]: [() => new Promise<string>(() => {}), '이어서 받았습니다 [DONE]'],
+    }, calls, aborts));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '오래 걸리는 일' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    roomsService.postUserMessage(ROOM_ID, { content: '그만하고 이것부터' }, 1);
+    await roomsService.interrupt(ROOM_ID);
+    await waitFor(() => isIdle() && speakers().length === 4, 'moved on');
+
+    assert.deepEqual(aborts, [HOST]);
+    assert.deepEqual(roomsDb.listMessages(ROOM_ID).map((row) => [row.speaker, row.status]), [
+      ['user', 'complete'], ['user', 'complete'], ['p-host', 'aborted'], ['p-host', 'complete'],
+    ]);
   });
 });
 
@@ -1002,6 +1083,133 @@ test('방장 주도에서 방장이 부른 참가자의 답은 방장에게 돌�
     assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER, HOST]);
     assert.match(calls[1].command, /방장 @Claude 가 부를 때만 답합니다/);
   }, { hostLed: true, discussion: true, thirdParticipant: true });
+});
+
+test('방장을 넘기면 새 방장이 사용자 글을 먼저 받고 다른 참가자를 부른다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [REVIEWER]: ['설계해 주세요\n@Claude', '정리했습니다'],
+      [HOST]: ['설계했습니다'],
+    }, calls));
+
+    const detail = roomsService.setLeader(ROOM_ID, 'p-rev');
+    assert.deepEqual(detail.participants.filter((member) => member.isHost).map((member) => member.participantId), ['p-rev']);
+    // 원래 대화는 방장이 아니어도 원래 대화다.
+    assert.equal(detail.participants.find((member) => member.participantId === 'p-host')?.isOrigin, true);
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 4, 'leader, host, leader');
+
+    assert.deepEqual(calls.map((call) => call.sessionId), [REVIEWER, HOST, REVIEWER]);
+    assert.match(calls[0].command, /\[방장 주도\] 당신이 이 룸의 방장입니다/);
+    assert.match(calls[1].command, /방장 @Claude2 가 부를 때만 답합니다/);
+
+    // 원래 대화로 돌려주면 따로 적어 둔 방장이 지워진다.
+    roomsService.setLeader(ROOM_ID, 'p-host');
+    assert.equal(roomsDb.getRoom(ROOM_ID)?.leader_participant_id, null);
+  }, { hostLed: true, thirdParticipant: true });
+});
+
+test('새 대화로 여는 룸은 방장 혼자로 시작하고, 방장의 모델·계정이 그 세션에 적힌다', async () => {
+  await withRoom(6, async () => {
+    const projectPath = roomsDb.getRoom(ROOM_ID)!.project_path;
+    // 앱이 막 연 세션. 프로바이더가 아직 세션 id 를 알려 온 적이 없다.
+    sessionsDb.createAppSession('fresh-host', 'claude', projectPath, '새 룸');
+
+    const detail = await roomsService.createRoom({
+      hostSessionId: 'fresh-host',
+      host: { displayName: '케이', roleName: '정리자', rolePrompt: '정리한다', model: 'opus', claudeAccountId: 'acct-2' },
+    });
+
+    assert.equal(detail.participants.length, 1);
+    const [host] = detail.participants;
+    assert.equal(host.displayName, '케이');
+    assert.equal(host.isHost, true);
+    assert.equal(host.isOrigin, true);
+    assert.equal(host.model, 'opus');
+    assert.equal(sessionsDb.getSessionById('fresh-host')?.model, 'opus');
+    assert.equal(sessionsDb.getSessionById('fresh-host')?.claude_account_id, 'acct-2');
+  });
+});
+
+test('이미 대화가 있는 세션으로 여는 룸은 그 대화의 모델을 바꾸지 않는다', async () => {
+  await withRoom(6, async () => {
+    const projectPath = roomsDb.getRoom(ROOM_ID)!.project_path;
+    const now = new Date().toISOString();
+    // 디스크에 기록이 있는 세션은 프로바이더 세션 id 를 이미 안다.
+    const sessionId = sessionsDb.createSession('old-host', 'claude', projectPath, 'Old', now, now, null);
+
+    const detail = await roomsService.createRoom({
+      hostSessionId: sessionId,
+      host: { displayName: '케이', roleName: '정리자', model: 'opus' },
+    });
+
+    assert.equal(detail.participants[0].model, null);
+    assert.equal(sessionsDb.getSessionById(sessionId)?.model ?? null, null);
+  });
+});
+
+test('참가자가 남긴 예약 줄은 예약 메시지가 되고, 때가 되면 룸 메시지로 올라와 그 참가자 차례를 연다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['장애가 끝나면 보겠습니다.\n[예약 +20분] 장애 끝났는지 보고 분석 시작\n[DONE]', '분석했습니다\n[DONE]'],
+    }, calls));
+    const userId = Number(userDb.createUser('room-owner', 'hash').id);
+
+    roomsService.postUserMessage(ROOM_ID, { content: '장애 끝나면 분석해줘' }, userId);
+    await waitFor(() => isIdle() && speakers().length === 2, 'host scheduled');
+
+    const pending = scheduledMessagesDb.listForSession(userId, HOST).filter((row) => row.status === 'pending');
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].content, '@Claude 장애 끝났는지 보고 분석 시작');
+    const dueIn = new Date(pending[0].scheduled_for).getTime() - Date.now();
+    assert.ok(dueIn > 19 * 60 * 1000 && dueIn <= 20 * 60 * 1000);
+
+    // 때가 됐다. 세션 하나에 보내지 않고 룸에 올려, 이름을 부른 참가자가 받는다.
+    await dispatchDueScheduledMessages({} as never, new Date(Date.now() + 21 * 60 * 1000));
+    await waitFor(() => isIdle() && speakers().length === 4, 'scheduled turn');
+
+    const messages = roomsService.getRoomDetail(ROOM_ID).messages;
+    assert.equal(messages[2].speaker, 'user');
+    assert.match(messages[2].text, /^⏰ 예약: @Claude 장애 끝났는지 보고 분석 시작/);
+    assert.equal(messages[3].speaker, 'p-host');
+    assert.deepEqual(calls.map((call) => call.sessionId), [HOST, HOST]);
+  });
+});
+
+test('참가자는 걸린 예약을 프롬프트에서 보고, 번호로 지우며, 같은 예약을 다시 적어도 한 번만 걸린다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    const userId = Number(userDb.createUser('room-owner', 'hash').id);
+    const keep = scheduledMessagesDb.create({ userId, sessionId: HOST, content: '@Claude 남길 것', options: {}, scheduledFor: new Date(Date.now() + 30 * 60_000) });
+    const drop = scheduledMessagesDb.create({ userId, sessionId: HOST, content: '@Claude 지울 것', options: {}, scheduledFor: new Date(Date.now() + 40 * 60_000) });
+    const dropId = drop.id.replace(/-/g, '').slice(0, 6);
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [`정리합니다.\n[예약취소 #${dropId}]\n[예약 +20분] 새로 건 것\n[예약 +20분] 새로 건 것\n[DONE]`],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '예약 정리해줘' }, userId);
+    await waitFor(() => isIdle() && speakers().length === 2, 'host cleaned up');
+
+    // 걸린 예약이 번호와 함께 보였다.
+    assert.match(calls[0].command, new RegExp(`#${dropId} \\d{2}:\\d{2} @Claude 지울 것`));
+    assert.match(calls[0].command, /\[걸린 예약 2개\]/);
+
+    const pending = scheduledMessagesDb.listPendingForSession(HOST).map((row) => row.content);
+    assert.deepEqual(pending, ['@Claude 새로 건 것', '@Claude 남길 것']);
+    assert.ok(scheduledMessagesDb.listPendingForSession(HOST).some((row) => row.id === keep.id));
+  });
+});
+
+test('대기로 돌린 방장은 방장 자리를 원래 대화에 돌려준다', async () => {
+  await withRoom(6, async () => {
+    roomTurnEngine.initialize(createRuntime({}, []));
+    roomsService.setLeader(ROOM_ID, 'p-rev');
+    const detail = roomsService.removeParticipant(ROOM_ID, 'p-rev');
+    assert.equal(detail.participants.find((member) => member.isHost)?.participantId, 'p-host');
+  });
 });
 
 test('방장 주도에서 사용자가 직접 부른 참가자는 답하고 끝난다', async () => {

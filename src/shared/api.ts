@@ -467,6 +467,9 @@ export const api = {
       },
     ) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`, changes),
+    /** 방장을 이 참가자에게 넘긴다. 명단에서 기다리던 멤버면 바로 상주로 들어온다. */
+    setLeader: (roomId: string, participantId: string) =>
+      post(`/api/rooms/${encodeURIComponent(roomId)}/leader`, { participantId }),
     removeParticipant: (roomId: string, participantId: string) =>
       del(`/api/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`),
     /** Shrinks one participant's context, or every participant's when no id is given. */

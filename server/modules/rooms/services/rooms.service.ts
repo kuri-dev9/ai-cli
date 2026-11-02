@@ -74,6 +74,13 @@ type HostInput = {
   roleName?: string | null;
   rolePrompt?: string | null;
   persona?: string | null;
+  /**
+   * 아직 한 번도 돌지 않은 새 세션일 때만 따른다. 새 대화로 룸을 열면 방장이 곧
+   * 원래 세션이라, 방장으로 고른 사람의 모델과 계정을 그 세션에 적는다. 이미
+   * 대화가 있는 세션은 그 대화의 모델·계정을 그대로 둔다.
+   */
+  model?: string | null;
+  claudeAccountId?: string | null;
 };
 
 /** 룸 하나의 요약. 사이드바가 어떤 세션이 룸인지 표시하는 데 쓴다. */
@@ -261,7 +268,7 @@ export const roomsService = {
    * 대화를 룸으로 바꾸고 첫 참가자를 초대한다. 원래 세션은 첫 참가자(호스트)로
    * 들어가 지금까지의 맥락을 그대로 가진다.
    */
-  async createRoom(input: { hostSessionId: string; host?: HostInput; participant: ParticipantInput }): Promise<RoomDetail> {
+  async createRoom(input: { hostSessionId: string; host?: HostInput; participant?: ParticipantInput | null }): Promise<RoomDetail> {
     const hostSession = sessionsDb.getSessionById(input.hostSessionId);
     if (!hostSession) {
       throw new AppError(`Session "${input.hostSessionId}" was not found.`, { code: 'SESSION_NOT_FOUND', statusCode: 404 });
@@ -278,22 +285,56 @@ export const roomsService = {
 
     const hostName = resolveDisplayName(input.host?.displayName, hostSession.provider, []);
     const hostRole = input.host?.roleName?.trim() ? requireRoleName(input.host.roleName) : '메인';
-    const provider = await assertProviderUsable(input.participant.provider);
-    const inviteeName = resolveDisplayName(input.participant.displayName, provider, [hostName]);
-    const inviteeRole = requireRoleName(input.participant.roleName);
-    const inviteeModel = input.participant.model?.trim() || null;
-    const inviteeClaudeAccountId = provider === 'claude' ? (input.participant.claudeAccountId?.trim() || null) : null;
-
     const projectPath = hostSession.project_path;
-    const inviteeSessionId = createParticipantSession(
-      provider,
-      projectPath,
-      inviteeName,
-      inviteeRole,
-      inviteeModel,
-      null,
-      inviteeClaudeAccountId,
-    );
+
+    // 한 번도 돌지 않은 세션이면 방장으로 고른 사람의 모델·계정을 그대로 받는다.
+    // 프로바이더가 세션 id 를 알려 온 적이 없다는 것이 아직 아무 말도 없었다는 뜻이다.
+    const hostIsFresh = !hostSession.provider_session_id;
+    let hostModel = hostSession.model;
+    let hostClaudeAccountId = hostSession.claude_account_id;
+    if (hostIsFresh) {
+      const requestedModel = input.host?.model?.trim();
+      if (requestedModel) {
+        providerModelsService.setSessionModel(hostSession.provider as LLMProvider, input.hostSessionId, requestedModel);
+        hostModel = requestedModel;
+      }
+      const requestedAccount = hostSession.provider === 'claude' ? input.host?.claudeAccountId?.trim() : '';
+      if (requestedAccount) {
+        sessionsDb.setSessionClaudeAccount(input.hostSessionId, requestedAccount);
+        hostClaudeAccountId = requestedAccount;
+      }
+    }
+
+    // 새 대화로 여는 룸은 방장 한 명으로도 시작할 수 있다. 나머지는 뒤이어 더한다.
+    let invitee: Parameters<typeof roomsDb.createRoom>[1][number] | null = null;
+    if (input.participant) {
+      const provider = await assertProviderUsable(input.participant.provider);
+      const inviteeName = resolveDisplayName(input.participant.displayName, provider, [hostName]);
+      const inviteeRole = requireRoleName(input.participant.roleName);
+      const inviteeModel = input.participant.model?.trim() || null;
+      const inviteeClaudeAccountId = provider === 'claude' ? (input.participant.claudeAccountId?.trim() || null) : null;
+      invitee = {
+        participant_id: randomUUID(),
+        session_id: createParticipantSession(
+          provider,
+          projectPath,
+          inviteeName,
+          inviteeRole,
+          inviteeModel,
+          null,
+          inviteeClaudeAccountId,
+        ),
+        provider,
+        model: inviteeModel,
+        claude_account_id: inviteeClaudeAccountId,
+        display_name: inviteeName,
+        role_name: inviteeRole,
+        role_prompt: input.participant.rolePrompt?.trim() ?? '',
+        persona: input.participant.persona?.trim() ?? '',
+        status: 'active',
+        position: 1,
+      };
+    }
     const roomId = randomUUID();
 
     roomsDb.createRoom(
@@ -309,8 +350,8 @@ export const roomsService = {
           participant_id: randomUUID(),
           session_id: input.hostSessionId,
           provider: hostSession.provider,
-          model: hostSession.model,
-          claude_account_id: hostSession.claude_account_id,
+          model: hostModel,
+          claude_account_id: hostClaudeAccountId,
           display_name: hostName,
           role_name: hostRole,
           role_prompt: input.host?.rolePrompt?.trim() ?? '',
@@ -318,19 +359,7 @@ export const roomsService = {
           status: 'active',
           position: 0,
         },
-        {
-          participant_id: randomUUID(),
-          session_id: inviteeSessionId,
-          provider,
-          model: inviteeModel,
-          claude_account_id: inviteeClaudeAccountId,
-          display_name: inviteeName,
-          role_name: inviteeRole,
-          role_prompt: input.participant.rolePrompt?.trim() ?? '',
-          persona: input.participant.persona?.trim() ?? '',
-          status: 'active',
-          position: 1,
-        },
+        ...(invitee ? [invitee] : []),
       ],
     );
 
@@ -496,6 +525,33 @@ export const roomsService = {
   },
 
   /**
+   * 방장을 넘긴다. 방장은 처음엔 원래 대화의 참가자지만, 어느 참가자든 받을 수
+   * 있다. 방장은 사용자 글을 먼저 받고 방장 주도에서 다른 참가자를 부르므로
+   * 늘 상주해야 한다 — 명단에서 기다리던 멤버라면 이 자리에서 들어온다.
+   */
+  setLeader(roomId: string, participantId: string): RoomDetail {
+    const room = requireRoom(roomId);
+    const participant = requireParticipant(roomId, participantId);
+    if (participant.status !== 'active') {
+      const sessionId = participant.session_id
+        ?? createParticipantSession(
+          participant.provider as LLMProvider,
+          room.project_path,
+          participant.display_name,
+          participant.role_name,
+          participant.model,
+          participant.effort,
+          participant.claude_account_id,
+        );
+      roomsDb.setParticipantStatus(participantId, 'active', sessionId);
+    }
+    // 원래 대화로 돌아가면 따로 적어 둘 것이 없다.
+    roomsDb.setLeader(roomId, participant.session_id === room.host_session_id ? null : participantId);
+    broadcastRoomFrame({ kind: 'room_updated', roomId });
+    return this.getRoomDetail(roomId);
+  },
+
+  /**
    * 참가자를 차례에서 뺀다.
    *
    * 일한 적 있는 참가자는 **룸 안에 그대로 두고** 대기로만 돌린다. 세션을 룸
@@ -521,6 +577,10 @@ export const roomsService = {
         code: 'PARTICIPANT_SPEAKING',
         statusCode: 409,
       });
+    }
+    // 차례에서 빠지는 방장은 방장 자리를 원래 대화에 돌려준다.
+    if (room.leader_participant_id === participantId) {
+      roomsDb.setLeader(roomId, null);
     }
     if (participant.session_id) {
       roomsDb.setParticipantStatus(participantId, 'standby');

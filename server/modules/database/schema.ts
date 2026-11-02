@@ -310,6 +310,8 @@ CREATE TABLE IF NOT EXISTS rooms (
     -- 1 이면 라운드가 완전히 끝났을 때(참가자 한 명이 아니라 전체) 텔레그램으로
     -- 알린다. 기본은 꺼짐.
     notify_telegram INTEGER NOT NULL DEFAULT 0,
+    -- 방장(리더) 참가자. NULL 이면 원래 대화(host_session_id)의 참가자가 방장이다.
+    leader_participant_id TEXT,
     -- 차례가 도는 중인 룸의 상태 JSON. 서버가 내려갔다 뜨면 이것으로 이어 간다.
     -- 라운드가 끝나면 NULL 로 돌아간다.
     loop_state TEXT,

@@ -2,6 +2,8 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 
 import { providerModelsService } from '@/modules/providers/index.js';
+import { scheduledMessagesService } from '@/modules/scheduled-messages/index.js';
+import { splitScheduleSpec } from '@/shared/schedule-time.js';
 import { findApplicationRoot, getModuleDirectory } from '@/shared/utils.js';
 
 import { createCommandsRouter } from './commands.routes.js';
@@ -18,5 +20,9 @@ export const commandsRoutes = createCommandsRouter({
     version: process.version,
     platform: process.platform,
     pid: process.pid,
+  },
+  scheduler: {
+    schedule: (input) => scheduledMessagesService.schedule(input),
+    splitScheduleSpec,
   },
 });

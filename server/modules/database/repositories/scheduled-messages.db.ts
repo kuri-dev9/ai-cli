@@ -57,6 +57,20 @@ export const scheduledMessagesDb = {
       .all(userId, sessionId) as ScheduledMessageRow[];
   },
 
+  /**
+   * 한 세션 앞으로 걸린, 아직 나가지 않은 예약. 사용자를 가리지 않는다 — 룸
+   * 참가자가 자기 룸의 예약을 보고 고르거나 지우는 데 쓴다.
+   */
+  listPendingForSession(sessionId: string): ScheduledMessageRow[] {
+    return getConnection()
+      .prepare(
+        `SELECT ${COLUMNS} FROM scheduled_messages
+         WHERE session_id = ? AND status = 'pending'
+         ORDER BY scheduled_for ASC`
+      )
+      .all(sessionId) as ScheduledMessageRow[];
+  },
+
   listPendingForUser(userId: number): ScheduledMessageRow[] {
     return getConnection()
       .prepare(

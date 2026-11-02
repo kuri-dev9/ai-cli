@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, LogOut, Minimize2, Pencil, X } from 'lucide-react';
+import { Crown, ExternalLink, LogOut, Minimize2, Pencil, X } from 'lucide-react';
 
 import { ComposerModelMenu, TokenUsageSummary } from '@/modules/chat';
 import { api, readApiJson } from '@/shared/api';
@@ -27,6 +27,8 @@ type ParticipantSettingsPanelProps = {
   /** 이 참가자 세션의 맥락만 줄인다. 쌓인 토큰을 되돌리는 데 쓴다. */
   onCompact: () => void;
   onLeave: () => void;
+  /** 방장을 이 참가자에게 넘긴다. 명단 멤버면 바로 상주로 들어온다. */
+  onMakeLeader: () => void;
   onOpenSession: () => void;
   onClose: () => void;
 };
@@ -47,6 +49,7 @@ export default function ParticipantSettingsPanel({
   onChangeRosterSelection,
   onCompact,
   onLeave,
+  onMakeLeader,
   onOpenSession,
   onClose,
 }: ParticipantSettingsPanelProps) {
@@ -217,6 +220,20 @@ export default function ParticipantSettingsPanel({
           {t('rooms.openSession')}
         </Button>
         {!participant.isHost && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 justify-start gap-1 px-2 text-xs"
+            title={t('rooms.makeLeaderTitle')}
+            onClick={() => {
+              if (window.confirm(t('rooms.makeLeaderConfirm', { name: participant.displayName }))) onMakeLeader();
+            }}
+          >
+            <Crown className="h-3.5 w-3.5" />
+            {t('rooms.makeLeader')}
+          </Button>
+        )}
+        {!participant.isOrigin && (
           <Button
             variant="ghost"
             size="sm"

@@ -36,7 +36,12 @@ export function parseRoomParticipantStatus(value: unknown): RoomParticipantStatu
     : 'active';
 }
 
+/**
+ * 방장은 따로 정했으면 그 참가자, 아니면 원래 대화의 참가자다. 원래 대화는
+ * 룸이 사는 자리라 바뀌지 않지만, 방장 권한은 다른 참가자에게 넘길 수 있다.
+ */
 export function toRoomParticipant(row: RoomParticipantRow, room: RoomRow): RoomParticipant {
+  const isOrigin = row.session_id !== null && row.session_id === room.host_session_id;
   return {
     participantId: row.participant_id,
     roomId: row.room_id,
@@ -51,7 +56,8 @@ export function toRoomParticipant(row: RoomParticipantRow, room: RoomRow): RoomP
     persona: row.persona,
     status: parseRoomParticipantStatus(row.status),
     position: row.position,
-    isHost: row.session_id === room.host_session_id,
+    isHost: room.leader_participant_id ? row.participant_id === room.leader_participant_id : isOrigin,
+    isOrigin,
     permissionMode: parseRoomPermissionMode(row.permission_mode ?? room.permission_mode),
   };
 }

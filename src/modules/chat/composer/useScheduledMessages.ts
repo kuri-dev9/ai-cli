@@ -3,6 +3,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/shared/api';
 import type { ScheduledMessage } from '@/shared/types';
 
+/** 예약이 이 훅 밖에서(예: `/예약` 명령) 바뀌었을 때 보내는 신호. 화면의 예약 목록이 다시 읽는다. */
+const SCHEDULED_MESSAGES_CHANGED = 'ai-cli:scheduled-messages-changed';
+
+export function notifyScheduledMessagesChanged(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(SCHEDULED_MESSAGES_CHANGED));
+  }
+}
+
 /**
  * The messages queued to be sent to one session later.
  *
@@ -48,6 +57,14 @@ export function useScheduledMessages(sessionId: string | null) {
     activeSessionRef.current = sessionId;
     void refresh();
   }, [refresh, sessionId]);
+
+  useEffect(() => {
+    const handleChange = () => {
+      void refresh();
+    };
+    window.addEventListener(SCHEDULED_MESSAGES_CHANGED, handleChange);
+    return () => window.removeEventListener(SCHEDULED_MESSAGES_CHANGED, handleChange);
+  }, [refresh]);
 
   const schedule = useCallback(async (input: {
     content: string;

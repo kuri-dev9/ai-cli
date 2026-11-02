@@ -23,6 +23,8 @@ export type RoomRow = {
   auto_compact: number;
   /** 1 이면 라운드가 완전히 끝났을 때 텔레그램으로 알린다. */
   notify_telegram: number;
+  /** 방장 참가자. NULL 이면 원래 대화의 참가자가 방장이다. */
+  leader_participant_id?: string | null;
   /** 차례가 도는 중인 룸의 상태 JSON. 서버가 다시 뜨면 이것으로 이어 간다. 쉬는 룸은 NULL. */
   loop_state?: string | null;
   created_at: string;
@@ -370,6 +372,12 @@ export const roomsDb = {
     if (settings.maxAutoTurns !== undefined) {
       db.prepare('UPDATE rooms SET max_auto_turns = ? WHERE room_id = ?').run(settings.maxAutoTurns, roomId);
     }
+    this.touchRoom(roomId);
+  },
+
+  /** 방장을 바꾼다. `null` 이면 원래 대화의 참가자로 돌아간다. */
+  setLeader(roomId: string, participantId: string | null): void {
+    getConnection().prepare('UPDATE rooms SET leader_participant_id = ? WHERE room_id = ?').run(participantId, roomId);
     this.touchRoom(roomId);
   },
 

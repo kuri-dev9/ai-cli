@@ -1,4 +1,5 @@
-import { scheduledMessagesDb, sessionDraftsDb } from '@/modules/database/index.js';
+import { roomsDb, scheduledMessagesDb, sessionDraftsDb } from '@/modules/database/index.js';
+import { roomsService } from '@/modules/rooms/index.js';
 import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/index.js';
 import type { QueuedSessionMessageRecord, ScheduledMessageRow } from '@/modules/database/index.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
@@ -165,10 +166,25 @@ export async function dispatchQueuedMessages(
   return claimed;
 }
 
+/** 예약이 룸을 가리키면 룸 메시지로 올린 글 앞에 붙는 표시. 사용자가 쓴 글과 구별된다. */
+const ROOM_SCHEDULE_PREFIX = '⏰ 예약: ';
+
 async function sendClaimedMessage(
   row: ScheduledMessageRow,
   runtime: ProviderRuntimeGateway,
 ): Promise<void> {
+  // 룸이 된 대화로 가는 예약은 그 세션 하나에 보내지 않고 룸에 올린다. 그래야
+  // 이름을 부른 참가자가 받고, 룸이 일하는 중이면 그 차례 뒤로 줄을 선다.
+  const room = roomsDb.getRoomByHostSession(row.session_id);
+  if (room) {
+    try {
+      roomsService.postUserMessage(room.room_id, { content: `${ROOM_SCHEDULE_PREFIX}${row.content}` }, row.user_id);
+    } catch (error) {
+      scheduledMessagesDb.markFailed(row.id, error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
+
   try {
     const result = await runDetachedChatTurn(
       {
