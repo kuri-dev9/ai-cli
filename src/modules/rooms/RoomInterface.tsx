@@ -70,6 +70,11 @@ type RoomInterfaceProps = {
 const MAX_AUTO_TURN_CHOICES = [3, 5, 10, 20];
 /** 바닥에서 이만큼 넘게 올라가 있으면 "맨 아래로" 버튼을 띄운다. 조금 굴린 정도로는 띄우지 않는다. */
 const SCROLL_BUTTON_THRESHOLD_PX = 240;
+/**
+ * 사용자가 스크롤을 직접 만진 뒤 이 안의 `scroll` 만 따라가기를 놓을 수 있다.
+ * 그 밖의 위쪽 움직임은 내용이 다시 그려지며 브라우저가 옮긴 것이다.
+ */
+const USER_SCROLL_INTENT_MS = 1_500;
 
 /**
  * The workspace header leaves an empty spot with this id, left of the tabs. The
@@ -237,6 +242,8 @@ export function RoomInterface({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // The live turn's card, scrolled into view from the "working" bar over the composer.
   const liveCardRef = useRef<HTMLDivElement | null>(null);
+  // 타임라인 본문. 높이가 자라는 것을 지켜본다.
+  const contentRef = useRef<HTMLDivElement | null>(null);
   // Follow new content only while the user is already at the bottom.
   const followBottomRef = useRef(true);
   // 직전에 확인한 스크롤 위치와 높이. 이번 스크롤이 어느 쪽으로 움직였는지 재는 기준.
@@ -286,14 +293,45 @@ export function RoomInterface({
   );
   const isMentionListOpen = Boolean(mention && mentionCandidates.length > 0);
 
-  useEffect(() => {
+  /** 바닥으로 내린다. 우리가 내린 것이니 기준도 옮겨, 이 스크롤을 사용자가 움직인 것으로 읽지 않는다. */
+  const pinToBottom = useCallback(() => {
     const container = scrollRef.current;
-    if (container && followBottomRef.current) {
-      container.scrollTop = container.scrollHeight;
-      // 우리가 내린 것이다. 기준을 옮겨 두어야 이 스크롤을 사용자가 움직인 것으로 읽지 않는다.
-      scrollSampleRef.current = { top: container.scrollTop, height: container.scrollHeight };
-    }
-  }, [detail?.messages.length, liveTurns]);
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    scrollSampleRef.current = { top: container.scrollTop, height: container.scrollHeight };
+  }, []);
+
+  useEffect(() => {
+    if (followBottomRef.current) pinToBottom();
+  }, [detail?.messages.length, liveTurns, pinToBottom]);
+
+  /**
+   * 개수가 그대로인데 높이만 자라는 것도 따라간다 — 코드 강조·이미지·화면 밖이던
+   * 항목이 실제 높이로 다시 그려지는 것. 위의 효과만으로는 이런 성장을 못 잡아,
+   * 밤새 켜 둔 룸이 바닥에서 조금씩 떨어지다 결국 한참 위에 멈춰 있었다.
+   */
+  // 타임라인은 상세를 받은 뒤에야 그려진다. 그때 지켜보기 시작한다.
+  const hasDetail = Boolean(detail);
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      if (followBottomRef.current) pinToBottom();
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [pinToBottom, hasDetail]);
+
+  // 탭이 가려진 동안 브라우저는 그리기를 미룬다. 돌아왔을 때 밀린 만큼을 따라잡는다.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && followBottomRef.current) {
+        requestAnimationFrame(pinToBottom);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [pinToBottom]);
 
   /**
    * 따라가기를 놓을지 붙을지 채팅과 같은 규칙으로 정한다.
@@ -307,23 +345,42 @@ export function RoomInterface({
     const container = scrollRef.current;
     if (!container) return;
     const { scrollTop, scrollHeight, clientHeight } = container;
-    followBottomRef.current = !resolveScrolledUpAfterScroll({
+    const scrolledUp = resolveScrolledUpAfterScroll({
       wasScrolledUp: !followBottomRef.current,
       previous: scrollSampleRef.current,
       top: scrollTop,
       height: scrollHeight,
       clientHeight,
     });
+    // 따라가는 중에 놓는 것은 사용자가 방금 스크롤을 만졌을 때뿐이다. 위쪽 항목이
+    // 다시 그려지며 브라우저가 scrollTop 을 끌어올린 것을 "위로 올렸다" 로 읽으면,
+    // 아무도 손대지 않았는데 따라가기가 풀려 그대로 멈춘다.
+    const userTouchedScroll = Date.now() - lastUserScrollInputAtRef.current < USER_SCROLL_INTENT_MS;
+    if (followBottomRef.current && scrolledUp && !userTouchedScroll) {
+      pinToBottom();
+      return;
+    }
+    followBottomRef.current = !scrolledUp;
     scrollSampleRef.current = { top: scrollTop, height: scrollHeight };
     const far = scrollHeight - scrollTop - clientHeight > SCROLL_BUTTON_THRESHOLD_PX;
     setFarFromBottom((previous) => (previous === far ? previous : far));
   };
 
+  /**
+   * 맨 아래로 바로 뛴다. 부드럽게 굴리면 출발할 때의 높이를 목표로 잡는데, 화면
+   * 밖 항목은 어림 높이라 그려지면서 늘어나 일정 높이만 내려가고 멈췄다. 뛴 뒤
+   * 늘어나는 만큼은 ResizeObserver 가 이어서 따라간다.
+   */
   const scrollToBottom = () => {
-    const container = scrollRef.current;
-    if (!container) return;
     followBottomRef.current = true;
-    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    pinToBottom();
+    setFarFromBottom(false);
+  };
+
+  /** 사용자가 스크롤을 직접 만진 시각. 휠·터치·스크롤바·키보드. */
+  const lastUserScrollInputAtRef = useRef(0);
+  const markUserScrollInput = () => {
+    lastUserScrollInputAtRef.current = Date.now();
   };
 
   /**
@@ -1104,18 +1161,25 @@ export function RoomInterface({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        onWheel={(event) => releaseFollowOnUpwardInput(event.deltaY)}
+        onWheel={(event) => {
+          markUserScrollInput();
+          releaseFollowOnUpwardInput(event.deltaY);
+        }}
+        onPointerDown={markUserScrollInput}
+        onKeyDown={markUserScrollInput}
         onTouchStart={(event) => {
+          markUserScrollInput();
           touchStartYRef.current = event.touches[0]?.clientY ?? 0;
         }}
         onTouchMove={(event) => {
+          markUserScrollInput();
           // 손가락을 아래로 끌면 위로 스크롤된다. 채팅과 같이 8px 넘게 움직였을 때만 본다.
           const moved = touchStartYRef.current - (event.touches[0]?.clientY ?? 0);
           if (Math.abs(moved) > 8) releaseFollowOnUpwardInput(moved);
         }}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <div className="mx-auto max-w-4xl space-y-4 px-0 py-4 sm:px-4">
+        <div ref={contentRef} className="mx-auto max-w-4xl space-y-4 px-0 py-4 sm:px-4">
           <div className="space-y-2">
             <button
               type="button"
@@ -1174,7 +1238,9 @@ export function RoomInterface({
           {liveTurns.map((turn, turnIndex) => {
             const participant = participantBySession(turn.sessionId);
             return (
-              <div key={turn.sessionId} ref={turnIndex === liveTurns.length - 1 ? liveCardRef : undefined} aria-live="polite">
+              // data-live-turn: 진행 중인 차례는 화면 밖에서도 그린다(index.css). 건너뛰면
+              // 마지막에 잰 높이로 굳어 바닥이 어긋난다.
+              <div key={turn.sessionId} ref={turnIndex === liveTurns.length - 1 ? liveCardRef : undefined} data-live-turn aria-live="polite">
                 <RoomTurnCard
                   participant={participant}
                   live={isRunning}

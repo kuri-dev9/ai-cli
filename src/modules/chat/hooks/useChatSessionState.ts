@@ -562,6 +562,13 @@ export function useChatSessionState({
   }, []);
 
   const scrollToBottomAndReset = useCallback(() => {
+    // 버튼은 "다시 따라가라" 는 뜻이다. 플래그를 먼저 풀어야 ResizeObserver 가
+    // 이어서 끌어내린다. 화면 밖 메시지는 `content-visibility: auto` 로 어림
+    // 높이만 잡혀 있다가, 바닥으로 뛰어 그려지는 순간 실제 높이로 늘어난다 —
+    // 플래그가 그대로면 그만큼 바닥에서 떨어진 채 멈춰, 버튼이 "일정 높이만"
+    // 내리는 것처럼 보였다.
+    isUserScrolledUpRef.current = false;
+    setIsUserScrolledUp(false);
     scrollToBottom();
     if (allMessagesLoaded) {
       setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
