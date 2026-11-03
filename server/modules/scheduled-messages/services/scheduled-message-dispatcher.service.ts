@@ -7,15 +7,20 @@ import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.
 import type { ChatRunOrigin, ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 
 /**
- * How often due messages are looked for.
+ * 아무 예약도 가깝지 않을 때 확인하는 간격. 대기열의 안전망이기도 하다.
  *
- * A minute is the granularity the composer offers, and a claim is indexed on
- * `(status, scheduled_for)`, so the poll is one cheap query. Anything finer
- * would buy precision nobody asked for.
+ * 예전에는 이 간격으로만 확인해서, 07:16 예약이 07:16:29 에야 나가는 일이
+ * 흔했다 — 화면에는 "다음 07:16" 이 그대로 떠 있으니 한 분 늦게 도는 것처럼
+ * 보였다. 지금은 다음 예약 시각과 다음 분의 시작 중 이른 쪽에 맞춰 깨어난다.
  */
 const POLL_INTERVAL_MS = 30_000;
+/** 타이머가 예약 시각보다 아주 조금 먼저 깨는 일을 막는 여유. */
+const WAKE_SLACK_MS = 50;
+/** 앞선 확인이 끝나지 않았을 때 다시 볼 간격. */
+const IN_FLIGHT_RETRY_MS = 1_000;
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let dispatcherRunning = false;
 let dispatchInFlight = false;
 let unsubscribeRunSettled: (() => void) | null = null;
 
@@ -251,6 +256,25 @@ export async function dispatchDueScheduledMessages(
 }
 
 /**
+ * 다음에 깨어날 때까지의 시간. 가장 이른 예약, 다음 분의 시작, 안전망 간격 중
+ * 가장 짧은 것이다.
+ *
+ * 분의 시작을 넣는 까닭: 확인과 확인 사이에 새로 걸린 "07:16" 예약은 아직 이
+ * 계산에 없다. 시각으로 걸리는 예약은 언제나 분의 시작에 놓이므로 그때 한 번
+ * 깨면 놓치지 않는다. "+10분" 같은 예약은 적어도 한 분 뒤라, 그 전의 확인이
+ * 시각을 보고 정확히 맞춘다.
+ */
+export function nextWakeDelayMs(now: Date, nextDueAt: Date | null): number {
+  const nowMs = now.getTime();
+  const untilNextMinute = 60_000 - (nowMs % 60_000);
+  let delay = Math.min(POLL_INTERVAL_MS, untilNextMinute);
+  if (nextDueAt) {
+    delay = Math.min(delay, nextDueAt.getTime() - nowMs);
+  }
+  return Math.max(0, delay) + WAKE_SLACK_MS;
+}
+
+/**
  * Starts the poll that sends scheduled messages.
  *
  * The schedule lives in the database, so a message stays scheduled across a
@@ -258,18 +282,45 @@ export async function dispatchDueScheduledMessages(
  * poll after it comes back, rather than being skipped.
  */
 export function initializeScheduledMessageDispatcher(runtime: ProviderRuntimeGateway): void {
-  if (pollTimer) {
+  if (dispatcherRunning) {
     return;
   }
+  dispatcherRunning = true;
+
+  const armNextPoll = () => {
+    if (!dispatcherRunning) {
+      return;
+    }
+    let nextDueAt: Date | null = null;
+    try {
+      nextDueAt = scheduledMessagesDb.nextPendingAt();
+    } catch (error) {
+      console.error('[ScheduledMessages] 다음 예약 시각을 읽지 못했습니다', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    // 이미 지난 예약이 남아 있으면(앞선 확인이 아직 보내는 중이라 못 가져갔다)
+    // 0 초로 계속 깨게 된다. 그럴 때는 1초에 한 번만 본다.
+    const delay = nextWakeDelayMs(new Date(), nextDueAt);
+    pollTimer = setTimeout(poll, delay <= WAKE_SLACK_MS ? IN_FLIGHT_RETRY_MS : delay);
+    // Never keep the process alive just to poll for scheduled messages.
+    pollTimer.unref?.();
+  };
 
   const poll = () => {
+    pollTimer = null;
     // A pass that overruns the interval must not be started again underneath
-    // itself; the claim is transactional but the runs are not.
+    // itself; the claim is transactional but the runs are not. 건너뛰어도 다음
+    // 확인은 다시 건다 — 타이머가 한 번짜리라 걸지 않으면 그대로 멈춘다.
     if (dispatchInFlight) {
+      armNextPoll();
       return;
     }
     dispatchInFlight = true;
-    void dispatchDueScheduledMessages(runtime)
+    const pass = dispatchDueScheduledMessages(runtime);
+    // 때가 된 것을 가져간 뒤에야 다음 시각을 본다. 그 전에 보면 방금 보낸 예약에 다시 깬다.
+    armNextPoll();
+    void pass
       .then(() => dispatchQueuedMessages(runtime))
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -279,10 +330,6 @@ export function initializeScheduledMessageDispatcher(runtime: ProviderRuntimeGat
         dispatchInFlight = false;
       });
   };
-
-  pollTimer = setInterval(poll, POLL_INTERVAL_MS);
-  // Never keep the process alive just to poll for scheduled messages.
-  pollTimer.unref?.();
 
   // The poll is the safety net, not the mechanism. A queued turn goes out the
   // instant the run in front of it ends — waiting up to 30s for the next poll
@@ -308,8 +355,9 @@ export function initializeScheduledMessageDispatcher(runtime: ProviderRuntimeGat
 }
 
 export function closeScheduledMessageDispatcher(): void {
+  dispatcherRunning = false;
   if (pollTimer) {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
   }
   if (unsubscribeRunSettled) {

@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { closeConnection, initializeDatabase, scheduledMessagesDb, sessionDraftsDb, sessionsDb, userDb } from '@/modules/database/index.js';
-import { dispatchDueScheduledMessages, dispatchQueuedMessages } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
+import { dispatchDueScheduledMessages, dispatchQueuedMessages, nextWakeDelayMs } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
 import { scheduleFromSettledRun } from '@/modules/scheduled-messages/services/reply-schedules.service.js';
 import { scheduledMessagesService } from '@/modules/scheduled-messages/services/scheduled-messages.service.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
@@ -466,5 +466,30 @@ test('일반 대화에서 AI 가 답에 남긴 예약 줄은 그 대화 앞으�
     finishRunWithReply(userId, `지웠습니다. [예약취소 #${pending[0].id.replace(/-/g, '').slice(0, 6)}]`);
     scheduleFromSettledRun(SESSION_ID);
     assert.equal(scheduledMessagesDb.listPendingForSession(SESSION_ID).length, 0);
+  });
+});
+
+test('디스패처는 30초 간격이 아니라 예약 시각과 분의 시작에 맞춰 깨어난다', async () => {
+  const now = new Date(2026, 10, 4, 7, 15, 31, 0);
+  // 가까운 예약이 없으면 다음 분의 시작(29초 뒤)에 깬다.
+  assert.equal(nextWakeDelayMs(now, null), 29_050);
+  // 07:16:00 예약은 그 순간에 깬다.
+  assert.equal(nextWakeDelayMs(now, new Date(2026, 10, 4, 7, 16, 0, 0)), 29_050);
+  // 분 중간의 예약(+N분)은 그 시각에 깬다.
+  assert.equal(nextWakeDelayMs(now, new Date(2026, 10, 4, 7, 15, 40, 0)), 9_050);
+  // 먼 예약만 있으면 안전망 간격(30초)을 넘지 않는다.
+  assert.equal(nextWakeDelayMs(new Date(2026, 10, 4, 7, 15, 0, 0), new Date(2026, 10, 4, 9, 0)), 30_050);
+  // 이미 지난 예약은 곧바로.
+  assert.equal(nextWakeDelayMs(now, new Date(2026, 10, 4, 7, 10)), 50);
+});
+
+test('nextPendingAt 은 가장 이른 대기 예약 시각을 돌려준다', async () => {
+  await withIsolatedDatabase((userId) => {
+    assert.equal(scheduledMessagesDb.nextPendingAt(), null);
+    const later = new Date(Date.now() + 120_000);
+    const sooner = new Date(Date.now() + 60_000);
+    scheduledMessagesDb.create({ userId, sessionId: SESSION_ID, content: 'b', options: {}, scheduledFor: later });
+    scheduledMessagesDb.create({ userId, sessionId: SESSION_ID, content: 'a', options: {}, scheduledFor: sooner });
+    assert.equal(scheduledMessagesDb.nextPendingAt()?.getTime(), sooner.getTime());
   });
 });

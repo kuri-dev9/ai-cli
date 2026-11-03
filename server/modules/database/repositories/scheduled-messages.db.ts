@@ -81,6 +81,21 @@ export const scheduledMessagesDb = {
       .all(userId) as ScheduledMessageRow[];
   },
 
+  /** 아직 나가지 않은 예약 중 가장 이른 시각. 디스패처가 그 순간에 깨어나려고 쓴다. */
+  nextPendingAt(): Date | null {
+    const row = getConnection()
+      .prepare(
+        `SELECT scheduled_for FROM scheduled_messages
+         WHERE status = 'pending'
+         ORDER BY scheduled_for ASC
+         LIMIT 1`
+      )
+      .get() as { scheduled_for: string } | undefined;
+    if (!row) return null;
+    const at = new Date(row.scheduled_for);
+    return Number.isNaN(at.getTime()) ? null : at;
+  },
+
   /**
    * Claims every message whose time has passed, marking them in the same
    * statement that selects them.
