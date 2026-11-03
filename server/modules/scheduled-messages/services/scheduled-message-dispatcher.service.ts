@@ -1,5 +1,6 @@
 import { roomsDb, scheduledMessagesDb, sessionDraftsDb } from '@/modules/database/index.js';
 import { roomsService } from '@/modules/rooms/index.js';
+import { scheduleFromSettledRun } from '@/modules/scheduled-messages/services/reply-schedules.service.js';
 import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/index.js';
 import type { QueuedSessionMessageRecord, ScheduledMessageRow } from '@/modules/database/index.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
@@ -287,6 +288,15 @@ export function initializeScheduledMessageDispatcher(runtime: ProviderRuntimeGat
   // instant the run in front of it ends — waiting up to 30s for the next poll
   // is long enough that the user assumes their message was swallowed.
   unsubscribeRunSettled = chatRunRegistry.onRunSettled((sessionId) => {
+    // 방금 끝난 답에 AI 가 남긴 예약 줄이 있으면 건다. 실패해도 대기열은 그대로 돈다.
+    try {
+      scheduleFromSettledRun(sessionId);
+    } catch (error) {
+      console.error('[ScheduledMessages] 답의 예약을 걸지 못했습니다', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     void dispatchQueuedMessages(runtime, sessionId).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[QueuedMessages] Post-run dispatch failed', { sessionId, error: message });

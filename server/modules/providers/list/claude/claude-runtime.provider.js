@@ -39,6 +39,21 @@ import {
 } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage, getClaudeConfigFilePath } from '@/shared/utils.js';
 
+/** 앱이 대신 맡는 내장 도구. 예약은 앱의 예약 저장소로 건다. */
+const APP_REPLACED_TOOLS = ['CronCreate', 'CronDelete', 'CronList', 'ScheduleWakeup'];
+
+/**
+ * 앱 예약 쓰는 법. 실행이 끝나면 앱(scheduled-messages)이 답에서 이 줄을 읽어
+ * 이 대화 앞으로 예약을 건다. 시각이 되면 할 일이 이 대화의 다음 메시지로 온다.
+ */
+const APP_SCHEDULE_PROMPT = [
+  '# Scheduling (this app)',
+  'To do something later (at a time, or after a delay), do not use sleep/polling loops or cron tools.',
+  'Instead put a line in your reply: "[예약 14:50] <what to do>". The app sends <what to do> back to this conversation at that time.',
+  'Time forms: "14:50", "2026-11-03 14:50", "+10분", "+2시간" (server local time). To cancel one, write "[예약취소 #<id>]" with the id shown in the app\'s schedule list.',
+  'Only write the line when you mean to schedule; say in plain words what you scheduled.',
+].join('\n');
+
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
 // Sessions cancelled via abort-session. The abort handler already sent the
@@ -287,7 +302,12 @@ function mapCliOptionsToSDK(options = {}) {
   // but being explicit ensures forward compatibility and clarity.
   sdkOptions.tools = { type: 'preset', preset: 'claude_code' };
 
-  sdkOptions.disallowedTools = settings.disallowedTools || [];
+  // 내장 예약 도구는 그 CLI 프로세스 안에만 예약을 두어 앱이 모르고, 프로세스가
+  // 끝나면 사라진다. 앱의 예약(아래 시스템 프롬프트의 `[예약 …]` 줄)을 쓰게 막는다.
+  sdkOptions.disallowedTools = [
+    ...(settings.disallowedTools || []),
+    ...APP_REPLACED_TOOLS.filter((tool) => !(settings.disallowedTools || []).includes(tool)),
+  ];
 
   sdkOptions.model = options.model || CLAUDE_PREDEFINED_MODELS.DEFAULT;
 
@@ -299,7 +319,8 @@ function mapCliOptionsToSDK(options = {}) {
 
   sdkOptions.systemPrompt = {
     type: 'preset',
-    preset: 'claude_code'
+    preset: 'claude_code',
+    append: APP_SCHEDULE_PROMPT,
   };
 
   // Without this the SDK only yields whole `assistant` messages, so a reply

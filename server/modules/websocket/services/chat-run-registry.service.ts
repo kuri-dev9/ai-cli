@@ -41,6 +41,8 @@ type ChatRun = {
   provider: LLMProvider;
   /** 이 실행을 시작시킨 곳. 기본은 `web`. */
   origin: ChatRunOrigin;
+  /** 이 실행을 시작시킨 사용자. 답에 남긴 예약을 그 사용자 몫으로 걸 때 쓴다. */
+  userId: string | number | null;
   providerSessionId: string | null;
   status: ChatRunStatus;
   lastSeq: number;
@@ -261,6 +263,7 @@ export const chatRunRegistry = {
       appSessionId: input.appSessionId,
       provider: input.provider,
       origin: input.origin ?? 'web',
+      userId: input.userId,
       providerSessionId: input.providerSessionId,
       status: 'running',
       lastSeq: 0,

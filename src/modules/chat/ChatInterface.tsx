@@ -434,8 +434,16 @@ function ChatInterface({
     beginCutFromAnchor(anchorId);
   }, [beginCutFromAnchor, closeCommandModal]);
 
-  const { scheduledMessages, schedule: scheduleMessage, cancel: cancelScheduledMessage } =
+  const { scheduledMessages, schedule: scheduleMessage, cancel: cancelScheduledMessage, refresh: refreshScheduledMessages } =
     useScheduledMessages(currentSessionId || selectedSession?.id || null);
+  // AI 가 답에 남긴 예약 줄은 실행이 끝날 때 서버가 건다. 답이 끝나면 목록을 다시 읽는다.
+  const wasProcessingRef = useRef(isProcessing);
+  useEffect(() => {
+    if (wasProcessingRef.current && !isProcessing) {
+      void refreshScheduledMessages();
+    }
+    wasProcessingRef.current = isProcessing;
+  }, [isProcessing, refreshScheduledMessages]);
 
   /**
    * Hands the composer's current text to the server to send later, and clears

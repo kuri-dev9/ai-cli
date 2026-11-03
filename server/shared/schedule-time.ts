@@ -62,3 +62,56 @@ export function parseScheduleTime(spec: string, now: Date): Date | null {
   const split = splitScheduleSpec(spec, now);
   return split && !split.rest ? split.at : null;
 }
+
+/** 한 답에서 받는 예약 수. 실수로 줄줄이 적은 예약이 대화를 뒤덮지 않게. */
+const MAX_SCHEDULES_PER_REPLY = 5;
+/** 예약할 수 있는 가장 먼 시각. 그보다 먼 것은 거의 틀림없이 잘못 읽은 시각이다. */
+const MAX_SCHEDULE_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 예약 줄. 목록 기호(`-`, `1.`), 인용(`>`), 굵게(`**`), 코드(`` ` ``)로 감싸 써도
+ * 읽는다 — 꾸며 쓴 줄을 놓쳐 예약이 말없이 사라지는 일이 실제로 있었다.
+ */
+const SCHEDULE_LINE = /^[\s>*_`-]*(?:\d+[.)]\s*)?[*_`]*\[(?:예약|schedule)\s+([^\]]+?)\s*\][*_`]*\s*(.+?)[*_`]*\s*$/iu;
+
+/** `[예약취소 #a1b2c3]`. 번호는 예약 목록에 붙은 짧은 번호다. 여러 개를 한 줄에 적어도 된다. */
+const SCHEDULE_CANCEL_LINE = /\[(?:예약\s*취소|cancel\s*schedule|unschedule)\s+((?:#?[0-9a-f]{4,}[\s,]*)+)\]/giu;
+
+/** 예약 번호. 화면의 예약 목록과 프롬프트, 취소 줄이 같은 길이를 쓴다. */
+export function shortScheduleId(id: string): string {
+  return id.replace(/-/g, '').slice(0, 6);
+}
+
+/**
+ * AI 답에서 예약 줄(`[예약 14:50] 할 일`)을 읽는다. 지난 시각이나 너무 먼 시각,
+ * 못 읽는 시각은 버리고, 같은 시각·같은 할 일은 한 번만 센다.
+ */
+export function parseScheduleLines(text: string, now: Date): Array<{ at: Date; task: string }> {
+  const schedules: Array<{ at: Date; task: string }> = [];
+  for (const line of text.split('\n')) {
+    const match = SCHEDULE_LINE.exec(line);
+    if (!match) continue;
+    const at = parseScheduleTime(match[1], now);
+    // 방금 지난 시각은 읽는 쪽이 지금으로 바꿔 준다. 그보다 이른 것은 버린다.
+    if (!at || at.getTime() < now.getTime() || at.getTime() - now.getTime() > MAX_SCHEDULE_AHEAD_MS) continue;
+    const task = match[2].trim();
+    if (!task) continue;
+    // 작업 중에 남긴 말과 마지막 말에 같은 줄을 두 번 쓰는 일이 흔하다.
+    if (schedules.some((schedule) => schedule.task === task && schedule.at.getTime() === at.getTime())) continue;
+    schedules.push({ at, task });
+    if (schedules.length >= MAX_SCHEDULES_PER_REPLY) break;
+  }
+  return schedules;
+}
+
+/** 답에서 취소할 예약 번호들을 읽는다. 앞의 `#` 은 떼고 소문자로 맞춘다. */
+export function parseScheduleCancels(text: string): string[] {
+  const ids = new Set<string>();
+  for (const match of text.matchAll(SCHEDULE_CANCEL_LINE)) {
+    for (const token of match[1].split(/[\s,]+/)) {
+      const id = token.replace(/^#/, '').toLowerCase();
+      if (id.length >= 4) ids.add(id);
+    }
+  }
+  return [...ids];
+}

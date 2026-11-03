@@ -6,8 +6,10 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, scheduledMessagesDb, sessionDraftsDb, sessionsDb, userDb } from '@/modules/database/index.js';
 import { dispatchDueScheduledMessages, dispatchQueuedMessages } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
+import { scheduleFromSettledRun } from '@/modules/scheduled-messages/services/reply-schedules.service.js';
 import { scheduledMessagesService } from '@/modules/scheduled-messages/services/scheduled-messages.service.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
+import { createNormalizedMessage } from '@/shared/utils.js';
 
 const SESSION_ID = 'scheduled-session';
 
@@ -434,5 +436,35 @@ test('scheduling validates its input', async () => {
       () => scheduledMessagesService.schedule({ ...base, sessionId: 'nope', content: 'hi' }),
       (error: Error & { code?: string }) => error.code === 'SESSION_NOT_FOUND',
     );
+  });
+});
+
+/** 일반 대화 하나를 돌린 것처럼 실행 기록부에 답을 남기고 끝낸다. */
+function finishRunWithReply(userId: number, reply: string): void {
+  const run = chatRunRegistry.startRun({ appSessionId: SESSION_ID, provider: 'claude', providerSessionId: null, connection: null, userId });
+  assert.ok(run);
+  run.writer.send(createNormalizedMessage({ kind: 'text', role: 'assistant', content: reply, sessionId: SESSION_ID, provider: 'claude' }));
+  chatRunRegistry.completeRun(SESSION_ID, { exitCode: 0 });
+}
+
+test('일반 대화에서 AI 가 답에 남긴 예약 줄은 그 대화 앞으로 앱 예약이 되고, 다시 적어도 한 번만 걸린다', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    const before = Date.now();
+    finishRunWithReply(userId, '10분 뒤에 한 번 찍겠습니다.\n[예약 +10분] 테스트 한번 찍기');
+    scheduleFromSettledRun(SESSION_ID);
+    finishRunWithReply(userId, '같은 예약을 다시 적었습니다.\n[예약 +10분] 테스트 한번 찍기');
+    scheduleFromSettledRun(SESSION_ID);
+
+    const pending = scheduledMessagesDb.listPendingForSession(SESSION_ID);
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].content, '테스트 한번 찍기');
+    assert.equal(pending[0].user_id, userId);
+    const dueIn = new Date(pending[0].scheduled_for).getTime() - before;
+    assert.ok(dueIn >= 9 * 60_000 && dueIn <= 11 * 60_000);
+
+    // 번호로 지운다.
+    finishRunWithReply(userId, `지웠습니다. [예약취소 #${pending[0].id.replace(/-/g, '').slice(0, 6)}]`);
+    scheduleFromSettledRun(SESSION_ID);
+    assert.equal(scheduledMessagesDb.listPendingForSession(SESSION_ID).length, 0);
   });
 });
