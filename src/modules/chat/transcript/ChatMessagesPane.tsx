@@ -49,6 +49,10 @@ type ChatMessagesPaneProps = {
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
   setInput: Dispatch<SetStateAction<string>>;
+  /** 새 Claude 대화에서 고를 수 있는 등록된 계정. 없으면 계정 선택을 띄우지 않는다. */
+  claudeAccounts?: Array<{ id: string; label: string }>;
+  claudeAccountId?: string;
+  onClaudeAccountChange?: (accountId: string) => void;
   isLoadingMoreMessages: boolean;
   hasMoreMessages: boolean;
   totalMessages: number;
@@ -103,6 +107,9 @@ function ChatMessagesPane({
   isTaskMasterInstalled,
   onShowAllTasks,
   setInput,
+  claudeAccounts,
+  claudeAccountId,
+  onClaudeAccountChange,
   isLoadingMoreMessages,
   hasMoreMessages,
   totalMessages,
@@ -221,6 +228,9 @@ function ChatMessagesPane({
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}
           setInput={setInput}
+          claudeAccounts={claudeAccounts}
+          claudeAccountId={claudeAccountId}
+          onClaudeAccountChange={onClaudeAccountChange}
         />
       ) : (
         <>

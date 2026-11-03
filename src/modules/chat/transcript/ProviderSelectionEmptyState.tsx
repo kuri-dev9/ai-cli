@@ -64,6 +64,11 @@ type ProviderSelectionEmptyStateProps = {
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
   setInput: React.Dispatch<React.SetStateAction<string>>;
+  /** 등록된 Claude 계정. 있으면 Claude 상자 오른쪽에 계정 선택을 띄운다. */
+  claudeAccounts?: Array<{ id: string; label: string }>;
+  /** 고른 계정 id. 빈 문자열은 기본 계정. */
+  claudeAccountId?: string;
+  onClaudeAccountChange?: (accountId: string) => void;
 };
 
 function getModelConfig(
@@ -101,6 +106,9 @@ export default function ProviderSelectionEmptyState({
   isTaskMasterInstalled,
   onShowAllTasks,
   setInput,
+  claudeAccounts,
+  claudeAccountId = "",
+  onClaudeAccountChange,
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation("chat");
   const enabledProviders = useEnabledProviders();
@@ -108,6 +116,8 @@ export default function ProviderSelectionEmptyState({
   const [modelLibraryOpen, setModelLibraryOpen] = useState(false);
 
   const [modelSearch, setModelSearch] = useState("");
+  const showClaudeAccountPicker =
+    provider === "claude" && Boolean(onClaudeAccountChange) && (claudeAccounts?.length ?? 0) > 0;
 
   /**
    * Opens and closes the picker, clearing the search on the way out.
@@ -187,10 +197,11 @@ export default function ProviderSelectionEmptyState({
             </p>
           </div>
 
+          <div className="flex items-stretch justify-center gap-2">
           <Dialog open={dialogOpen} onOpenChange={setPickerOpen}>
             <DialogTrigger asChild>
               <Card
-                className="group mx-auto max-w-xs cursor-pointer border-border/60 transition-all duration-150 hover:border-border hover:shadow-md active:scale-[0.99]"
+                className="group w-full max-w-xs cursor-pointer border-border/60 transition-all duration-150 hover:border-border hover:shadow-md active:scale-[0.99]"
                 role="button"
                 tabIndex={0}
               >
@@ -275,6 +286,28 @@ export default function ProviderSelectionEmptyState({
               </Command>
             </DialogContent>
           </Dialog>
+
+          {/* 새 대화를 어느 Claude 계정으로 돌릴지. 세션이 생긴 뒤에는 바꿀 수 없다. */}
+          {showClaudeAccountPicker && (
+            <label className="flex shrink-0 flex-col justify-center gap-0.5 rounded-lg border border-border/60 bg-card px-2.5 py-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                {t("composer.claudeAccount", { defaultValue: "Claude account" })}
+              </span>
+              <select
+                value={claudeAccountId}
+                onChange={(event) => onClaudeAccountChange?.(event.target.value)}
+                className="max-w-[10rem] cursor-pointer bg-transparent text-xs font-medium text-foreground outline-none"
+              >
+                <option value="">
+                  {t("composer.claudeAccountDefault", { defaultValue: "Default account" })}
+                </option>
+                {claudeAccounts?.map((account) => (
+                  <option key={account.id} value={account.id}>{account.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          </div>
 
           <Dialog
             open={modelLibraryOpen}

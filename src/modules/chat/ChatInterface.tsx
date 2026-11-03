@@ -553,6 +553,9 @@ function ChatInterface({
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}
           setInput={setInput}
+          claudeAccounts={isNewClaudeChat ? claudeAccounts : undefined}
+          claudeAccountId={claudeAccountId}
+          onClaudeAccountChange={setClaudeAccountId}
           isLoadingMoreMessages={isLoadingMoreMessages}
           hasMoreMessages={hasMoreMessages}
           totalMessages={totalMessages}
@@ -592,24 +595,6 @@ function ChatInterface({
               >
                 <ArrowDownIcon className="h-4 w-4" aria-hidden />
               </button>
-            </div>
-          )}
-
-          {isNewClaudeChat && claudeAccounts.length > 0 && (
-            <div className="mb-1.5 flex items-center justify-end gap-2 px-1 text-xs text-muted-foreground">
-              <span>{t('composer.claudeAccount', { defaultValue: 'Claude account' })}</span>
-              <select
-                value={claudeAccountId}
-                onChange={(event) => setClaudeAccountId(event.target.value)}
-                className="rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-xs text-foreground"
-              >
-                <option value="">
-                  {t('composer.claudeAccountDefault', { defaultValue: 'Default account' })}
-                </option>
-                {claudeAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>{account.label}</option>
-                ))}
-              </select>
             </div>
           )}
 
