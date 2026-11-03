@@ -55,6 +55,18 @@ const syncLiveBuffers = (lives: RoomLiveBuffer[], activeSessionIds: string[]): R
   return unchanged ? lives : next;
 };
 
+/**
+ * Whether `incoming` was built before the state already shown. A POST reply
+ * carries the state from the moment it was handled, and can land after a
+ * `room_state` frame sent later — applying it would drop whoever started in
+ * between (a side turn's participant vanished this way while it kept working).
+ */
+const isStaleState = (current: RoomRuntimeState | null | undefined, incoming: RoomRuntimeState): boolean => (
+  typeof current?.revision === 'number'
+  && typeof incoming.revision === 'number'
+  && incoming.revision < current.revision
+);
+
 /** Active sessions from a state, falling back to the single field older servers send. */
 const activeSessionsOf = (state: RoomRuntimeState): string[] => (
   state.activeSessionIds ?? (state.activeSessionId ? [state.activeSessionId] : [])
@@ -212,11 +224,15 @@ const keepActivePermissions = (requests: PendingPermissionRequest[], lives: Room
 export function roomViewReducer(state: RoomViewState, action: RoomViewAction): RoomViewState {
   switch (action.type) {
     case 'detail_loaded': {
+      // The rest of the snapshot is fresh even when its runtime state is not.
+      const detail = isStaleState(state.detail?.state, action.detail.state)
+        ? { ...action.detail, state: state.detail!.state }
+        : action.detail;
       // Streams of turns still running survive a refetch; the user is watching them.
-      const lives = syncLiveBuffers(state.lives, activeSessionsOf(action.detail.state));
+      const lives = syncLiveBuffers(state.lives, activeSessionsOf(detail.state));
       return {
         ...state,
-        detail: action.detail,
+        detail,
         lives,
         pendingPermissions: keepActivePermissions(state.pendingPermissions, lives),
       };
@@ -241,7 +257,7 @@ export function roomViewReducer(state: RoomViewState, action: RoomViewAction): R
     }
 
     case 'room_state': {
-      if (!state.detail) {
+      if (!state.detail || isStaleState(state.detail.state, action.state)) {
         return state;
       }
       const lives = syncLiveBuffers(state.lives, activeSessionsOf(action.state));

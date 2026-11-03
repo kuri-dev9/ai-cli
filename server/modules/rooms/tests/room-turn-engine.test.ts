@@ -667,6 +667,51 @@ test('compacting sends the command to each session and keeps the timeline', asyn
   });
 });
 
+test('compacting mid-round shrinks only the idle participants and delays their next turn until done', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let releaseHost: () => void = () => {};
+    const hostGate = new Promise<void>((resolve) => { releaseHost = resolve; });
+    let releaseCompact: () => void = () => {};
+    const compactGate = new Promise<void>((resolve) => { releaseCompact = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: ['먼저 봐 두세요 @Claude2', async () => { await hostGate; return '구현 끝 [DONE]'; }],
+      [REVIEWER]: ['봤습니다 @Claude', async () => { await compactGate; return '요약했습니다'; }, '테스트도 보겠습니다 [DONE]'],
+    }, calls));
+
+    // 리뷰어 세션을 한 번 만들어 둔 뒤 호스트만 일하게 한다.
+    roomsService.postUserMessage(ROOM_ID, { content: '구현해줘' }, 1);
+    await waitFor(() => calls.length === 3, 'host working again');
+
+    const state = await roomsService.compact(ROOM_ID);
+    // 일하는 호스트는 그대로, 쉬던 리뷰어만 줄인다. 라운드도 그대로 돈다.
+    assert.equal(state.status, 'running');
+    assert.deepEqual(state.activeParticipantIds, ['p-host']);
+    assert.deepEqual(state.compactingParticipantIds, ['p-rev']);
+    await waitFor(() => calls.length === 4, 'reviewer compacting');
+    assert.deepEqual([calls[3].sessionId, calls[3].command], [REVIEWER, '/compact']);
+
+    // 줄이는 중인 리뷰어를 부르면 압축이 끝난 뒤에 받는다.
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 테스트도 봐줘' }, 1);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(calls.length, 4);
+    releaseCompact();
+    await waitFor(() => calls.length === 5, 'reviewer turn after compaction');
+    assert.equal(calls[4].sessionId, REVIEWER);
+    assert.match(calls[4].command, /테스트도 봐줘/);
+
+    releaseHost();
+    await waitFor(() => isIdle(), 'round done');
+    assert.deepEqual(roomTurnEngine.getState(ROOM_ID, 6).compactingParticipantIds, []);
+  });
+});
+
+test('room state revisions only grow, so a late reply cannot roll back a newer frame', () => {
+  const first = roomTurnEngine.getState(ROOM_ID, 6).revision;
+  const second = roomTurnEngine.getState(ROOM_ID, 6).revision;
+  assert.ok(second > first);
+});
+
 test('compacting one participant leaves the others alone', async () => {
   await withRoom(6, async () => {
     const calls: Call[] = [];

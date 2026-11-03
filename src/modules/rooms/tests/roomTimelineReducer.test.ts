@@ -96,6 +96,31 @@ describe('roomViewReducer', () => {
     expect(state.lives).toEqual([{ sessionId: 'reviewer-session', frames: [], lastSeq: 0 }]);
   });
 
+  it('ignores a state built before the one already shown', () => {
+    // 옆 차례가 시작되기 전에 만든 POST 응답이, 그 참가자를 올린 room_state 뒤에 도착했다.
+    const both: RoomRuntimeState = {
+      ...runningState('host-session', 'p-host'),
+      activeParticipantIds: ['p-host', 'p-reviewer'],
+      activeSessionIds: ['host-session', 'reviewer-session'],
+      revision: 20,
+    };
+    let state = roomViewReducer(loaded(), { type: 'room_state', state: both });
+    state = roomViewReducer(state, { type: 'room_state', state: { ...runningState('host-session', 'p-host'), revision: 10 } });
+    expect(state.detail?.state.activeParticipantIds).toEqual(['p-host', 'p-reviewer']);
+    expect(state.lives.map((buffer) => buffer.sessionId)).toEqual(['host-session', 'reviewer-session']);
+
+    // 늦게 온 스냅숏은 상태만 버리고 나머지는 받는다.
+    state = roomViewReducer(state, {
+      type: 'detail_loaded',
+      detail: { ...detail, messages: [message({ id: 5 })], state: { ...idleState, revision: 15 } },
+    });
+    expect(state.detail?.messages.map((entry) => entry.id)).toEqual([5]);
+    expect(state.detail?.state.revision).toBe(20);
+
+    state = roomViewReducer(state, { type: 'room_state', state: { ...idleState, revision: 30 } });
+    expect(state.detail?.state.status).toBe('idle');
+  });
+
   it('drops the synthetic local_ prompt frame and frames from other sessions', () => {
     let state = running();
     state = roomViewReducer(state, {

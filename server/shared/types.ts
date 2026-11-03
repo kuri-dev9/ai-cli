@@ -1621,6 +1621,13 @@ export type RoomRuntimeState = {
   turnCount: number;
   maxAutoTurns: number;
   pendingUserMessage: boolean;
+  /** 차례와 따로 대화를 줄이고 있는 참가자. 일하는 참가자를 두고 쉬는 참가자만 먼저 줄일 때 생긴다. */
+  compactingParticipantIds: string[];
+  /**
+   * 이 상태를 만든 순서. 늘기만 한다. REST 응답과 `room_state` 프레임이 뒤바뀌어
+   * 도착해도 화면이 더 오래된 상태로 되돌아가지 않게 한다.
+   */
+  revision: number;
 };
 
 /** 룸이 지금 하는 일: 쉼, 한 참가자의 차례, 동시 분담 작업, 의견 듣기, 리더의 정리. */

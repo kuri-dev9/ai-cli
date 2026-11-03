@@ -109,6 +109,11 @@ type RoomLoopState = {
   resumeCount: number;
   /** 서버가 다시 뜬 뒤 이어 갈 라운드. `runLoop` 가 처음에 한 번 꺼내 쓴다. */
   resume: { active: PersistedActive[] } | null;
+  /**
+   * 차례와 따로 대화를 줄이는 참가자 → 그 압축이 끝나는 약속. 라운드가 도는 중에
+   * 쉬는 참가자만 먼저 줄일 때 생긴다. 그 참가자의 차례는 압축이 끝난 뒤에 시작한다.
+   */
+  compacting: Map<string, Promise<void>>;
 };
 
 /** 라운드가 도는 동안 DB 에 적어 두는 일하던 참가자. */
@@ -214,10 +219,22 @@ function getLoop(roomId: string): RoomLoopState {
       inRound: false,
       resumeCount: 0,
       resume: null,
+      compacting: new Map(),
     };
     loops.set(roomId, loop);
   }
   return loop;
+}
+
+/**
+ * 마지막으로 매긴 상태 순서. 시각에서 시작해 서버가 다시 떠도 앞선 값보다 작아지지
+ * 않는다 — 화면은 더 작은 순서의 상태를 버리기 때문이다.
+ */
+let lastStateRevision = 0;
+
+function nextStateRevision(): number {
+  lastStateRevision = Math.max(Date.now(), lastStateRevision + 1);
+  return lastStateRevision;
 }
 
 function readState(roomId: string, maxAutoTurns: number): RoomRuntimeState {
@@ -234,6 +251,8 @@ function readState(roomId: string, maxAutoTurns: number): RoomRuntimeState {
     turnCount: loop?.turnCount ?? 0,
     maxAutoTurns,
     pendingUserMessage: loop?.pendingUserMessage ?? false,
+    compactingParticipantIds: loop ? [...loop.compacting.keys()] : [],
+    revision: nextStateRevision(),
   };
 }
 
@@ -393,6 +412,9 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
   if (!runtime) {
     throw new Error('Room engine is not initialized.');
   }
+
+  // 쉬는 동안 따로 줄이던 참가자다. 한 세션에서 두 실행을 돌릴 수 없으므로 끝나기를 기다린다.
+  await loop.compacting.get(participant.participantId);
 
   // 명단에서 기다리던 멤버라면 여기서 들어온다. 세션이 없으면 그 자리에서 생긴다.
   const summoned = summonParticipant(room, participant);
@@ -1341,6 +1363,56 @@ async function runCompaction(roomId: string, participants: SpeakingParticipant[]
   }
 }
 
+/**
+ * 라운드가 도는 중에 쉬는 참가자들만 대화를 줄인다.
+ *
+ * 루프와 일하는 참가자 목록은 건드리지 않는다 — 라운드는 그대로 돌고, 줄이는
+ * 참가자는 `compacting` 에만 오른다. 그사이 이 참가자가 불리면 그 차례는 압축이
+ * 끝난 뒤에 시작한다.
+ */
+function startIdleCompaction(room: RoomRow, participants: SpeakingParticipant[]): void {
+  const loop = getLoop(room.room_id);
+  for (const participant of participants) {
+    const task = (async () => {
+      try {
+        if (!runtime) {
+          throw new Error('Room engine is not initialized.');
+        }
+        const session = sessionsDb.getSessionById(participant.sessionId);
+        const result = await runDetachedChatTurn(
+          {
+            sessionId: participant.sessionId,
+            userId: loop.userId,
+            content: COMPACT_COMMAND,
+            options: {
+              ...(session?.model || participant.model ? { model: session?.model || participant.model } : {}),
+              ...(session?.claude_account_id || participant.claudeAccountId
+                ? { claudeAccountId: session?.claude_account_id || participant.claudeAccountId }
+                : {}),
+            },
+            owner: 'room',
+          },
+          { runtime, isSessionHandedToTelegram },
+        );
+        if (result.error) {
+          console.error('[Rooms] Compaction failed', { roomId: room.room_id, participant: participant.displayName, error: result.error });
+        }
+      } catch (error) {
+        // 한 세션이 줄이지 못해도 나머지는 줄인다.
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[Rooms] Compaction failed', { roomId: room.room_id, participant: participant.displayName, error: message });
+      } finally {
+        loop.compacting.delete(participant.participantId);
+        broadcastState(room);
+        // 토큰 표시가 줄어든 값으로 다시 읽히게 한다.
+        broadcastRoomFrame({ kind: 'room_updated', roomId: room.room_id });
+      }
+    })();
+    loop.compacting.set(participant.participantId, task);
+  }
+  broadcastState(room);
+}
+
 /** Rooms 모듈 안에서 룸 서비스가 쓰는 턴 엔진. */
 export const roomTurnEngine = {
   /** `readTokenUsage` 는 테스트가 맥락 사용량을 가짜로 줄 때만 넘긴다. */
@@ -1411,8 +1483,8 @@ export const roomTurnEngine = {
   ): { message: RoomMessage; state: RoomRuntimeState } {
     const loop = getLoop(room.room_id);
     const attachments = options.attachments ?? [];
-    // 명령은 호스트 세션 하나를 쓰므로, 다른 차례와 겹치면 받지 않는다.
-    if (options.hostCommand && loop.running) {
+    // 명령은 호스트 세션 하나를 쓰므로, 다른 차례나 압축과 겹치면 받지 않는다.
+    if (options.hostCommand && (loop.running || loop.compacting.size > 0)) {
       throw new AppError('참가자가 일하는 중에는 명령을 실행할 수 없습니다. 끝나거나 정지한 뒤 다시 보내 주세요.', {
         code: 'ROOM_BUSY',
         statusCode: 409,
@@ -1460,18 +1532,26 @@ export const roomTurnEngine = {
    * 정지와 달리 루프는 멈추지 않고, 끊긴 답은 중단으로 남는다.
    */
   /**
-   * 참가자 세션들의 맥락을 줄인다. 차례가 도는 중에는 받지 않는다 — 답하는
-   * 중인 세션에 명령을 밀어 넣으면 그 답이 엉킨다.
+   * 참가자 세션들의 맥락을 줄인다. 답하는 중인 세션에 명령을 밀어 넣으면 그 답이
+   * 엉키므로, 차례가 도는 중이면 쉬는 참가자만 먼저 줄이고 바로 돌아온다. 일하던
+   * 참가자는 끝난 뒤 다시 누르면 된다.
    */
   async compact(room: RoomRow, participants: SpeakingParticipant[]): Promise<RoomRuntimeState> {
     const loop = getLoop(room.room_id);
-    if (loop.running) {
-      throw new AppError('참가자가 일하는 중에는 대화를 줄일 수 없습니다. 끝나거나 정지한 뒤 다시 눌러 주세요.', {
+    const idle = participants.filter((participant) => (
+      !loop.active.has(participant.participantId) && !loop.compacting.has(participant.participantId)
+    ));
+    if (idle.length === 0) {
+      throw new AppError('지금 줄일 수 있는 참가자가 없습니다. 모두 일하거나 이미 줄이는 중입니다.', {
         code: 'ROOM_BUSY',
         statusCode: 409,
       });
     }
-    await runCompaction(room.room_id, participants);
+    if (loop.running || loop.compacting.size > 0) {
+      startIdleCompaction(room, idle);
+    } else {
+      await runCompaction(room.room_id, idle);
+    }
     return readState(room.room_id, room.max_auto_turns);
   },
 

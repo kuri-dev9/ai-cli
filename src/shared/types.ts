@@ -1452,6 +1452,10 @@ export type RoomRuntimeState = {
   turnCount: number;
   maxAutoTurns: number;
   pendingUserMessage: boolean;
+  /** Participants shrinking their context apart from the turns; set when only the idle ones are compacted mid-round. */
+  compactingParticipantIds?: string[];
+  /** Grows with every state the server builds, so a late REST reply cannot roll back a newer `room_state` frame. */
+  revision?: number;
 };
 
 /** What a room is doing: resting, one participant's turn, split work in parallel, gathering opinions, or the lead summarising. */

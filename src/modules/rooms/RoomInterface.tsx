@@ -265,6 +265,17 @@ export function RoomInterface({
   const activeParticipant = activeParticipants[0];
   const participantBySession = (sessionId: string) => participants.find((participant) => participant.sessionId === sessionId);
   const isParticipantActive = (participantId: string) => activeParticipants.some((participant) => participant.participantId === participantId);
+  // Shrinking their context apart from the round, while others keep working.
+  const compactingParticipants = (roomState?.compactingParticipantIds ?? [])
+    .map((participantId) => participantsById.get(participantId))
+    .filter((participant): participant is RoomParticipant => Boolean(participant));
+  // Mid-round the compact button only reaches those with a session who are neither working nor already compacting.
+  const idleCompactableCount = participants.filter((participant) => (
+    participant.sessionId
+    && !isParticipantActive(participant.participantId)
+    && !compactingParticipants.some((compacting) => compacting.participantId === participant.participantId)
+  )).length;
+  const isCompactBusy = isRunning || compactingParticipants.length > 0;
   const settingsParticipant = participants.find((participant) => participant.participantId === settingsParticipantId);
   // A finished turn always lands a timeline entry, so this doubles as "refresh token usage".
   const timelineLength = detail?.messages.length ?? 0;
@@ -785,6 +796,15 @@ export function RoomInterface({
           </button>
         </div>
       )}
+      {compactingParticipants.length > 0 && (
+        <div className="mx-auto mb-2 flex max-w-[54.25rem] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-border/50 bg-card/80 px-3 py-1.5 text-xs">
+          <Minimize2 className="h-3.5 w-3.5 shrink-0 animate-pulse text-muted-foreground" />
+          {compactingParticipants.map((participant) => (
+            <ParticipantBadge key={participant.participantId} participant={participant} hostLabel={t('rooms.leader')} />
+          ))}
+          <span className="text-muted-foreground">{t('rooms.compacting')}</span>
+        </div>
+      )}
       {actionError && (
         <p role="alert" className="mx-auto mb-2 max-w-[54.25rem] px-1 text-xs text-red-600 dark:text-red-400">{actionError}</p>
       )}
@@ -1057,8 +1077,10 @@ export function RoomInterface({
             variant="ghost"
             size="sm"
             className="h-7 flex-shrink-0 gap-1 px-2 text-xs"
-            disabled={isRunning}
-            title={isRunning ? t('rooms.compactWhileRunning') : t('rooms.compactAllTitle')}
+            disabled={isCompactBusy && idleCompactableCount === 0}
+            title={isCompactBusy
+              ? (idleCompactableCount > 0 ? t('rooms.compactIdleTitle', { count: idleCompactableCount }) : t('rooms.compactNoIdle'))
+              : t('rooms.compactAllTitle')}
             onClick={() => void runAction(() => compact())}
           >
             <Minimize2 className="h-3.5 w-3.5" />
