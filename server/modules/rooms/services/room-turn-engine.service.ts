@@ -597,9 +597,21 @@ async function runTurnInSession(
     },
     { runtime, isSessionHandedToTelegram },
   );
+  // 프로바이더는 턴이 끝나도 백그라운드 작업이 보고하러 올 때까지 프로세스를 길게는
+  // 30분 붙잡아 둔다. 실행이 다 풀릴 때까지 기다리면 답은 이미 끝났는데 룸에는 그동안
+  // 내내 "답하는 중" 으로 남는다. 턴의 마지막 `complete` 가 지나가면 차례를 끝낸다.
+  let stopWatchingTurn = () => {};
+  const turnSettled = new Promise<{ started: boolean; error: string | null }>((resolve) => {
+    stopWatchingTurn = chatRunRegistry.onRunSettled((sessionId) => {
+      if (sessionId === me.sessionId) {
+        resolve({ started: true, error: null });
+      }
+    });
+  });
   try {
-    return await Promise.race([run, released]);
+    return await Promise.race([run, released, turnSettled]);
   } finally {
+    stopWatchingTurn();
     loop.releaseWaiters.delete(me.sessionId);
   }
 }

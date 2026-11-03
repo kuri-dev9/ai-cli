@@ -706,6 +706,34 @@ test('compacting mid-round shrinks only the idle participants and delays their n
   });
 });
 
+test('a turn ends at its complete even while the provider holds the process for background work', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let releaseProcess: () => void = () => {};
+    const processGate = new Promise<void>((resolve) => { releaseProcess = resolve; });
+    roomTurnEngine.initialize({
+      hasRuntime: () => true,
+      run: async (_provider: string, command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter) => {
+        const sessionId = String(options.sessionId);
+        calls.push({ sessionId, command, options });
+        writer.send(createNormalizedMessage({ kind: 'text', role: 'assistant', content: '구현 끝, 시험은 뒤에서 돕니다 [DONE]', sessionId, provider: 'claude' }));
+        writer.send(createNormalizedMessage({ kind: 'complete', exitCode: 0, sessionId, provider: 'claude' }));
+        // 백그라운드 작업이 보고하러 오기를 기다리며 프로세스가 남아 있다.
+        await processGate;
+      },
+      abort: async () => true,
+      resolveToolApproval: () => {},
+      getPendingApprovalsForSession: () => [],
+    } as never);
+
+    roomsService.postUserMessage(ROOM_ID, { content: '구현해줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'turn ended at complete');
+    assert.deepEqual(speakers(), ['user', 'p-host']);
+    assert.equal(roomsDb.listMessages(ROOM_ID)[1].status, 'complete');
+    releaseProcess();
+  });
+});
+
 test('room state revisions only grow, so a late reply cannot roll back a newer frame', () => {
   const first = roomTurnEngine.getState(ROOM_ID, 6).revision;
   const second = roomTurnEngine.getState(ROOM_ID, 6).revision;
