@@ -13,6 +13,7 @@ import {
 } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import { hasHiddenProviders as computeHasHiddenProviders, isVisibleProvider } from '@/shared/providerVisibility';
 import { useEnabledProviders } from '@/shared/hooks/useEnabledProviders';
+import { SESSION_ARCHIVED_EVENT } from '@/shared/sessionEvents';
 import { useQuietFolders } from '@/shared/hooks/useQuietFolders';
 import {
   clearLegacyStarredProjectIds,
@@ -241,6 +242,22 @@ export function useSidebarController({
     } finally {
       setIsArchivedSessionsLoading(false);
     }
+  }, []);
+
+  // 사이드바 밖에서 보관한 세션(룸에서 뺀 참가자 등)도 최근 대화에서 뺀다.
+  useEffect(() => {
+    const handleArchived = (event: Event) => {
+      const archivedSessionId = (event as CustomEvent<string>).detail;
+      setRecentConversations((previous) => {
+        const remaining = previous.filter((conversation) => conversation.sessionId !== archivedSessionId);
+        if (remaining.length !== previous.length) {
+          setRecentConversationsTotal((total) => Math.max(0, total - 1));
+        }
+        return remaining;
+      });
+    };
+    window.addEventListener(SESSION_ARCHIVED_EVENT, handleArchived);
+    return () => window.removeEventListener(SESSION_ARCHIVED_EVENT, handleArchived);
   }, []);
 
   const fetchRecentConversationsPage = useCallback(async (offset: number, append: boolean) => {

@@ -10,6 +10,7 @@ import type { ServerEvent,
   ProjectSession,IsSessionProcessing } from '@/shared/types';
 import { mergeProjectSelectionMetadata } from '@/modules/project-workspace/utils/projectSelectionMetadata';
 import { readSelectedProvider } from '@/shared/selectedProvider';
+import { SESSION_ARCHIVED_EVENT } from '@/shared/sessionEvents';
 import { isPathInQuietFolders, readQuietFolders } from '@/shared/quietFolders';
 import {
   findUnseenSessionIds,
@@ -1147,6 +1148,20 @@ export function useProjectsState({
     },
     [clearSessionAttention, navigate, selectedSession?.id],
   );
+
+  // 룸에서 뺀 참가자처럼 사이드바 밖에서 보관한 세션도 목록에서 뺀다.
+  useEffect(() => {
+    const handleArchived = (event: Event) => {
+      const archivedSessionId = (event as CustomEvent<string>).detail;
+      if (!archivedSessionId) return;
+      clearSessionAttention(archivedSessionId);
+      setProjects((prevProjects) =>
+        prevProjects.map((project) => removeSessionFromProject(project, archivedSessionId)),
+      );
+    };
+    window.addEventListener(SESSION_ARCHIVED_EVENT, handleArchived);
+    return () => window.removeEventListener(SESSION_ARCHIVED_EVENT, handleArchived);
+  }, [clearSessionAttention]);
 
   const handleSidebarRefresh = useCallback(async () => {
     try {

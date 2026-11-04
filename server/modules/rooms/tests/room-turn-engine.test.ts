@@ -811,7 +811,7 @@ test('a read-only turn still asks when the participant is set to ask', async () 
   }, { splitWork: true });
 });
 
-test('a worked participant goes to standby instead of leaving the room', async () => {
+test('a worked participant leaves the room and its session goes to the archive', async () => {
   await withRoom(6, async () => {
     assert.throws(
       () => roomsService.removeParticipant(ROOM_ID, 'p-host'),
@@ -819,32 +819,19 @@ test('a worked participant goes to standby instead of leaving the room', async (
     );
 
     const detail = roomsService.removeParticipant(ROOM_ID, 'p-rev');
-    // 룸 안에 그대로 남는다. 세션이 프로젝트 목록으로 튀어나오면 룸을 쓸수록
-    // 목록이 지저분해진다.
-    assert.deepEqual(detail.participants.map((participant) => participant.participantId), ['p-host', 'p-rev']);
-    assert.deepEqual(detail.formerParticipants, []);
-    assert.equal(detail.participants.find((participant) => participant.participantId === 'p-rev')?.status, 'standby');
-    // 세션도 룸 참가자로 남아 사이드바에서 룸 밑에 접힌다.
-    assert.equal(roomsDb.getParticipantBySession(REVIEWER)?.participant_id, 'p-rev');
+    // 명단에서 빠지고, 지난 발언에 이름을 붙이도록 퇴장한 참가자로만 남는다.
+    assert.deepEqual(detail.participants.map((participant) => participant.participantId), ['p-host']);
+    assert.deepEqual(detail.formerParticipants.map((participant) => participant.participantId), ['p-rev']);
+    // 사이드바의 룸 밑에서도 빠진다.
+    assert.equal(roomsDb.getParticipantBySession(REVIEWER), null);
     assert.deepEqual(
       roomsService.listRoomIndex()[0].participants.map((participant) => participant.participantId),
-      ['p-host', 'p-rev'],
+      ['p-host'],
     );
-  });
-});
-
-test('a standby participant comes back when it is mentioned again', async () => {
-  await withRoom(6, async () => {
-    const calls: Call[] = [];
-    roomTurnEngine.initialize(createRuntime({ [HOST]: ['다시 봐줘 @Claude2'], [REVIEWER]: ['[DONE]'] }, calls));
-
-    roomsService.removeParticipant(ROOM_ID, 'p-rev');
-    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
-    await waitFor(() => isIdle() && speakers().includes('p-rev'), 'the recalled turn');
-
-    // 같은 세션이 돌아온다. 새로 만들지 않으므로 하던 이야기를 기억한다.
-    assert.ok(calls.some((call) => call.sessionId === REVIEWER));
-    assert.equal(roomsService.getRoomDetail(ROOM_ID).participants.find((p) => p.participantId === 'p-rev')?.sessionId, REVIEWER);
+    // 세션은 보관함으로 가서 프로젝트 목록에 평범한 세션으로 튀어나오지 않는다.
+    assert.equal(sessionsDb.getSessionById(REVIEWER)?.isArchived, 1);
+    // 빠진 참가자는 불러도 오지 않는다.
+    assert.throws(() => roomsService.removeParticipant(ROOM_ID, 'p-rev'));
   });
 });
 
@@ -1276,7 +1263,7 @@ test('참가자는 걸린 예약을 프롬프트에서 보고, 번호로 지우�
   });
 });
 
-test('대기로 돌린 방장은 방장 자리를 원래 대화에 돌려준다', async () => {
+test('룸에서 뺀 방장은 방장 자리를 원래 대화에 돌려준다', async () => {
   await withRoom(6, async () => {
     roomTurnEngine.initialize(createRuntime({}, []));
     roomsService.setLeader(ROOM_ID, 'p-rev');

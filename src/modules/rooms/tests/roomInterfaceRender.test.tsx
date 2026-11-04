@@ -212,16 +212,16 @@ describe('RoomInterface', () => {
     await waitFor(() => expect(roomCalls.find((call) => call.name === 'updateParticipant')?.args)
       .toEqual(['room-1', 'p-rev', { permissionMode: 'full' }]));
 
-    // 내보내는 것이 아니라 대기로 돌린다. 세션은 룸 밑에 그대로 남는다.
+    // 룸에서 아주 뺀다. 세션은 보관함으로 가고 사이드바에서도 사라진다.
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: '대기로' }));
+    fireEvent.click(screen.getByRole('button', { name: '빼기' }));
     await waitFor(() => expect(roomCalls.find((call) => call.name === 'removeParticipant')?.args)
       .toEqual(['room-1', 'p-rev']));
     confirm.mockRestore();
 
     // The host is the room itself and has no remove button.
     fireEvent.click(screen.getByRole('button', { name: '설계자 설정' }));
-    expect(screen.queryByRole('button', { name: '대기로' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '빼기' })).toBeNull();
   });
 
   it('shows a waiting message mid-turn with a button to interrupt the current speaker', async () => {

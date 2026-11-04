@@ -21,6 +21,7 @@ import type { ScrollSample } from '@/modules/chat';
 import { ROOM_MAX_PARTICIPANTS } from '@/shared/constants';
 import { useWebSocket } from '@/shared/context/WebSocketContext';
 import { applyRoomDetailToIndex } from '@/shared/hooks/useRoomIndex';
+import { announceSessionArchived } from '@/shared/sessionEvents';
 import type {
   ChatMessage,
   PendingPermissionRequest,
@@ -600,11 +601,13 @@ export function RoomInterface({
   };
 
   const handleLeave = (participantId: string) => {
+    const sessionId = participants.find((participant) => participant.participantId === participantId)?.sessionId;
     void runAction(async () => {
       const nextDetail = await removeParticipant(participantId);
       if (nextDetail) {
-        // 그 참가자는 룸에 남은 채 대기로 내려간다. 사이드바도 룸 밑에 그대로 둔다.
+        // 룸 밑에서 빠진 세션은 보관함으로 갔다. 사이드바 목록에서도 바로 지운다.
         applyRoomDetailToIndex(nextDetail);
+        if (sessionId) announceSessionArchived(sessionId);
       }
       setSettingsParticipantId(null);
     });

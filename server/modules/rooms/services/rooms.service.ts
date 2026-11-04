@@ -552,15 +552,14 @@ export const roomsService = {
   },
 
   /**
-   * 참가자를 차례에서 뺀다.
+   * 참가자를 룸에서 뺀다.
    *
-   * 일한 적 있는 참가자는 **룸 안에 그대로 두고** 대기로만 돌린다. 세션을 룸
-   * 밖으로 내보내면 그 대화가 프로젝트 목록에 평범한 세션으로 튀어나와, 룸을
-   * 쓸수록 목록이 지저분해진다. 대기로 두면 사이드바에서는 여전히 룸 밑에
-   * 접혀 있고, 차례만 돌아오지 않는다. `@이름` 으로 다시 부르면 그 세션이
-   * 하던 이야기를 그대로 기억한 채 돌아온다.
+   * 일한 적 있는 참가자는 퇴장으로 적고 그 세션을 보관함으로 옮긴다. 명단과
+   * 사이드바의 룸 밑에서 모두 사라지고, 프로젝트 목록에 평범한 세션으로 튀어
+   * 나오지도 않는다. 행은 남겨 두어 타임라인의 지난 발언에는 이름이 그대로
+   * 붙는다. 대화가 다시 필요하면 보관함에서 꺼내 평범한 대화로 이어 가면 된다.
    *
-   * 한 번도 불린 적 없는 명단 멤버는 세션도 발언도 없으므로 아주 뺀다. 지울
+   * 한 번도 불린 적 없는 명단 멤버는 세션도 발언도 없으므로 행째 지운다. 지울
    * 것이 이름뿐이라 그 이름을 바로 다시 쓸 수 있다.
    *
    * 호스트는 룸 자체여서 뺄 수 없고, 지금 차례를 쥔 참가자는 끝나거나 정지한
@@ -583,8 +582,8 @@ export const roomsService = {
       roomsDb.setLeader(roomId, null);
     }
     if (participant.session_id) {
-      roomsDb.setParticipantStatus(participantId, 'standby');
-      roomsDb.touchRoom(roomId);
+      roomsDb.markParticipantLeft(roomId, participantId);
+      sessionsDb.updateSessionIsArchived(participant.session_id, true);
     } else {
       roomsDb.deleteParticipant(roomId, participantId);
     }
