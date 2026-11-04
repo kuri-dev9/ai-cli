@@ -269,7 +269,29 @@ function notifyRunStopped({ userId, provider, sessionId = null, stopReason = 'co
  * than needing a new opt-in that would default to off. No explicit dedupeKey, so
  * the default composite key collapses repeats inside the dedupe window.
  */
+// In-process listeners for background work that reported back after its turn,
+// for features that want to pick up the follow-up output (e.g. team rooms).
+const backgroundWorkCompletedListeners = new Set();
+
+/**
+ * Subscribes to "background work finished after its turn ended". Returns the
+ * unsubscribe function. Listeners run after the current event is written.
+ */
+function onBackgroundWorkCompleted(listener) {
+  backgroundWorkCompletedListeners.add(listener);
+  return () => backgroundWorkCompletedListeners.delete(listener);
+}
+
 function notifyBackgroundWorkCompleted({ userId, provider, sessionId = null, sessionName = null }) {
+  for (const listener of backgroundWorkCompletedListeners) {
+    setImmediate(() => {
+      try {
+        listener({ provider, sessionId });
+      } catch (error) {
+        console.error('[Notifications] Background-work listener failed', { sessionId, error: error?.message || String(error) });
+      }
+    });
+  }
   notifyUserIfEnabled({
     userId,
     event: createNotificationEvent({
@@ -306,5 +328,6 @@ export {
   notifyUserIfEnabled,
   notifyRunStopped,
   notifyRunFailed,
-  notifyBackgroundWorkCompleted
+  notifyBackgroundWorkCompleted,
+  onBackgroundWorkCompleted
 };

@@ -241,6 +241,21 @@ test('답의 예약 줄을 읽고, 이름이 없으면 적은 참가자에게 �
   assert.equal(schedules[1].at.getTime(), new Date(2026, 10, 2, 15, 3).getTime());
 });
 
+test('받을 사람을 "이름:" 으로 앞에 적은 예약도 그 참가자에게 간다', () => {
+  const now = new Date(2026, 10, 4, 13, 30);
+  const schedules = parseSchedules([
+    '[예약 13:41] 에스터: 질의 결과 확인',
+    '[예약 13:42] @리오: 주입 확인',
+    '[예약 13:43] @없는이 확인',
+  ].join('\n'), { displayName: '에스터' }, now, [{ displayName: '리오' }]);
+  assert.deepEqual(schedules.map((schedule) => schedule.content), [
+    '@에스터 질의 결과 확인',
+    '@리오 주입 확인',
+    // 모르는 이름을 부르면 받을 사람을 찾지 못하므로 적은 참가자에게 돌아온다.
+    '@에스터 @없는이 확인',
+  ]);
+});
+
 test('역할 안내와 짧은 알림 모두 sleep 대신 예약하라고 알린다', () => {
   const me = participant('a', '케이', 0);
   const prompt = buildTurnPrompt({ me, participants: [me], delta: [], isFirstTurn: true, mode: { kind: 'turn' }, turn: { count: 1, max: 6 } } as never);

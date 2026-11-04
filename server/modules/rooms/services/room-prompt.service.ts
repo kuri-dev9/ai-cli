@@ -16,8 +16,12 @@ const HANDOFF_TAIL_LINES = 3;
 /** 새로 들어온 참가자에게 넘기는 룸 대화 수. 그보다 앞은 생략한다. */
 const MAX_DELTA_MESSAGES = 30;
 
-/** 한 메시지를 프롬프트에 옮길 때의 최대 길이. 긴 답 하나가 프롬프트를 다 먹지 않게. */
-const MAX_MESSAGE_CHARS = 4000;
+/**
+ * 한 메시지를 프롬프트에 옮길 때의 최대 길이. 긴 답 하나가 프롬프트를 다 먹지
+ * 않게 하되, 보고의 끝부분(확인 목록 같은 결론)이 잘리지 않을 만큼은 넉넉히 둔다.
+ * 넘치면 원문 파일 경로를 함께 적어 참가자가 나머지를 직접 읽게 한다.
+ */
+export const MAX_MESSAGE_CHARS = 16000;
 
 export const ROOM_DONE_MARKER = '[DONE]';
 export const ROOM_PASS_MARKER = '[PASS]';
@@ -40,6 +44,24 @@ function describeSpeaker(speaker: string, participants: RoomParticipant[]): stri
 
 function clip(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}\n…(생략)` : text;
+}
+
+/**
+ * 룸 메시지를 프롬프트에 옮긴다. 넘치면 몇 자 중 몇 자를 옮겼는지와, 원문을 남긴
+ * 파일이 있으면 그 경로를 적는다 — 예전에는 "…(생략)" 만 붙어 보고의 끝부분이
+ * 받는 쪽에서 아예 사라졌다.
+ */
+function clipMessage(text: string, fullTextPath: string | null): string {
+  if (text.length <= MAX_MESSAGE_CHARS) return text;
+  const where = fullTextPath ? ` 나머지는 원문 파일에서 읽으세요: ${fullTextPath}` : '';
+  return `${text.slice(0, MAX_MESSAGE_CHARS)}\n…(${text.length}자 중 앞 ${MAX_MESSAGE_CHARS}자만 옮겼습니다.${where})`;
+}
+
+/** 짧은 알림의 참가자 목록에 붙이는 상태. 대기 멤버는 부르면 들어온다. */
+function describeStatus(participant: RoomParticipant): string {
+  if (participant.status === 'standby') return ', 대기';
+  if (participant.status === 'summoned') return ', 불려 와 일하는 중';
+  return '';
 }
 
 /**
@@ -66,7 +88,7 @@ export function buildRoleBrief(
   const rolePrompt = me.rolePrompt.trim() ? `\n역할 설명: ${me.rolePrompt.trim()}` : '';
   const persona = me.persona.trim() ? `\n성향: ${me.persona.trim()}` : '';
   const changedNotice = reason === 'changed'
-    ? '[바뀜] 사용자가 룸의 참가자 설정을 고쳤습니다. 지금까지의 안내는 잊고 아래 내용을 따르세요.\n\n'
+    ? '[바뀜] 사용자가 룸의 참가자 설정(이름·역할·성향)을 고쳤습니다. 아래가 지금의 이름과 역할입니다. 이름이 바뀌어도 당신은 같은 참가자이고, 하던 일·맡은 일·승인 기다리던 계획은 그대로 이어 가세요.\n\n'
     : '';
 
   return [
@@ -91,6 +113,7 @@ export function buildRoleBrief(
     `- 답의 마지막 줄에는 반드시 다음 중 하나만 쓰세요: "@이름"(그 참가자에게 넘김), "${ROOM_PASS_MARKER}"(덧붙일 말 없음), "${ROOM_DONE_MARKER}"(작업이 끝나 사용자 확인이 필요함).`,
     `- 여럿에게 동시에 물으려면 마지막 줄에 이름만 "@이름 @이름" 처럼 함께 적으세요. 모두 동시에 답하고(파일은 고치지 않습니다), 답이 모이면 당신에게 차례가 돌아옵니다.`,
     `- ${SCHEDULE_RULE}`,
+    '- 백그라운드 작업(Monitor, 백그라운드 셸)을 걸고 차례를 끝내면, 작업이 끝났을 때 그 보고가 당신의 답으로 룸에 이어 올라갑니다. 한 차례 안에 끝낼 수 있는 일은 끝까지 기다렸다가 결과와 함께 답하세요.',
   ].join('\n');
 }
 
@@ -131,21 +154,39 @@ export function parseSchedules(
   text: string,
   me: Pick<RoomParticipant, 'displayName'>,
   now: Date,
+  roster: Array<Pick<RoomParticipant, 'displayName'>> = [],
 ): Array<{ at: Date; content: string }> {
-  return parseScheduleLines(text, now).map(({ at, task }) => ({
-    at,
-    content: task.includes('@') ? task : `@${me.displayName} ${task}`,
-  }));
+  const names = [me, ...roster].map((participant) => participant.displayName);
+  return parseScheduleLines(text, now).map(({ at, task }) => {
+    // "에스터: 할 일", "@에스터: 할 일" 처럼 받을 사람을 앞에 적는 일이 흔하다.
+    // 그 이름을 멘션으로 바꾼다. 그대로 두면 "@에스터 에스터: …" 가 되었다.
+    const lead = /^@?([^\s:：@]+)\s*[:：]\s*(.+)$/su.exec(task);
+    if (lead && names.some((name) => name.toLowerCase() === lead[1].toLowerCase())) {
+      return { at, content: `@${lead[1]} ${lead[2].trim()}` };
+    }
+    // 아는 참가자를 부르는 멘션이 없으면 적은 참가자 자신에게 돌아온다.
+    // 명단을 받지 못했으면 멘션이 있는지만 본다.
+    const mentionsKnown = roster.length === 0
+      ? task.includes('@')
+      : names.some((name) => task.toLowerCase().includes(`@${name.toLowerCase()}`));
+    return { at, content: mentionsKnown ? task : `@${me.displayName} ${task}` };
+  });
 }
 
-function buildReminder(me: RoomParticipant, standby: RoomParticipant[] = []): string {
+function buildReminder(me: RoomParticipant, participants: RoomParticipant[], standby: RoomParticipant[] = []): string {
   // 명단은 그 사이에 바뀔 수 있어 짧은 알림에도 함께 적는다. 부를 상대를 모르면
-  // 부르지 못한다.
-  const callable = standby
-    .filter((participant) => participant.participantId !== me.participantId)
-    .map((participant) => `@${participant.displayName}(${participant.roleName})`)
+  // 부르지 못한다. 대기 멤버만 적으면 지금 일하는 참가자가 목록에서 사라져,
+  // 받는 쪽은 그 참가자가 끊긴 것인지 일하는 중인지 알 수 없었다. 모두 적고 상태를 붙인다.
+  const seen = new Set<string>();
+  const callable = [...participants, ...standby]
+    .filter((participant) => {
+      if (participant.participantId === me.participantId || seen.has(participant.participantId)) return false;
+      seen.add(participant.participantId);
+      return true;
+    })
+    .map((participant) => `@${participant.displayName}(${participant.roleName}${describeStatus(participant)})`)
     .join(', ');
-  const callableLine = callable ? `\n부를 수 있는 멤버: ${callable}` : '';
+  const callableLine = callable ? `\n부를 수 있는 참가자: ${callable}` : '';
   // 예약 규칙은 짧게라도 매번 붙인다. 이 규칙이 생기기 전에 역할 안내를 받은 세션도 알아야 한다.
   return `[팀 룸] 당신은 "@${me.displayName}"(${me.roleName}) 입니다. 마지막 줄에 "@이름", "${ROOM_PASS_MARKER}", "${ROOM_DONE_MARKER}" 중 하나를 쓰세요. 기다릴 일은 sleep 대신 "[예약 14:50] 할 일" 줄로 남기세요.${callableLine}`;
 }
@@ -311,6 +352,14 @@ export function buildTurnPrompt(input: {
   hostLed?: { hostName: string } | null;
   /** 이 룸에 걸려 있는, 아직 나가지 않은 예약. */
   schedules?: Array<{ id: string; at: Date; content: string }>;
+  /**
+   * 발언자 이름을 붙일 때 쓰는 전원(대기 멤버·퇴장한 참가자 포함). 지금 차례가
+   * 도는 참가자만으로 찾으면, 불려 와 답하고 대기로 돌아간 멤버의 말이 "알 수 없는
+   * 참가자" 로 옮겨졌다.
+   */
+  speakers?: RoomParticipant[];
+  /** 너무 길어 잘린 메시지의 원문 파일 경로. 메시지 id 로 찾는다. */
+  fullTextPaths?: Map<number, string>;
 }): string {
   const { me, participants, isFirstTurn } = input;
   const mode = input.mode ?? { kind: 'turn' };
@@ -321,15 +370,16 @@ export function buildTurnPrompt(input: {
     // 첫 차례가 아닌데도 안내를 다시 보내는 건 설정이 바뀌었을 때뿐이다.
     isFirstTurn || input.roleChanged
       ? buildRoleBrief(me, participants, isFirstTurn ? 'first' : 'changed', input.standby ?? [])
-      : buildReminder(me, input.standby ?? []),
+      : buildReminder(me, participants, input.standby ?? []),
   ];
 
   if (input.priorContext?.trim()) {
     sections.push(`룸이 되기 전 원래 대화의 마지막 부분:\n${input.priorContext.trim()}`);
   }
 
+  const speakers = [...(input.speakers ?? []), ...participants];
   const lines = delta.map(
-    (message) => `[${describeSpeaker(message.speaker, participants)}]\n${clip(message.text, MAX_MESSAGE_CHARS)}`,
+    (message) => `[${describeSpeaker(message.speaker, speakers)}]\n${clipMessage(message.text, input.fullTextPaths?.get(message.id) ?? null)}`,
   );
   const header = isFirstTurn ? '지금까지 룸의 대화:' : '지난 차례 이후 룸에 올라온 대화:';
   sections.push(

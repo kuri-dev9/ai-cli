@@ -280,6 +280,100 @@ test('곁가지 차례가 일하는 중인 참가자를 부르면 그 차례가 
   }, { hostLed: true });
 });
 
+test('방장이 부른 뒤 사용자 글이 끼어들어도 부른 참가자는 시작한다', async () => {
+  await withRoom(10, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const hostGate = new Promise<void>((resolve) => { release = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await hostGate; return '조사는 @Claude2 가 맡아 주세요'; }, '받았습니다 [DONE]', '정리했습니다 [DONE]'],
+      [REVIEWER]: ['조사했습니다'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '조사 시작' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    // 방장이 일하는 중에 글이 와 줄을 선다.
+    roomsService.postUserMessage(ROOM_ID, { content: '그리고 이것도' }, 1);
+    release();
+
+    await waitFor(() => isIdle() && calls.some((call) => call.sessionId === REVIEWER), 'reviewer ran');
+    assert.ok(calls.some((call) => call.sessionId === REVIEWER), '부른 참가자가 시작해야 한다');
+  }, { hostLed: true });
+});
+
+test('빈 답으로 끝난 차례는 한 번 다시 묻는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['', '한 일: 조사. [DONE]'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '조사해줘' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'host replied');
+
+    assert.equal(calls.length, 2);
+    assert.match(calls[1].command, /빈 답으로 끝났습니다/);
+    assert.match(roomsDb.listMessages(ROOM_ID)[1].text, /한 일: 조사/);
+  });
+});
+
+test('백그라운드 작업을 걸고 빈 답으로 끝난 차례는 다시 묻지 않고 기다린다고 남긴다', async () => {
+  await withRoom(1, async () => {
+    const calls: Call[] = [];
+    const runtime = {
+      hasRuntime: () => true,
+      run: async (_provider: string, command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter) => {
+        const sessionId = String(options.sessionId);
+        calls.push({ sessionId, command, options });
+        writer.send(createNormalizedMessage({ kind: 'tool_use', toolName: 'Monitor', toolInput: { command: 'tail -f out.log' }, sessionId, provider: 'claude' }));
+      },
+      abort: async () => true,
+      resolveToolApproval: () => {},
+      getPendingApprovalsForSession: () => [],
+    } as never;
+    roomTurnEngine.initialize(runtime);
+
+    roomsService.postUserMessage(ROOM_ID, { content: '오래 걸리는 질의' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 2, 'host replied');
+
+    assert.equal(calls.length, 1);
+    assert.match(roomsDb.listMessages(ROOM_ID)[1].text, /백그라운드 작업을 기다리는 중/);
+  });
+});
+
+test('대기로 돌아간 멤버의 말도 다른 참가자의 프롬프트에 이름이 붙는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    sessionsDb.createSession(SECOND_REVIEWER, 'claude', '/tmp', 'Ester', new Date().toISOString(), new Date().toISOString(), null);
+    roomsDb.addParticipant({
+      participant_id: 'p-roster', room_id: ROOM_ID, session_id: SECOND_REVIEWER, provider: 'claude', model: null, claude_account_id: null,
+      display_name: '에스터', role_name: '테스터', role_prompt: '', persona: '', status: 'standby', position: 2,
+    });
+    roomsDb.insertMessage({ roomId: ROOM_ID, speaker: 'p-roster', text: '테스트 결과 보고', status: 'complete', sessionId: SECOND_REVIEWER, finalText: null, handoff: null, turnKind: 'reply', task: null });
+    roomTurnEngine.initialize(createRuntime({ [HOST]: ['봤습니다 [DONE]'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '결과 봐줘' }, 1);
+    await waitFor(() => isIdle() && calls.length === 1, 'host replied');
+    assert.match(calls[0].command, /\[에스터\(테스터\)\]\n테스트 결과 보고/);
+    assert.doesNotMatch(calls[0].command, /알 수 없는 참가자/);
+  });
+});
+
+test('긴 보고는 잘린 만큼을 알리고 원문 파일 경로를 붙인다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    const long = `${'가'.repeat(17000)}끝부분 확인 목록`;
+    roomTurnEngine.initialize(createRuntime({ [HOST]: [`${long}\n@Claude2`], [REVIEWER]: ['봤습니다 [DONE]'] }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '보고해줘' }, 1);
+    await waitFor(() => isIdle() && calls.length === 2, 'reviewer replied');
+    const match = /원문 파일에서 읽으세요: (\S+\.md)/.exec(calls[1].command);
+    assert.ok(match, '원문 경로가 있어야 한다');
+    assert.match(calls[1].command, /자 중 앞 16000자만 옮겼습니다/);
+    const { readFileSync } = await import('node:fs');
+    assert.match(readFileSync(match[1], 'utf8'), /끝부분 확인 목록/);
+  });
+});
+
 test('stop aborts the active participant and records the turn as aborted', async () => {
   await withRoom(6, async () => {
     const calls: Call[] = [];

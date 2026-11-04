@@ -11,6 +11,8 @@ export {
   notifyRunStopped,
   // Used by provider runtimes to report background work that finished after its turn ended.
   notifyBackgroundWorkCompleted,
+  // Used by team rooms to pick up what background work reported after its turn.
+  onBackgroundWorkCompleted,
 } from '@/modules/notifications/services/notification-orchestrator.service.js';
 export {
   registerDesktopNotificationClient,

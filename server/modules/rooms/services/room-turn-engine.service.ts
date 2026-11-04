@@ -1,5 +1,9 @@
-import { roomsDb, scheduledMessagesDb, sessionsDb } from '@/modules/database/index.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+import { getDatabasePath, roomsDb, scheduledMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import type { RoomRow } from '@/modules/database/index.js';
+import { onBackgroundWorkCompleted } from '@/modules/notifications/index.js';
 import { providerTokenUsageService, sessionsService } from '@/modules/providers/index.js';
 import { isSessionHandedToTelegram, notifyTelegramRoundFinished } from '@/modules/telegram-bridge/index.js';
 import {
@@ -13,6 +17,7 @@ import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 import { broadcastRoomFrame } from '@/modules/rooms/services/room-broadcast.service.js';
 import {
   buildTurnPrompt,
+  MAX_MESSAGE_CHARS,
   nextParticipantAfter,
   parseAssignments,
   parseHandoff,
@@ -33,6 +38,7 @@ import {
   parseRoomPermissionMode,
   serializeHandoff,
   toRoomMessage,
+  toRoomParticipant,
 } from '@/modules/rooms/services/room-records.service.js';
 import type {
   AnyRecord,
@@ -159,6 +165,20 @@ let runtime: ProviderRuntimeGateway | null = null;
  * 상태를 지우거나 "일하던 참가자 없음" 으로 덮어쓰면 다시 떠서 이어 갈 수 없다.
  */
 let closing = false;
+
+/**
+ * 백그라운드 작업을 남긴 채 차례를 끝낸 세션 → 그 차례가 끝난 시각(ms). 작업이
+ * 끝나 프로바이더가 후속 답을 내면 그 시각 뒤의 답을 룸으로 옮긴다. 같은 세션이
+ * 룸에서 다시 차례를 받으면 지운다 — 그 뒤의 답은 그 차례가 직접 거둔다.
+ */
+const backgroundWaits = new Map<string, number>();
+let stopWatchingBackgroundWork: (() => void) | null = null;
+
+/** 빈 답으로 끝난 차례에 한 번 다시 묻는 글. */
+const EMPTY_REPLY_PROMPT = '[팀 룸] 직전 차례가 빈 답으로 끝났습니다. 한 일과 결과, 남은 일을 요약해 보고하고, 마지막 줄에 넘김 표시를 쓰세요.';
+
+/** 백그라운드 작업을 기다리느라 빈 답으로 끝난 차례에 남기는 말. */
+const WAITING_FOR_BACKGROUND_TEXT = '(백그라운드 작업을 기다리는 중입니다. 작업이 끝나면 그 보고가 이 참가자의 답으로 이어서 올라옵니다.)';
 
 /** 원래 대화에서 새 참가자에게 넘길 최근 메시지 수와 길이. */
 const PRIOR_CONTEXT_MESSAGES = 12;
@@ -322,6 +342,51 @@ function loadParticipants(room: RoomRow): RoomParticipant[] {
   return listActiveParticipants(room);
 }
 
+/** 발언자 이름을 붙일 전원. 명단 멤버와 퇴장한 참가자까지 넣는다. */
+function listAllSpeakers(room: RoomRow): RoomParticipant[] {
+  return [
+    ...listRoster(room),
+    ...roomsDb.listFormerParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
+  ];
+}
+
+/**
+ * 프롬프트에 다 옮기지 못하는 긴 메시지의 원문을 파일로 남기고 그 경로를 돌려준다.
+ * 받는 참가자가 잘린 뒷부분을 직접 읽을 수 있게 한다. 앱 DB 옆에 둔다.
+ */
+function writeFullTexts(roomId: string, messages: RoomMessage[]): Map<number, string> {
+  const paths = new Map<number, string>();
+  const long = messages.filter((message) => message.text.length > MAX_MESSAGE_CHARS);
+  if (long.length === 0) return paths;
+  try {
+    const directory = path.join(path.dirname(getDatabasePath()), 'room-messages', roomId);
+    mkdirSync(directory, { recursive: true });
+    for (const message of long) {
+      const file = path.join(directory, `${message.id}.md`);
+      writeFileSync(file, message.text, 'utf8');
+      paths.set(message.id, file);
+    }
+  } catch (error) {
+    console.warn('[Rooms] 긴 메시지 원문을 남기지 못했습니다', { roomId, error: error instanceof Error ? error.message : String(error) });
+  }
+  return paths;
+}
+
+/** 프로바이더가 차례 뒤에도 계속 도는 일로 보는 도구. 런타임의 판정과 같다. */
+const DEFERRED_WORK_TOOLS = new Set(['Monitor', 'ScheduleWakeup', 'CronCreate', 'TaskCreate']);
+
+/** 이번 차례가 끝난 뒤에도 도는 백그라운드 작업을 걸었는지. */
+function turnStartedBackgroundWork(sessionId: string): boolean {
+  const events = chatRunRegistry.replayEvents(sessionId, 0) as NormalizedMessage[];
+  return events.some((event) => {
+    if (event.kind !== 'tool_use' || !event.toolName) return false;
+    if (event.toolName === 'Bash') {
+      return (event.toolInput as { run_in_background?: unknown } | undefined)?.run_in_background === true;
+    }
+    return DEFERRED_WORK_TOOLS.has(event.toolName);
+  });
+}
+
 /**
  * 이 턴이 남긴 답. 도구 사이사이 남긴 말까지 이어서 타임라인에 올리고, 넘김
  * 표시는 마지막 말에서만 읽는다. 스트리밍 조각은 확정된 `text` 와 내용이
@@ -477,6 +542,8 @@ async function runParticipantTurnNow(room: RoomRow, participant: RoomParticipant
     me,
     participants,
     standby,
+    speakers: listAllSpeakers(room),
+    fullTextPaths: writeFullTexts(room.room_id, delta),
     delta,
     isFirstTurn,
     roleChanged,
@@ -498,17 +565,40 @@ async function runParticipantTurnNow(room: RoomRow, participant: RoomParticipant
   // 사용자가 그동안 붙인 파일. 참가자마다 자기가 아직 못 본 글의 것만 받는다.
   const attachments = delta.filter((message) => message.speaker === 'user').flatMap((message) => message.attachments);
 
+  // 이 세션이 룸에서 다시 차례를 받았다. 기다리던 백그라운드 보고는 이 차례가 거둔다.
+  backgroundWaits.delete(me.sessionId);
   try {
-    const result = await runTurnInSession(room, me, loop, prompt, attachments, options.readOnly);
+    let result = await runTurnInSession(room, me, loop, prompt, attachments, options.readOnly);
 
     // 이 차례에 보낸 데까지는 읽은 것이다. 일하는 동안 들어온 사용자 글은 그 뒤에
     // 있으므로 다음 차례에 간다.
     roomsDb.markParticipantSeen(me.participantId, readThroughId);
 
-    return recordTurnReply(room, me, loop, result, {
+    let waitingForBackground = false;
+    const endedEmpty = result.started && !result.error && !loop.halted
+      && !loop.interruptedSessions.has(me.sessionId) && !readTurnTexts(me.sessionId).all;
+    if (endedEmpty && !options.dropPass) {
+      if (turnStartedBackgroundWork(me.sessionId)) {
+        // 백그라운드 작업을 걸고 기다리는 중이다. 다시 물으면 새 차례가 그 대기를
+        // 밀어내 작업이 끊길 수 있으므로 묻지 않고, 끝나면 보고를 룸으로 옮긴다.
+        waitingForBackground = true;
+      } else {
+        // 할 말 없이 끝났다. 그대로 "(응답 없음)" 으로 넘기면 받는 쪽은 무슨 일이
+        // 있었는지 모른다. 한 번만 다시 묻는다.
+        console.log('[Rooms] 빈 답으로 끝나 한 번 다시 묻습니다', { roomId: room.room_id, participantId: me.participantId });
+        result = await runTurnInSession(room, me, loop, EMPTY_REPLY_PROMPT, [], options.readOnly);
+      }
+    }
+
+    const recorded = recordTurnReply(room, me, loop, result, {
       ...options,
       task: options.mode.kind === 'task' ? options.mode.task : undefined,
+      emptyText: waitingForBackground ? WAITING_FOR_BACKGROUND_TEXT : undefined,
     });
+    if (turnStartedBackgroundWork(me.sessionId)) {
+      backgroundWaits.set(me.sessionId, Date.now());
+    }
+    return recorded;
   } finally {
     finishActiveTurn(room, me, loop);
   }
@@ -653,7 +743,7 @@ function recordTurnReply(
   me: SpeakingParticipant,
   loop: RoomLoopState,
   result: { started: boolean; error: string | null },
-  options: Pick<TurnOptions, 'turnKind' | 'readAssignments' | 'dropPass'> & { task?: RoomTask },
+  options: Pick<TurnOptions, 'turnKind' | 'readAssignments' | 'dropPass'> & { task?: RoomTask; emptyText?: string },
 ): TurnResult {
   const texts = result.started ? readTurnTexts(me.sessionId) : { all: '', last: '', errors: [] };
   let status: RoomMessage['status'] = 'complete';
@@ -670,7 +760,7 @@ function recordTurnReply(
     status = 'error';
     text = text || `(실행 실패) ${result.error ?? texts.errors.join('\n') ?? ''}`.trim();
   } else if (!text) {
-    text = '(응답 없음)';
+    text = options.emptyText ?? '(응답 없음)';
   }
 
   if (status === 'complete' && result.error) {
@@ -744,7 +834,7 @@ function scheduleFollowUps(room: RoomRow, me: RoomParticipant, loop: RoomLoopSta
     }
   }
 
-  const schedules = parseSchedules(text, me, new Date());
+  const schedules = parseSchedules(text, me, new Date(), listRoster(room));
   if (schedules.length > 0) {
     const userId = Number(loop.userId);
     if (!Number.isInteger(userId)) {
@@ -929,20 +1019,6 @@ async function runCommentRound(
 }
 
 /**
- * 사용자 메시지 하나로 시작해, 참가자들이 넘김 표시대로 차례를 주고받는다.
- * 분담이 켜져 있으면 답이 맡긴 일을 동시에 돌리고 맡긴 참가자가 정리하며,
- * 의견이 켜져 있으면 답마다 나머지가 의견을 낸다.
- *
- * 넘기는 상대는 명단에서 기다리는 멤버일 수도 있다. 그러면 그 자리에서 들어와
- * 답하고, 라운드가 끝나면 다시 대기로 돌아간다.
- *
- * 끝나는 경우: `[DONE]`, 다른 참가자 모두가 연달아 `[PASS]`, 자동 턴 한도,
- * 정지, 실행 실패. 실패에서 멈추는 이유는 다음 참가자가 실패한 답을 받아
- * 엉뚱하게 이어가기 쉬워서다 — 사용자가 보고 다시 시키는 편이 낫다.
- * 자동 턴은 차례 하나, 분담 한 번, 동시 호출 한 번(동시에 몇 명이 일하든)을
- * 각각 하나로 센다.
- */
-/**
  * 곁가지 차례의 넘김을 따라간다. 원래 라운드와 같은 규칙이되 의견 차례와 순서대로
  * 돌리기는 하지 않는다 — 그건 원래 라운드가 쥔 흐름이다.
  *
@@ -951,18 +1027,21 @@ async function runCommentRound(
  * - 그 밖: `@이름` 하나는 그 참가자에게, 여럿은 동시에 부른 뒤 부른 쪽이 정리한다.
  *
  * 부른 참가자가 원래 라운드에서 일하는 중이면 그 차례가 끝나기를 기다린다.
- * 자동 턴 한도와 정지, 새 사용자 글은 원래 라운드와 똑같이 지킨다.
+ * 자동 턴 한도와 정지는 원래 라운드와 똑같이 지킨다.
  */
 async function followSideHandoffs(
   roomId: string,
   first: RoomParticipant,
   firstResult: TurnResult,
   loop: RoomLoopState,
+  initialCalledByHost = false,
 ): Promise<void> {
   let speaker = first;
   let result = firstResult;
-  let calledByHost = false;
-  while (!loop.halted && !loop.pendingUserMessage) {
+  let calledByHost = initialCalledByHost;
+  // 새 사용자 글이 와도 멈추지 않는다. 그 글은 원래 라운드가 받고, 이미 부른
+  // 참가자의 일은 끝까지 간다 — 멈추면 부른 참가자가 시작조차 하지 않는다.
+  while (!loop.halted) {
     if (!result.message || result.message.status !== 'complete') return;
     const room = roomsDb.getRoom(roomId);
     if (!room || loop.turnCount >= room.max_auto_turns) return;
@@ -979,7 +1058,7 @@ async function followSideHandoffs(
       broadcastState(room);
       await runGroupCall(room, speaker, called, loop);
       broadcastState(room);
-      if (loop.halted || loop.pendingUserMessage || loop.turnCount >= room.max_auto_turns) return;
+      if (loop.halted || loop.turnCount >= room.max_auto_turns) return;
       loop.turnCount += 1;
       broadcastState(room);
       result = await runParticipantTurn(room, speaker, loop, {
@@ -1023,6 +1102,136 @@ async function followSideHandoffs(
 }
 
 /**
+ * 라운드 밖에서 생긴 흐름(백그라운드 보고, 끼어든 사용자 글에 밀린 부르기)을
+ * 돌린다. 라운드가 도는 중이면 곁가지 차례로 붙이고, 쉬는 중이면 그 흐름만으로
+ * 라운드를 하나 연다 — 그래야 정지·상태 표시·라운드 마무리가 똑같이 적용된다.
+ */
+function runAside(roomId: string, loop: RoomLoopState, work: () => Promise<void>): void {
+  const room = roomsDb.getRoom(roomId);
+  if (!room) return;
+  if (loop.running) {
+    const task: Promise<void> = work()
+      .catch((error: unknown) => {
+        console.error('[Rooms] 곁가지 흐름이 실패했습니다', { roomId, error: error instanceof Error ? error.message : String(error) });
+      })
+      .finally(() => {
+        loop.sideTurns.delete(task);
+        broadcastState(room);
+      });
+    loop.sideTurns.add(task);
+    return;
+  }
+  loop.running = true;
+  loop.inRound = true;
+  loop.halted = false;
+  loop.turnCount = 0;
+  broadcastState(room);
+  void (async () => {
+    try {
+      await work();
+    } catch (error) {
+      console.error('[Rooms] 곁가지 흐름이 실패했습니다', { roomId, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      await finishRound(roomId, loop);
+    }
+  })();
+}
+
+/**
+ * 백그라운드 작업이 차례 뒤에 보고하러 왔다. 그 세션의 후속 답을 이 참가자의
+ * 답으로 룸에 올리고, 넘김을 따라간다. 방장 주도에서 방장 아닌 참가자의 보고는
+ * 방장에게 돌아간다 — 그 일은 방장이 맡긴 것이다.
+ */
+async function pickUpBackgroundReport(sessionId: string): Promise<void> {
+  const since = backgroundWaits.get(sessionId);
+  if (since === undefined || !runtime) return;
+  const row = roomsDb.getParticipantBySession(sessionId);
+  const room = row ? roomsDb.getRoom(row.room_id) : null;
+  if (!row || !room) {
+    backgroundWaits.delete(sessionId);
+    return;
+  }
+  const loop = getLoop(room.room_id);
+  // 그 사이 룸이 이 세션에 새 차례를 줬다. 그 차례가 답을 거둔다.
+  if (loop.active.has(row.participant_id)) return;
+
+  let texts: string[] = [];
+  try {
+    const history = await sessionsService.fetchHistory(sessionId, { limit: 60 });
+    texts = history.messages
+      .filter((message) => message.kind === 'text' && message.role === 'assistant' && message.content?.trim())
+      .filter((message) => {
+        const at = Date.parse(message.timestamp);
+        return Number.isFinite(at) && at > since;
+      })
+      .map((message) => message.content!.trim());
+  } catch (error) {
+    console.warn('[Rooms] 백그라운드 보고를 읽지 못했습니다', { roomId: room.room_id, sessionId, error: error instanceof Error ? error.message : String(error) });
+    return;
+  }
+  if (texts.length === 0) return;
+  // 보고가 또 백그라운드 작업을 걸었을 수 있다. 다음 보고는 지금 뒤의 것만 옮긴다.
+  backgroundWaits.set(sessionId, Date.now());
+
+  const me = toRoomParticipant(row, room);
+  const all = texts.join('\n\n');
+  const last = texts.at(-1) ?? '';
+  const handoff = parseHandoff(last, listRoster(room), me.participantId);
+  const inserted = roomsDb.insertMessage({
+    roomId: room.room_id,
+    speaker: me.participantId,
+    text: `[백그라운드 작업 보고]\n\n${all}`,
+    status: 'complete',
+    sessionId,
+    finalText: last || null,
+    handoff: serializeHandoff(handoff.kind === 'none' ? null : handoff),
+    turnKind: 'reply',
+    task: null,
+  });
+  const message = toRoomMessage(inserted);
+  broadcastRoomFrame({ kind: 'room_message', roomId: room.room_id, message });
+  scheduleFollowUps(room, me, loop, all);
+  console.log('[Rooms] 백그라운드 작업 보고를 룸에 올렸습니다', { roomId: room.room_id, participantId: me.participantId });
+
+  const calledByHost = room.host_led !== 0 && !me.isHost;
+  runAside(room.room_id, loop, () => followSideHandoffs(room.room_id, me, { message, handoff, assignments: [] }, loop, calledByHost));
+}
+
+/** 라운드를 닫는다. 남은 곁가지 차례를 기다리고, 상태를 지우고, 기다리던 글이 있으면 다시 돈다. */
+async function finishRound(roomId: string, loop: RoomLoopState): Promise<void> {
+  // 사용자 글을 바로 받아 돌던 차례가 남아 있으면 끝날 때까지 라운드를 닫지 않는다.
+  while (loop.sideTurns.size > 0) {
+    await Promise.allSettled([...loop.sideTurns]);
+  }
+  loop.running = false;
+  loop.active.clear();
+  loop.readOnlyActive.clear();
+  loop.phase = 'idle';
+  // 라운드가 끝났다. 서버가 내려가며 끊긴 것이면 상태를 남겨 다시 뜰 때 이어 간다.
+  loop.inRound = false;
+  if (!isShuttingDown()) {
+    try {
+      roomsDb.setLoopState(roomId, null);
+    } catch (error) {
+      console.error('[Rooms] Failed to clear the round state', { roomId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  // 불려 와 일하던 멤버는 라운드가 어떻게 끝났든 대기로 돌아간다.
+  returnSummonedToStandby(roomId);
+  const room = roomsDb.getRoom(roomId);
+  if (room) {
+    broadcastState(room);
+  }
+  // 마지막 차례가 끝나는 순간 들어온 글이 있으면 다시 돈다 — 그러면 아직
+  // "완전히 끝난" 게 아니라서 여기서는 알리지 않는다. 다음에 멈출 때 한 번만.
+  if (loop.pendingUserMessage && !loop.halted && room) {
+    void runLoop(roomId);
+  } else {
+    notifyTelegramRoundFinished(roomId);
+  }
+}
+
+/**
  * 라운드가 도는 중에 쉬고 있는 참가자가 사용자 글을 바로 받는 차례. 일하던
  * 참가자와 동시에 돈다. 한 명이면 평소처럼(파일도 고칠 수 있게), 여럿을 함께
  * 불렀으면 함께 부르기처럼 읽기 전용으로 답한다.
@@ -1062,6 +1271,20 @@ function startSideTurn(room: RoomRow, targets: RoomParticipant[], loop: RoomLoop
   loop.sideTurns.add(task);
 }
 
+/**
+ * 사용자 메시지 하나로 시작해, 참가자들이 넘김 표시대로 차례를 주고받는다.
+ * 분담이 켜져 있으면 답이 맡긴 일을 동시에 돌리고 맡긴 참가자가 정리하며,
+ * 의견이 켜져 있으면 답마다 나머지가 의견을 낸다.
+ *
+ * 넘기는 상대는 명단에서 기다리는 멤버일 수도 있다. 그러면 그 자리에서 들어와
+ * 답하고, 라운드가 끝나면 다시 대기로 돌아간다.
+ *
+ * 끝나는 경우: `[DONE]`, 다른 참가자 모두가 연달아 `[PASS]`, 자동 턴 한도,
+ * 정지, 실행 실패. 실패에서 멈추는 이유는 다음 참가자가 실패한 답을 받아
+ * 엉뚱하게 이어가기 쉬워서다 — 사용자가 보고 다시 시키는 편이 낫다.
+ * 자동 턴은 차례 하나, 분담 한 번, 동시 호출 한 번(동시에 몇 명이 일하든)을
+ * 각각 하나로 센다.
+ */
 async function runLoop(roomId: string): Promise<void> {
   const loop = getLoop(roomId);
   loop.running = true;
@@ -1188,6 +1411,14 @@ async function runLoop(roomId: string): Promise<void> {
         break;
       }
       if (loop.pendingUserMessage) {
+        // 사용자 글이 끼어들어 흐름이 그 글로 넘어간다. 그래도 이 답이 이미 누군가를
+        // 불렀다면 그 부르기는 살린다 — 버리면 타임라인엔 "넘김" 이 적혔는데 부른
+        // 참가자는 시작조차 하지 않는다. 부른 일은 곁가지로 끝까지 간다.
+        const explicitCall = handoff.kind === 'mention' || handoff.kind === 'group';
+        if (message?.status === 'complete' && explicitCall && (!hostLed || speaker.isHost)) {
+          const carried: TurnResult = { message, handoff, assignments: [] };
+          runAside(roomId, loop, () => followSideHandoffs(roomId, speaker, carried, loop));
+        }
         continue;
       }
       if (!message || message.status !== 'complete') {
@@ -1326,36 +1557,7 @@ async function runLoop(roomId: string): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[Rooms] Room loop failed', { roomId, error: message });
   } finally {
-    // 사용자 글을 바로 받아 돌던 차례가 남아 있으면 끝날 때까지 라운드를 닫지 않는다.
-    while (loop.sideTurns.size > 0) {
-      await Promise.allSettled([...loop.sideTurns]);
-    }
-    loop.running = false;
-    loop.active.clear();
-    loop.readOnlyActive.clear();
-    loop.phase = 'idle';
-    // 라운드가 끝났다. 서버가 내려가며 끊긴 것이면 상태를 남겨 다시 뜰 때 이어 간다.
-    loop.inRound = false;
-    if (!isShuttingDown()) {
-      try {
-        roomsDb.setLoopState(roomId, null);
-      } catch (error) {
-        console.error('[Rooms] Failed to clear the round state', { roomId, error: error instanceof Error ? error.message : String(error) });
-      }
-    }
-    // 불려 와 일하던 멤버는 라운드가 어떻게 끝났든 대기로 돌아간다.
-    returnSummonedToStandby(roomId);
-    const room = roomsDb.getRoom(roomId);
-    if (room) {
-      broadcastState(room);
-    }
-    // 마지막 차례가 끝나는 순간 들어온 글이 있으면 다시 돈다 — 그러면 아직
-    // "완전히 끝난" 게 아니라서 여기서는 알리지 않는다. 다음에 멈출 때 한 번만.
-    if (loop.pendingUserMessage && !loop.halted && room) {
-      void runLoop(roomId);
-    } else {
-      notifyTelegramRoundFinished(roomId);
-    }
+    await finishRound(roomId, loop);
   }
 }
 
@@ -1541,6 +1743,15 @@ export const roomTurnEngine = {
     runtime = gateway;
     closing = false;
     readTokenUsage = options.readTokenUsage ?? defaultTokenUsageReader;
+    stopWatchingBackgroundWork?.();
+    stopWatchingBackgroundWork = onBackgroundWorkCompleted(({ sessionId }: { sessionId: string | null }) => {
+      if (!sessionId) return;
+      // 런타임은 앱 세션 id 나 프로바이더 세션 id 중 하나를 준다.
+      const appSessionId = backgroundWaits.has(sessionId)
+        ? sessionId
+        : sessionsDb.getSessionByProviderSessionId(sessionId)?.session_id ?? sessionId;
+      void pickUpBackgroundReport(appSessionId);
+    });
   },
 
   close(): void {
@@ -1549,6 +1760,9 @@ export const roomTurnEngine = {
       loop.halted = true;
     }
     loops.clear();
+    backgroundWaits.clear();
+    stopWatchingBackgroundWork?.();
+    stopWatchingBackgroundWork = null;
     runtime = null;
     readTokenUsage = defaultTokenUsageReader;
   },
