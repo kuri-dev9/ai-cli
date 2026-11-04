@@ -229,6 +229,57 @@ test('a message sent mid-turn to an idle participant is answered right away, alo
   });
 });
 
+test('곁가지로 글을 받은 방장이 다른 참가자를 부르면 그 참가자가 실제로 답한다', async () => {
+  await withRoom(10, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const reviewerGate = new Promise<void>((resolve) => { release = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [REVIEWER]: [async () => { await reviewerGate; return '구현 끝'; }],
+      [HOST]: ['구현은 @Claude3 이 맡아 주세요', '정리했습니다 [DONE]'],
+      [SECOND_REVIEWER]: ['맡은 일 했습니다'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 구현해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'reviewer turn started');
+
+    // 리뷰어가 일하는 동안 방장이 곁가지로 글을 받는다.
+    roomsService.postUserMessage(ROOM_ID, { content: '하나 더 부탁해' }, 1);
+    // 방장이 넘긴 참가자가 기다리지 않고 들어와 답하고, 답은 방장에게 돌아간다.
+    await waitFor(() => calls.filter((call) => call.sessionId === HOST).length === 2, 'host got the result back');
+    assert.deepEqual(calls.map((call) => call.sessionId), [REVIEWER, HOST, SECOND_REVIEWER, HOST]);
+    release();
+
+    await waitFor(isIdle, 'round done');
+  }, { hostLed: true, thirdParticipant: true });
+});
+
+test('곁가지 차례가 일하는 중인 참가자를 부르면 그 차례가 끝난 뒤에 답한다', async () => {
+  await withRoom(10, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const reviewerGate = new Promise<void>((resolve) => { release = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [REVIEWER]: [async () => { await reviewerGate; return '구현 끝'; }, '이어서 봤습니다'],
+      [HOST]: ['@Claude2 끝나면 이것도 봐 주세요', '정리했습니다 [DONE]'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 구현해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'reviewer turn started');
+    roomsService.postUserMessage(ROOM_ID, { content: '진행 어때?' }, 1);
+    await waitFor(() => calls.length === 2, 'host side turn');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    // 한 세션에서 두 실행을 돌리지 않는다.
+    assert.equal(calls.length, 2);
+
+    release();
+    await waitFor(() => isIdle() && calls.length === 4, 'reviewer answered after its turn');
+    assert.deepEqual(calls.map((call) => call.sessionId), [REVIEWER, HOST, REVIEWER, HOST]);
+  }, { hostLed: true });
+});
+
 test('stop aborts the active participant and records the turn as aborted', async () => {
   await withRoom(6, async () => {
     const calls: Call[] = [];

@@ -114,6 +114,11 @@ type RoomLoopState = {
    * 쉬는 참가자만 먼저 줄일 때 생긴다. 그 참가자의 차례는 압축이 끝난 뒤에 시작한다.
    */
   compacting: Map<string, Promise<void>>;
+  /**
+   * 차례를 쥔 참가자 → 그 차례가 끝나는 약속. 라운드와 곁가지 차례가 같은 참가자를
+   * 동시에 부르면 한 세션에서 두 실행이 돌게 되므로, 뒤에 온 쪽이 이것을 기다린다.
+   */
+  turnLocks: Map<string, Promise<void>>;
 };
 
 /** 라운드가 도는 동안 DB 에 적어 두는 일하던 참가자. */
@@ -220,6 +225,7 @@ function getLoop(roomId: string): RoomLoopState {
       resumeCount: 0,
       resume: null,
       compacting: new Map(),
+      turnLocks: new Map(),
     };
     loops.set(roomId, loop);
   }
@@ -408,7 +414,27 @@ function resolveTurnPermissions(me: RoomParticipant, readOnly: boolean): AnyReco
   };
 }
 
+/**
+ * 참가자 한 명의 차례를 다른 차례와 겹치지 않게 돌린다. 그 참가자가 이미 다른
+ * 흐름에서 일하는 중이면 끝나기를 기다린 뒤 시작한다.
+ */
 async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, loop: RoomLoopState, options: TurnOptions): Promise<TurnResult> {
+  let held = loop.turnLocks.get(participant.participantId);
+  while (held) {
+    await held;
+    held = loop.turnLocks.get(participant.participantId);
+  }
+  let release!: () => void;
+  loop.turnLocks.set(participant.participantId, new Promise<void>((resolve) => { release = resolve; }));
+  try {
+    return await runParticipantTurnNow(room, participant, loop, options);
+  } finally {
+    loop.turnLocks.delete(participant.participantId);
+    release();
+  }
+}
+
+async function runParticipantTurnNow(room: RoomRow, participant: RoomParticipant, loop: RoomLoopState, options: TurnOptions): Promise<TurnResult> {
   if (!runtime) {
     throw new Error('Room engine is not initialized.');
   }
@@ -917,12 +943,94 @@ async function runCommentRound(
  * 각각 하나로 센다.
  */
 /**
+ * 곁가지 차례의 넘김을 따라간다. 원래 라운드와 같은 규칙이되 의견 차례와 순서대로
+ * 돌리기는 하지 않는다 — 그건 원래 라운드가 쥔 흐름이다.
+ *
+ * - 방장 주도: 방장이 부른 참가자가 답하고, 그 답은 방장에게 돌아간다. 방장이
+ *   부르지 않은 참가자는 방장을 부를 때만 넘어간다.
+ * - 그 밖: `@이름` 하나는 그 참가자에게, 여럿은 동시에 부른 뒤 부른 쪽이 정리한다.
+ *
+ * 부른 참가자가 원래 라운드에서 일하는 중이면 그 차례가 끝나기를 기다린다.
+ * 자동 턴 한도와 정지, 새 사용자 글은 원래 라운드와 똑같이 지킨다.
+ */
+async function followSideHandoffs(
+  roomId: string,
+  first: RoomParticipant,
+  firstResult: TurnResult,
+  loop: RoomLoopState,
+): Promise<void> {
+  let speaker = first;
+  let result = firstResult;
+  let calledByHost = false;
+  while (!loop.halted && !loop.pendingUserMessage) {
+    if (!result.message || result.message.status !== 'complete') return;
+    const room = roomsDb.getRoom(roomId);
+    if (!room || loop.turnCount >= room.max_auto_turns) return;
+    const roster = listRoster(room);
+    const hostLed = room.host_led !== 0;
+    const host = roster.find((participant) => participant.isHost);
+    const handoff = result.handoff;
+
+    if (handoff.kind === 'group' && (!hostLed || speaker.isHost)) {
+      const called = handoff.participantIds
+        .map((participantId) => roster.find((participant) => participant.participantId === participantId))
+        .filter((participant): participant is RoomParticipant => Boolean(participant));
+      loop.turnCount += 1;
+      broadcastState(room);
+      await runGroupCall(room, speaker, called, loop);
+      broadcastState(room);
+      if (loop.halted || loop.pendingUserMessage || loop.turnCount >= room.max_auto_turns) return;
+      loop.turnCount += 1;
+      broadcastState(room);
+      result = await runParticipantTurn(room, speaker, loop, {
+        mode: { kind: 'summary' },
+        readOnly: false,
+        turnKind: 'summary',
+        readAssignments: false,
+        dropPass: false,
+      });
+      calledByHost = false;
+      continue;
+    }
+
+    let next: RoomParticipant | null = null;
+    if (hostLed && host) {
+      if (speaker.isHost) {
+        if (handoff.kind !== 'mention') return;
+        next = roster.find((participant) => participant.participantId === handoff.participantId) ?? null;
+        calledByHost = true;
+      } else if (calledByHost || (handoff.kind === 'mention' && handoff.participantId === host.participantId)) {
+        // 방장이 부른 참가자의 답은 넘김 표시와 상관없이 방장에게 돌아간다.
+        next = host;
+        calledByHost = false;
+      }
+    } else if (handoff.kind === 'mention') {
+      next = roster.find((participant) => participant.participantId === handoff.participantId) ?? null;
+    }
+    if (!next) return;
+
+    loop.turnCount += 1;
+    broadcastState(room);
+    result = await runParticipantTurn(room, next, loop, {
+      mode: { kind: 'turn' },
+      readOnly: false,
+      turnKind: 'reply',
+      readAssignments: false,
+      dropPass: false,
+    });
+    speaker = next;
+  }
+}
+
+/**
  * 라운드가 도는 중에 쉬고 있는 참가자가 사용자 글을 바로 받는 차례. 일하던
  * 참가자와 동시에 돈다. 한 명이면 평소처럼(파일도 고칠 수 있게), 여럿을 함께
  * 불렀으면 함께 부르기처럼 읽기 전용으로 답한다.
  *
- * 이 답의 넘김 표시는 따라가지 않는다. 흐름은 원래 라운드가 쥐고 있고, 이 답은
- * 다음 차례의 참가자들이 대화 기록으로 읽는다.
+ * 한 명이 받은 답의 넘김 표시는 따라간다(`followSideHandoffs`). 방장이 곁가지로
+ * 글을 받아 다른 참가자를 부르는 일이 흔한데, 그 넘김을 버리면 타임라인에는
+ * "○○ 에게 넘김" 이 적혀 있는데 아무도 움직이지 않는다. 여럿을 함께 부른 답은
+ * 원래 라운드처럼 거기서 끝낸다.
  */
 function startSideTurn(room: RoomRow, targets: RoomParticipant[], loop: RoomLoopState): void {
   const task: Promise<void> = (async () => {
@@ -932,13 +1040,14 @@ function startSideTurn(room: RoomRow, targets: RoomParticipant[], loop: RoomLoop
       await runGroupCall(room, null, targets, loop);
       return;
     }
-    await runParticipantTurn(room, targets[0], loop, {
+    const result = await runParticipantTurn(room, targets[0], loop, {
       mode: { kind: 'turn' },
       readOnly: false,
       turnKind: 'reply',
       readAssignments: false,
       dropPass: false,
     });
+    await followSideHandoffs(room.room_id, targets[0], result, loop);
   })()
     .catch((error: unknown) => {
       console.error('[Rooms] 사용자 글을 바로 받는 차례가 실패했습니다', {
