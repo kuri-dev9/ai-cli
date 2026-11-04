@@ -122,7 +122,9 @@ function TurnLimitInput({ value, label, onCommit }: { value: number; label: stri
           if (event.key === 'Enter') commit();
           if (event.key === 'Escape') setDraft(null);
         }}
-        className="w-14 rounded border border-border bg-background px-1 py-0.5 text-xs"
+        // 브라우저 기본 위아래 화살표와 추천 목록 ▼ 가 좁은 칸을 차지해 "100" 이 "10(" 로
+        // 잘렸다. 둘 다 감춘다. 값은 키보드 위아래 키로도 바뀌고, 추천은 입력할 때 뜬다.
+        className="w-12 rounded border border-border bg-background px-1 py-0.5 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       <datalist id="room-max-auto-turn-choices">
         {MAX_AUTO_TURN_CHOICES.map((choice) => <option key={choice} value={choice} />)}
