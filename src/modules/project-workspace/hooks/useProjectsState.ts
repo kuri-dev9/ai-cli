@@ -11,6 +11,7 @@ import type { ServerEvent,
 import { mergeProjectSelectionMetadata } from '@/modules/project-workspace/utils/projectSelectionMetadata';
 import { readSelectedProvider } from '@/shared/selectedProvider';
 import { SESSION_ARCHIVED_EVENT } from '@/shared/sessionEvents';
+import { roomMemberSessionIds, useRoomIndex } from '@/shared/hooks/useRoomIndex';
 import { isPathInQuietFolders, readQuietFolders } from '@/shared/quietFolders';
 import {
   findUnseenSessionIds,
@@ -493,6 +494,11 @@ export function useProjectsState({
     if (isPathInQuietFolders(resolvedProjectPath, readQuietFolders().paths)) {
       return;
     }
+    // 룸 참가자 세션은 룸 화면에서 본다. 따로 표시하면 쓰지도 않는 세션마다 매번
+    // 들어가 꺼야 했다. 룸(호스트) 쪽 표시는 그대로 남는다.
+    if (roomMemberSessionIds().has(targetSessionId)) {
+      return;
+    }
 
     setAttentionSessionIds((previous) => {
       if (previous.has(targetSessionId)) {
@@ -508,6 +514,17 @@ export function useProjectsState({
   useEffect(() => {
     writePersistedAttentionIds(attentionSessionIds);
   }, [attentionSessionIds]);
+
+  // 룸에 들어가기 전에 켜졌거나 색인이 늦게 와 걸러지지 않은 참가자 세션의 표시를 지운다.
+  const roomIndex = useRoomIndex();
+  useEffect(() => {
+    const members = roomMemberSessionIds(roomIndex);
+    if (members.size === 0) return;
+    setAttentionSessionIds((previous) => {
+      if (![...previous].some((id) => members.has(id))) return previous;
+      return new Set([...previous].filter((id) => !members.has(id)));
+    });
+  }, [roomIndex, attentionSessionIds]);
 
   const clearSessionAttention = useCallback((targetSessionId?: string | null) => {
     if (!targetSessionId) {
@@ -938,7 +955,7 @@ export function useProjectsState({
       const next = new Set(previous);
       let changed = false;
       for (const unseenSessionId of unseenSessionIds) {
-        if (unseenSessionId === viewedSessionId || next.has(unseenSessionId)) {
+        if (unseenSessionId === viewedSessionId || next.has(unseenSessionId) || roomMemberSessionIds().has(unseenSessionId)) {
           continue;
         }
         next.add(unseenSessionId);

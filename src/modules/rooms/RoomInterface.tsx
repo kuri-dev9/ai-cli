@@ -68,7 +68,6 @@ type RoomInterfaceProps = {
   sendByCtrlEnter?: boolean;
 };
 
-const MAX_AUTO_TURN_CHOICES = [3, 5, 10, 20];
 /** 바닥에서 이만큼 넘게 올라가 있으면 "맨 아래로" 버튼을 띄운다. 조금 굴린 정도로는 띄우지 않는다. */
 const SCROLL_BUTTON_THRESHOLD_PX = 240;
 /**
@@ -87,8 +86,7 @@ export const ROOM_HEADER_SLOT_ID = 'room-header-participants';
 const MAX_AUTO_TURNS_LIMIT = 100;
 
 /**
- * The auto-turn limit as a free number field, with the old presets offered as
- * suggestions. It commits on Enter or blur rather than per keystroke, so typing
+ * The auto-turn limit as a free number field. It commits on Enter or blur rather than per keystroke, so typing
  * "15" does not briefly set the limit to 1. The loop reads the limit before
  * every turn, so changing it mid-round takes effect on the next turn.
  */
@@ -112,7 +110,6 @@ function TurnLimitInput({ value, label, onCommit }: { value: number; label: stri
         min={1}
         max={MAX_AUTO_TURNS_LIMIT}
         step={1}
-        list="room-max-auto-turn-choices"
         aria-label={label}
         title={label}
         value={draft ?? String(value)}
@@ -122,13 +119,11 @@ function TurnLimitInput({ value, label, onCommit }: { value: number; label: stri
           if (event.key === 'Enter') commit();
           if (event.key === 'Escape') setDraft(null);
         }}
-        // 브라우저 기본 위아래 화살표와 추천 목록 ▼ 가 좁은 칸을 차지해 "100" 이 "10(" 로
-        // 잘렸다. 둘 다 감춘다. 값은 키보드 위아래 키로도 바뀌고, 추천은 입력할 때 뜬다.
-        className="w-12 rounded border border-border bg-background px-1 py-0.5 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        // 브라우저 기본 위아래 화살표가 좁은 칸을 차지해 숫자가 잘렸다. 감춘다 — 값은
+        // 직접 쓰거나 키보드 위아래 키로 바꾼다. 추천 목록(datalist)도 포커스마다 ▼ 를
+        // 그려 뺐다.
+        className="w-12 rounded border border-border bg-background px-1 py-0.5 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <datalist id="room-max-auto-turn-choices">
-        {MAX_AUTO_TURN_CHOICES.map((choice) => <option key={choice} value={choice} />)}
-      </datalist>
     </>
   );
 }

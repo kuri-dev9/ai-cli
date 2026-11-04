@@ -120,6 +120,20 @@ export type RoomMembership = {
 };
 
 /**
+ * Every session that takes part in a room without being its host. These are
+ * followed from the room view, so the sidebar does not flag them on their own.
+ */
+export function roomMemberSessionIds(index: RoomIndexEntry[] | null = roomIndexSnapshot): Set<string> {
+  const ids = new Set<string>();
+  for (const room of index ?? []) {
+    for (const member of room.participants) {
+      if (member.sessionId && member.sessionId !== room.hostSessionId) ids.add(member.sessionId);
+    }
+  }
+  return ids;
+}
+
+/**
  * Looks up which room, if any, a session belongs to. Returns null while the
  * index is still loading or when the session is not in a room.
  */
