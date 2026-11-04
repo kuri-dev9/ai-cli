@@ -277,3 +277,40 @@ describe('isSyntheticPromptFrame', () => {
     expect(isSyntheticPromptFrame({ kind: 'text', role: 'assistant', id: 'local_1' })).toBe(false);
   });
 });
+
+describe('room timeline window', () => {
+  const windowOf = (ids: number[], hasOlderMessages: boolean): RoomDetail => ({
+    ...detail,
+    messages: ids.map((id) => message({ id })),
+    hasOlderMessages,
+  });
+
+  it('prepends earlier messages and takes their "more" flag', () => {
+    const first = roomViewReducer(INITIAL_ROOM_VIEW_STATE, { type: 'detail_loaded', detail: windowOf([5, 6, 7], true) });
+    const next = roomViewReducer(first, {
+      type: 'older_messages_loaded',
+      roomId: 'room-1',
+      messages: [message({ id: 3 }), message({ id: 4 }), message({ id: 5 })],
+      hasOlderMessages: false,
+    });
+    expect(next.detail?.messages.map((entry) => entry.id)).toEqual([3, 4, 5, 6, 7]);
+    expect(next.detail?.hasOlderMessages).toBe(false);
+  });
+
+  it('keeps the earlier messages the user pulled in when a refetch overlaps them', () => {
+    const first = roomViewReducer(INITIAL_ROOM_VIEW_STATE, { type: 'detail_loaded', detail: windowOf([5, 6, 7], true) });
+    const withOlder = roomViewReducer(first, {
+      type: 'older_messages_loaded', roomId: 'room-1', messages: [message({ id: 3 }), message({ id: 4 })], hasOlderMessages: false,
+    });
+    const refetched = roomViewReducer(withOlder, { type: 'detail_loaded', detail: windowOf([6, 7, 8], true) });
+    expect(refetched.detail?.messages.map((entry) => entry.id)).toEqual([3, 4, 5, 6, 7, 8]);
+    expect(refetched.detail?.hasOlderMessages).toBe(false);
+  });
+
+  it('replaces the list when the refetched window leaves a gap', () => {
+    const first = roomViewReducer(INITIAL_ROOM_VIEW_STATE, { type: 'detail_loaded', detail: windowOf([1, 2], false) });
+    const refetched = roomViewReducer(first, { type: 'detail_loaded', detail: windowOf([10, 11], true) });
+    expect(refetched.detail?.messages.map((entry) => entry.id)).toEqual([10, 11]);
+    expect(refetched.detail?.hasOlderMessages).toBe(true);
+  });
+});

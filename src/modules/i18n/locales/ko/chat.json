@@ -447,6 +447,7 @@
     "openSession": "세션 열기",
     "aborted": "중단됨",
     "error": "오류",
+    "loadOlderMessages": "이전 대화 더 보기",
     "emptyTimeline": "메시지를 보내면 참가자들이 차례로 답합니다. @이름으로 다음에 답할 참가자를 지정할 수 있습니다.",
     "showHostHistory": "룸 이전 대화 보기",
     "hideHostHistory": "룸 이전 대화 접기",

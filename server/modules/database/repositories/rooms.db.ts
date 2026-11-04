@@ -455,6 +455,25 @@ export const roomsDb = {
       .all(roomId) as RoomMessageRow[];
   },
 
+  /**
+   * 가장 최근 메시지 `limit` 개를 오래된 것부터. 오래 쓴 룸을 열 때 타임라인 전체를
+   * 싣지 않기 위해 쓴다. `beforeId` 를 주면 그 앞의 것들에서 고른다.
+   */
+  listRecentMessages(roomId: string, limit: number, beforeId?: number): RoomMessageRow[] {
+    const db = getConnection();
+    const rows = beforeId === undefined
+      ? db.prepare('SELECT * FROM room_messages WHERE room_id = ? ORDER BY id DESC LIMIT ?').all(roomId, limit)
+      : db.prepare('SELECT * FROM room_messages WHERE room_id = ? AND id < ? ORDER BY id DESC LIMIT ?').all(roomId, beforeId, limit);
+    return (rows as RoomMessageRow[]).reverse();
+  },
+
+  /** 마지막 사용자 글. 타임라인 전체를 읽지 않고 찾는다. */
+  getLatestUserMessage(roomId: string): RoomMessageRow | null {
+    return (getConnection()
+      .prepare("SELECT * FROM room_messages WHERE room_id = ? AND speaker = 'user' ORDER BY id DESC LIMIT 1")
+      .get(roomId) as RoomMessageRow | undefined) ?? null;
+  },
+
   listMessagesAfter(roomId: string, afterId: number): RoomMessageRow[] {
     return getConnection()
       .prepare('SELECT * FROM room_messages WHERE room_id = ? AND id > ? ORDER BY id')

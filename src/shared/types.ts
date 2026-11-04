@@ -1487,7 +1487,10 @@ export type RoomDetail = {
   participants: RoomParticipant[];
   /** Members who left; kept only to name their earlier timeline entries. */
   formerParticipants: RoomParticipant[];
+  /** Only the most recent messages; `hasOlderMessages` says whether more come before them. */
   messages: RoomMessage[];
+  /** Whether messages older than `messages` exist and can be loaded on demand. */
+  hasOlderMessages?: boolean;
   state: RoomRuntimeState;
 };
 

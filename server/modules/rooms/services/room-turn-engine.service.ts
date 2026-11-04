@@ -866,13 +866,7 @@ function scheduleFollowUps(room: RoomRow, me: RoomParticipant, loop: RoomLoopSta
 }
 
 function latestUserMessageText(roomId: string): string {
-  const messages = roomsDb.listMessages(roomId);
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].speaker === 'user') {
-      return messages[index].text;
-    }
-  }
-  return '';
+  return roomsDb.getLatestUserMessage(roomId)?.text ?? '';
 }
 
 /** 분담이 켜져 있는지. 혼자 남은 룸에서는 나눌 상대가 없다. */

@@ -448,6 +448,7 @@
     "openSession": "Open session",
     "aborted": "Aborted",
     "error": "Error",
+    "loadOlderMessages": "Show earlier messages",
     "emptyTimeline": "Send a message and the participants answer in turn. Use @name to choose who answers next.",
     "showHostHistory": "Show the conversation before the room",
     "hideHostHistory": "Hide the conversation before the room",

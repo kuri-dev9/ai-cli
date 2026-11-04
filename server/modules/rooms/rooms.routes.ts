@@ -62,6 +62,21 @@ router.get(
 );
 
 router.get(
+  '/:roomId/messages',
+  asyncHandler(async (req: Request, res: Response) => {
+    const beforeId = Number(req.query.before);
+    if (!Number.isInteger(beforeId) || beforeId <= 0) {
+      throw new AppError('before 는 메시지 번호여야 합니다.', { code: 'INVALID_BEFORE', statusCode: 400 });
+    }
+    res.json(createApiSuccessResponse(roomsService.listOlderMessages(
+      readRequiredString(req.params.roomId, 'roomId'),
+      beforeId,
+      Number(req.query.limit),
+    )));
+  }),
+);
+
+router.get(
   '/:roomId',
   asyncHandler(async (req: Request, res: Response) => {
     res.json(createApiSuccessResponse(roomsService.getRoomDetail(readRequiredString(req.params.roomId, 'roomId'))));

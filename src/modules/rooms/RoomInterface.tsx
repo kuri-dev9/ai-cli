@@ -207,6 +207,7 @@ export function RoomInterface({
     setLeader,
     applyDetail,
     answerPermission,
+    loadOlderMessages,
   } = useRoom(hostSessionId);
 
   const createDiff = useMemo(() => createCachedDiffCalculator(), []);
@@ -293,6 +294,27 @@ export function RoomInterface({
     [mention, participants],
   );
   const isMentionListOpen = Boolean(mention && mentionCandidates.length > 0);
+
+  /**
+   * 이전 대화를 더 불러온다. 위에 항목이 붙어도 보던 자리가 그대로 남도록, 바닥에서의
+   * 거리를 재 두었다가 다시 맞춘다.
+   */
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const handleLoadOlder = () => {
+    const container = scrollRef.current;
+    const fromBottom = container ? container.scrollHeight - container.scrollTop : 0;
+    setLoadingOlder(true);
+    void loadOlderMessages()
+      .catch((error: unknown) => console.warn('[Rooms] Failed to load earlier messages:', error))
+      .finally(() => {
+        setLoadingOlder(false);
+        requestAnimationFrame(() => {
+          if (!container) return;
+          container.scrollTop = container.scrollHeight - fromBottom;
+          scrollSampleRef.current = { top: container.scrollTop, height: container.scrollHeight };
+        });
+      });
+  };
 
   /** 바닥으로 내린다. 우리가 내린 것이니 기준도 옮겨, 이 스크롤을 사용자가 움직인 것으로 읽지 않는다. */
   const pinToBottom = useCallback(() => {
@@ -1235,6 +1257,19 @@ export function RoomInterface({
 
           {detail.messages.length === 0 && liveTurns.length === 0 && (
             <p className="px-3 text-center text-sm text-muted-foreground">{t('rooms.emptyTimeline')}</p>
+          )}
+          {detail.hasOlderMessages && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={handleLoadOlder}
+                disabled={loadingOlder}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
+              >
+                {loadingOlder ? <Loader2 className="h-3 w-3 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5 rotate-180" />}
+                {t('rooms.loadOlderMessages')}
+              </button>
+            </div>
           )}
           {detail.messages.map(renderRoomMessage)}
 

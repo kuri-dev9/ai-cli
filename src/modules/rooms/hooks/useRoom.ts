@@ -25,9 +25,11 @@ export function useRoom(hostSessionId: string) {
   const roomId = viewState.detail?.room.roomId ?? null;
   // Lets the stable action callbacks below read the room without re-creating them.
   const roomIdRef = useRef(roomId);
+  const viewStateRef = useRef(viewState);
   useLayoutEffect(() => {
     roomIdRef.current = roomId;
-  }, [roomId]);
+    viewStateRef.current = viewState;
+  });
 
   const reload = useCallback(async () => {
     try {
@@ -168,6 +170,21 @@ export function useRoom(hostSessionId: string) {
     }
   }, []);
 
+  /** Pulls in the timeline entries before the oldest one on screen. */
+  const loadOlderMessages = useCallback(async () => {
+    const currentRoomId = roomIdRef.current;
+    const oldest = viewStateRef.current.detail?.messages[0];
+    if (!currentRoomId || !oldest) return;
+    const response = await api.rooms.olderMessages(currentRoomId, oldest.id);
+    const body = await readApiJson<{ data?: { messages?: RoomMessage[]; hasOlderMessages?: boolean } }>(response);
+    dispatch({
+      type: 'older_messages_loaded',
+      roomId: currentRoomId,
+      messages: Array.isArray(body.data?.messages) ? body.data.messages : [],
+      hasOlderMessages: Boolean(body.data?.hasOlderMessages),
+    });
+  }, []);
+
   /** Applies a detail returned by another call (e.g. adding a participant). */
   const applyDetail = useCallback((detail: RoomDetail) => {
     dispatch({ type: 'detail_loaded', detail });
@@ -205,5 +222,6 @@ export function useRoom(hostSessionId: string) {
     setLeader,
     applyDetail,
     answerPermission,
+    loadOlderMessages,
   };
 }

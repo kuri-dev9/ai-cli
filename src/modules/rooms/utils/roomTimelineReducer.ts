@@ -30,6 +30,7 @@ export type RoomViewState = {
 
 export type RoomViewAction =
   | { type: 'detail_loaded'; detail: RoomDetail }
+  | { type: 'older_messages_loaded'; roomId: string; messages: RoomMessage[]; hasOlderMessages: boolean }
   | { type: 'room_message'; message: RoomMessage }
   | { type: 'room_state'; state: RoomRuntimeState }
   | { type: 'live_frame'; event: ServerEvent }
@@ -95,6 +96,29 @@ const insertRoomMessage = (messages: RoomMessage[], message: RoomMessage): RoomM
     return messages.map((existing) => (existing.id === message.id ? message : existing));
   }
   return [...messages, message].sort((a, b) => a.id - b.id);
+};
+
+/**
+ * A refetch carries only the latest window of the timeline. Older entries the
+ * user already pulled in with "show earlier" stay, as long as the new window
+ * overlaps what is on screen — otherwise there is a gap between them and the
+ * window simply replaces the list.
+ */
+const mergeTimelineWindow = (previous: RoomDetail | null, next: RoomDetail): RoomDetail => {
+  if (!previous || previous.room.roomId !== next.room.roomId || next.messages.length === 0) {
+    return next;
+  }
+  const windowStart = next.messages[0].id;
+  const overlaps = previous.messages.some((message) => message.id >= windowStart);
+  const older = previous.messages.filter((message) => message.id < windowStart);
+  if (!overlaps || older.length === 0) {
+    return next;
+  }
+  return {
+    ...next,
+    messages: [...older, ...next.messages],
+    hasOlderMessages: previous.hasOlderMessages,
+  };
 };
 
 const finalizeStreamingFrame = (frames: NormalizedMessage[]): NormalizedMessage[] =>
@@ -225,9 +249,10 @@ export function roomViewReducer(state: RoomViewState, action: RoomViewAction): R
   switch (action.type) {
     case 'detail_loaded': {
       // The rest of the snapshot is fresh even when its runtime state is not.
-      const detail = isStaleState(state.detail?.state, action.detail.state)
-        ? { ...action.detail, state: state.detail!.state }
-        : action.detail;
+      const fresh = mergeTimelineWindow(state.detail, action.detail);
+      const detail = isStaleState(state.detail?.state, fresh.state)
+        ? { ...fresh, state: state.detail!.state }
+        : fresh;
       // Streams of turns still running survive a refetch; the user is watching them.
       const lives = syncLiveBuffers(state.lives, activeSessionsOf(detail.state));
       return {
@@ -235,6 +260,22 @@ export function roomViewReducer(state: RoomViewState, action: RoomViewAction): R
         detail,
         lives,
         pendingPermissions: keepActivePermissions(state.pendingPermissions, lives),
+      };
+    }
+
+    case 'older_messages_loaded': {
+      if (!state.detail || state.detail.room.roomId !== action.roomId) {
+        return state;
+      }
+      const known = new Set(state.detail.messages.map((message) => message.id));
+      const older = action.messages.filter((message) => !known.has(message.id));
+      return {
+        ...state,
+        detail: {
+          ...state.detail,
+          messages: [...older, ...state.detail.messages].sort((a, b) => a.id - b.id),
+          hasOlderMessages: action.hasOlderMessages,
+        },
       };
     }
 

@@ -123,8 +123,28 @@ function buildDetail(room: RoomRow): RoomDetail {
     },
     participants: roomsDb.listParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
     formerParticipants: roomsDb.listFormerParticipants(room.room_id).map((row) => toRoomParticipant(row, room)),
-    messages: roomsDb.listMessages(room.room_id).map(toRoomMessage),
+    ...recentMessages(room.room_id),
     state: roomTurnEngine.getState(room.room_id, room.max_auto_turns),
+  };
+}
+
+/**
+ * 상세에 싣는 최근 메시지 수. 오래 쓴 룸은 타임라인이 수천 개라, 열 때마다 그리고
+ * 참가자가 바뀔 때마다 통째로 싣던 것이 룸을 여는 데 한참 걸리게 했다. 그 앞은
+ * 화면에서 "이전 대화 더 보기" 로 불러온다.
+ */
+export const ROOM_DETAIL_MESSAGE_LIMIT = 60;
+
+/** 한 번에 더 불러오는 이전 메시지 수의 상한. */
+const MAX_OLDER_MESSAGES_PAGE = 200;
+
+/** 최근 메시지와, 그 앞이 더 있는지. 하나 더 읽어 앞이 있는지 본다. */
+function recentMessages(roomId: string, limit = ROOM_DETAIL_MESSAGE_LIMIT, beforeId?: number): { messages: RoomMessage[]; hasOlderMessages: boolean } {
+  const rows = roomsDb.listRecentMessages(roomId, limit + 1, beforeId);
+  const hasOlderMessages = rows.length > limit;
+  return {
+    messages: (hasOlderMessages ? rows.slice(1) : rows).map(toRoomMessage),
+    hasOlderMessages,
   };
 }
 
@@ -256,6 +276,13 @@ export const roomsService = {
 
   getRoomDetail(roomId: string): RoomDetail {
     return buildDetail(requireRoom(roomId));
+  },
+
+  /** `beforeId` 앞의 메시지를 최근 것부터 `limit` 개, 오래된 순으로. */
+  listOlderMessages(roomId: string, beforeId: number, limit: number): { messages: RoomMessage[]; hasOlderMessages: boolean } {
+    requireRoom(roomId);
+    const pageSize = Math.min(Math.max(1, Math.floor(limit) || ROOM_DETAIL_MESSAGE_LIMIT), MAX_OLDER_MESSAGES_PAGE);
+    return recentMessages(roomId, pageSize, beforeId);
   },
 
   /** 이 세션이 호스트인 룸. 룸이 아니면 null — 화면이 일반 대화를 그린다. */

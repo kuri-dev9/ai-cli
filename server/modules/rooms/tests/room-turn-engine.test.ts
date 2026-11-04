@@ -374,6 +374,22 @@ test('긴 보고는 잘린 만큼을 알리고 원문 파일 경로를 붙인다
   });
 });
 
+test('룸 상세는 최근 메시지만 싣고, 그 앞은 따로 불러온다', async () => {
+  await withRoom(6, async () => {
+    for (let index = 0; index < 70; index += 1) {
+      roomsDb.insertMessage({ roomId: ROOM_ID, speaker: 'user', text: `글 ${index}`, status: 'complete', sessionId: null, attachments: null });
+    }
+    const detail = roomsService.getRoomDetail(ROOM_ID);
+    assert.equal(detail.messages.length, 60);
+    assert.equal(detail.messages.at(-1)?.text, '글 69');
+    assert.equal(detail.hasOlderMessages, true);
+
+    const older = roomsService.listOlderMessages(ROOM_ID, detail.messages[0].id, 60);
+    assert.deepEqual(older.messages.map((message) => message.text), Array.from({ length: 10 }, (_, index) => `글 ${index}`));
+    assert.equal(older.hasOlderMessages, false);
+  });
+});
+
 test('stop aborts the active participant and records the turn as aborted', async () => {
   await withRoom(6, async () => {
     const calls: Call[] = [];

@@ -436,6 +436,9 @@ export const api = {
     bySession: (sessionId: string) =>
       get(`/api/rooms/by-session/${encodeURIComponent(sessionId)}`),
     get: (roomId: string) => get(`/api/rooms/${encodeURIComponent(roomId)}`),
+    // Messages before `beforeId`, oldest first. The room detail only carries the latest ones.
+    olderMessages: (roomId: string, beforeId: number, limit = 60) =>
+      get(`/api/rooms/${encodeURIComponent(roomId)}/messages?before=${beforeId}&limit=${limit}`),
     create: (input: CreateRoomInput) => post('/api/rooms', input),
     addParticipant: (roomId: string, participant: RoomParticipantInput) =>
       post(`/api/rooms/${encodeURIComponent(roomId)}/participants`, participant),

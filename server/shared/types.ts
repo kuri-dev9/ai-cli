@@ -1656,6 +1656,9 @@ export type RoomDetail = {
   participants: RoomParticipant[];
   /** 퇴장한 참가자. 타임라인의 지난 발언에 이름을 붙이는 데만 쓴다. */
   formerParticipants: RoomParticipant[];
+  /** 최근 메시지만 싣는다. 그 앞이 더 있으면 `hasOlderMessages` 가 참이다. */
   messages: RoomMessage[];
+  /** `messages` 앞에 아직 싣지 않은 메시지가 있는지. */
+  hasOlderMessages: boolean;
   state: RoomRuntimeState;
 };
