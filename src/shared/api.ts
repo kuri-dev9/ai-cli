@@ -479,6 +479,9 @@ export const api = {
     compact: (roomId: string, participantId?: string) =>
       post(`/api/rooms/${encodeURIComponent(roomId)}/compact`, participantId ? { participantId } : {}),
     interrupt: (roomId: string) => post(`/api/rooms/${encodeURIComponent(roomId)}/interrupt`),
+    // Takes back a message no participant has received yet.
+    cancelPendingMessage: (roomId: string, messageId: number) =>
+      del(`/api/rooms/${encodeURIComponent(roomId)}/messages/${messageId}`),
     stop: (roomId: string) => post(`/api/rooms/${encodeURIComponent(roomId)}/stop`),
   },
 

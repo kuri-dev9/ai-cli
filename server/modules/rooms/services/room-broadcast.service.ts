@@ -3,6 +3,7 @@ import type { RoomMessage, RoomRuntimeState } from '@/shared/types.js';
 
 type RoomFrame =
   | { kind: 'room_message'; roomId: string; message: RoomMessage }
+  | { kind: 'room_message_deleted'; roomId: string; messageId: number }
   | { kind: 'room_state'; roomId: string; state: RoomRuntimeState }
   | { kind: 'room_updated'; roomId: string };
 

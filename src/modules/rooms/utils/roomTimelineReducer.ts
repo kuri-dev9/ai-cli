@@ -32,6 +32,7 @@ export type RoomViewAction =
   | { type: 'detail_loaded'; detail: RoomDetail }
   | { type: 'older_messages_loaded'; roomId: string; messages: RoomMessage[]; hasOlderMessages: boolean }
   | { type: 'room_message'; message: RoomMessage }
+  | { type: 'room_message_deleted'; messageId: number }
   | { type: 'room_state'; state: RoomRuntimeState }
   | { type: 'live_frame'; event: ServerEvent }
   | { type: 'permissions_answered'; requestIds: string[] };
@@ -296,6 +297,15 @@ export function roomViewReducer(state: RoomViewState, action: RoomViewAction): R
         pendingPermissions: keepActivePermissions(state.pendingPermissions, lives),
       };
     }
+
+    case 'room_message_deleted':
+      if (!state.detail) {
+        return state;
+      }
+      return {
+        ...state,
+        detail: { ...state.detail, messages: state.detail.messages.filter((message) => message.id !== action.messageId) },
+      };
 
     case 'room_state': {
       if (!state.detail || isStaleState(state.detail.state, action.state)) {

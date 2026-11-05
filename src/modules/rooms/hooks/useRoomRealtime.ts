@@ -74,6 +74,11 @@ export function useRoomRealtime({ roomId, lives, isRunning, dispatch, reload }: 
             dispatch({ type: 'room_message', message: event.message as RoomMessage });
           }
           return;
+        case 'room_message_deleted':
+          if (event.roomId === roomId && typeof event.messageId === 'number') {
+            dispatch({ type: 'room_message_deleted', messageId: event.messageId });
+          }
+          return;
         case 'room_state':
           if (event.roomId === roomId && event.state) {
             dispatch({ type: 'room_state', state: event.state as RoomRuntimeState });

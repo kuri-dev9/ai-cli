@@ -90,6 +90,11 @@ type RoomLoopState = {
   /** 차례가 도는 중에 사용자가 보낸 글이 있다. 다음 차례 경계에서 처리한다. */
   pendingUserMessage: boolean;
   /**
+   * 기다리는 사용자 글의 번호. 글은 이미 타임라인에 있어서, 취소하려면 어느 글인지
+   * 알아야 지울 수 있다. 라운드가 글을 받거나 정지하면 비운다.
+   */
+  pendingMessageIds: number[];
+  /**
    * 사용자가 끼어들어 끊은 세션. 그 답은 실패가 아니라 중단으로 남기고, 루프는
    * 멈추지 않은 채 기다리던 글로 넘어간다.
    */
@@ -236,6 +241,7 @@ function getLoop(roomId: string): RoomLoopState {
       phase: 'idle',
       turnCount: 0,
       pendingUserMessage: false,
+      pendingMessageIds: [],
       interruptedSessions: new Set(),
       releaseWaiters: new Map(),
       sideTurns: new Set(),
@@ -277,6 +283,7 @@ function readState(roomId: string, maxAutoTurns: number): RoomRuntimeState {
     turnCount: loop?.turnCount ?? 0,
     maxAutoTurns,
     pendingUserMessage: loop?.pendingUserMessage ?? false,
+    pendingMessageId: loop?.pendingMessageIds.at(-1) ?? null,
     compactingParticipantIds: loop ? [...loop.compacting.keys()] : [],
     revision: nextStateRevision(),
   };
@@ -1335,6 +1342,7 @@ async function runLoop(roomId: string): Promise<void> {
       if (loop.pendingUserMessage) {
         // 사용자의 새 글이 이어지던 흐름보다 우선한다. 한도도 새로 센다.
         loop.pendingUserMessage = false;
+        loop.pendingMessageIds = [];
         loop.turnCount = 0;
         // 새 라운드다. 지난 라운드를 몇 번 이어 갔는지는 상관없다.
         loop.resumeCount = 0;
@@ -1849,6 +1857,7 @@ export const roomTurnEngine = {
           startSideTurn(room, targets, loop);
         } else {
           loop.pendingUserMessage = true;
+          loop.pendingMessageIds.push(message.id);
         }
       }
     }
@@ -1893,6 +1902,26 @@ export const roomTurnEngine = {
     return readState(room.room_id, room.max_auto_turns);
   },
 
+  /**
+   * 기다리는 사용자 글을 취소한다. 타임라인에서 지워 다음 차례의 참가자가 읽지 않게
+   * 하고, 돌던 라운드는 하던 대로 이어 간다. 라운드가 이미 받아 간 글은 취소할 수 없다.
+   */
+  cancelPendingMessage(room: RoomRow, messageId: number): RoomRuntimeState {
+    const loop = getLoop(room.room_id);
+    if (!loop.pendingMessageIds.includes(messageId)) {
+      throw new AppError('이미 참가자가 받은 글이라 취소할 수 없습니다.', {
+        code: 'MESSAGE_NOT_PENDING',
+        statusCode: 409,
+      });
+    }
+    loop.pendingMessageIds = loop.pendingMessageIds.filter((id) => id !== messageId);
+    loop.pendingUserMessage = loop.pendingMessageIds.length > 0;
+    roomsDb.deleteMessage(room.room_id, messageId);
+    broadcastRoomFrame({ kind: 'room_message_deleted', roomId: room.room_id, messageId });
+    broadcastState(room);
+    return readState(room.room_id, room.max_auto_turns);
+  },
+
   /** 이 참가자가 지금 일하고 있는지. 퇴장은 일이 끝난 뒤에만 받는다. */
   isSpeaking(roomId: string, participantId: string): boolean {
     const loop = loops.get(roomId);
@@ -1904,6 +1933,7 @@ export const roomTurnEngine = {
     const loop = getLoop(room.room_id);
     loop.halted = true;
     loop.pendingUserMessage = false;
+    loop.pendingMessageIds = [];
     await abortActiveRuns(loop, false);
     broadcastState(room);
     return readState(room.room_id, room.max_auto_turns);

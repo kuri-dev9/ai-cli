@@ -658,6 +658,11 @@ export const roomsService = {
     return roomTurnEngine.compact(room, targets);
   },
 
+  /** 참가자가 받기 전의 사용자 글을 취소한다. */
+  cancelPendingMessage(roomId: string, messageId: number): RoomRuntimeState {
+    return roomTurnEngine.cancelPendingMessage(requireRoom(roomId), messageId);
+  },
+
   async interrupt(roomId: string): Promise<RoomRuntimeState> {
     return roomTurnEngine.interrupt(requireRoom(roomId));
   },

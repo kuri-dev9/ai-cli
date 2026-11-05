@@ -89,6 +89,10 @@ vi.mock('@/shared/api', async (importOriginal) => {
           roomCalls.push({ name: 'interrupt', args });
           return ok({});
         },
+        cancelPendingMessage: (...args: unknown[]) => {
+          roomCalls.push({ name: 'cancelPendingMessage', args });
+          return ok({});
+        },
         update: (...args: unknown[]) => {
           roomCalls.push({ name: 'update', args });
           return ok(roomDetail);
@@ -237,6 +241,22 @@ describe('RoomInterface', () => {
     fireEvent.click(screen.getByRole('button', { name: '지금 끼어들기' }));
     await waitFor(() => expect(roomCalls.some((call) => call.name === 'interrupt')).toBe(true));
   });
+  it('cancels the waiting message the server names, not just the latest one', async () => {
+    roomCalls.length = 0;
+    await renderRoom();
+    const waiting = roomDetail.messages.find((message) => message.speaker === 'user')!;
+
+    emit({
+      kind: 'room_state',
+      roomId: 'room-1',
+      state: { ...roomDetail.state, status: 'running', activeParticipantId: 'p-rev', activeSessionId: 'rev-session', activeParticipantIds: ['p-rev'], activeSessionIds: ['rev-session'], phase: 'turn', pendingUserMessage: true, pendingMessageId: waiting.id },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    await waitFor(() => expect(roomCalls.find((call) => call.name === 'cancelPendingMessage')?.args)
+      .toEqual(['room-1', waiting.id]));
+  });
+
   it('shows a reply as a card with its conclusion up front, the work folded away and the handoff at its foot', async () => {
     await renderRoom();
 

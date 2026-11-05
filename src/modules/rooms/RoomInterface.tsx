@@ -196,6 +196,7 @@ export function RoomInterface({
     loadError,
     postMessage,
     interrupt,
+    cancelPendingMessage,
     stop,
     compact,
     updateSettings,
@@ -832,9 +833,19 @@ export function RoomInterface({
   };
 
   const isFull = participants.length >= ROOM_MAX_PARTICIPANTS;
+  // 사용자 글은 곁가지로 바로 받히기도 해서, 마지막 글이 기다리는 글이라고 단정할 수 없다.
   const waitingUserMessage = isRunning && roomState?.pendingUserMessage
-    ? [...detail.messages].reverse().find((message) => message.speaker === 'user')
+    ? detail.messages.find((message) => message.id === roomState.pendingMessageId)
+      ?? [...detail.messages].reverse().find((message) => message.speaker === 'user')
     : undefined;
+
+  /** 기다리는 글을 취소한다. 잘못 눌러도 다시 보낼 수 있게 입력창이 비어 있으면 글을 돌려놓는다. */
+  const handleCancelWaiting = (message: RoomMessage) => {
+    void runAction(async () => {
+      await cancelPendingMessage(message.id);
+      if (!composer.input.trim()) composer.setInput(message.text);
+    });
+  };
 
   const phase = roomState?.phase ?? (isRunning ? 'turn' : 'idle');
   const statusLabel = phase === 'working'
@@ -906,6 +917,15 @@ export function RoomInterface({
               onClick={() => void runAction(interrupt)}
             >
               {t('rooms.interruptNow')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 px-2 text-xs"
+              title={t('rooms.cancelPendingTitle')}
+              onClick={() => handleCancelWaiting(waitingUserMessage)}
+            >
+              {t('rooms.cancelPending')}
             </Button>
           </div>
         </div>

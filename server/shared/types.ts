@@ -1621,6 +1621,8 @@ export type RoomRuntimeState = {
   turnCount: number;
   maxAutoTurns: number;
   pendingUserMessage: boolean;
+  /** 기다리는 글 가운데 마지막 것의 번호. 화면이 이 글을 보여 주고 취소한다. */
+  pendingMessageId: number | null;
   /** 차례와 따로 대화를 줄이고 있는 참가자. 일하는 참가자를 두고 쉬는 참가자만 먼저 줄일 때 생긴다. */
   compactingParticipantIds: string[];
   /**

@@ -307,6 +307,12 @@ describe('room timeline window', () => {
     expect(refetched.detail?.hasOlderMessages).toBe(false);
   });
 
+  it('drops a cancelled message from the timeline', () => {
+    const first = roomViewReducer(INITIAL_ROOM_VIEW_STATE, { type: 'detail_loaded', detail: windowOf([5, 6, 7], false) });
+    const next = roomViewReducer(first, { type: 'room_message_deleted', messageId: 7 });
+    expect(next.detail?.messages.map((entry) => entry.id)).toEqual([5, 6]);
+  });
+
   it('replaces the list when the refetched window leaves a gap', () => {
     const first = roomViewReducer(INITIAL_ROOM_VIEW_STATE, { type: 'detail_loaded', detail: windowOf([1, 2], false) });
     const refetched = roomViewReducer(first, { type: 'detail_loaded', detail: windowOf([10, 11], true) });

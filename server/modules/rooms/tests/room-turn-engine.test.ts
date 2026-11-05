@@ -390,6 +390,63 @@ test('룸 상세는 최근 메시지만 싣고, 그 앞은 따로 불러온다',
   });
 });
 
+test('기다리는 사용자 글을 취소하면 아무도 받지 않고 라운드는 이어 간다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await gate; return '구현 끝 @Claude2'; }],
+      [REVIEWER]: ['봤습니다 [DONE]'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '구현해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+
+    // 호스트가 일하는 중이라 줄을 선다.
+    const first = roomsService.postUserMessage(ROOM_ID, { content: '먼저 보낸 글' }, 1);
+    const second = roomsService.postUserMessage(ROOM_ID, { content: '취소할 글' }, 1);
+    assert.equal(second.state.pendingMessageId, second.message.id);
+
+    // 마지막 글을 취소해도 앞의 글은 계속 기다린다.
+    const afterSecond = roomsService.cancelPendingMessage(ROOM_ID, second.message.id);
+    assert.equal(afterSecond.pendingUserMessage, true);
+    assert.equal(afterSecond.pendingMessageId, first.message.id);
+
+    const afterFirst = roomsService.cancelPendingMessage(ROOM_ID, first.message.id);
+    assert.equal(afterFirst.pendingUserMessage, false);
+    assert.equal(afterFirst.pendingMessageId, null);
+    assert.throws(
+      () => roomsService.cancelPendingMessage(ROOM_ID, first.message.id),
+      (error: Error & { code?: string }) => error.code === 'MESSAGE_NOT_PENDING',
+    );
+
+    release();
+    await waitFor(() => isIdle() && calls.length === 2, 'round went on');
+    assert.deepEqual(calls.map((call) => call.sessionId), [HOST, REVIEWER]);
+    assert.doesNotMatch(calls[1].command, /먼저 보낸 글|취소할 글/);
+    assert.deepEqual(speakers(), ['user', 'p-host', 'p-rev']);
+  });
+});
+
+test('라운드가 이미 받아 간 사용자 글은 취소할 수 없다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({ [HOST]: [async () => { await gate; return '끝 [DONE]'; }] }, calls));
+
+    const { message } = roomsService.postUserMessage(ROOM_ID, { content: '구현해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    assert.throws(
+      () => roomsService.cancelPendingMessage(ROOM_ID, message.id),
+      (error: Error & { code?: string }) => error.code === 'MESSAGE_NOT_PENDING',
+    );
+    release();
+    await waitFor(isIdle, 'round done');
+  });
+});
+
 test('stop aborts the active participant and records the turn as aborted', async () => {
   await withRoom(6, async () => {
     const calls: Call[] = [];

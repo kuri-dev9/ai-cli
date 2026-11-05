@@ -110,6 +110,17 @@ export function useRoom(hostSessionId: string) {
     }
   }, []);
 
+  /** Takes back a waiting message: it leaves the timeline and no participant reads it. */
+  const cancelPendingMessage = useCallback(async (messageId: number) => {
+    if (!roomIdRef.current) return;
+    const response = await api.rooms.cancelPendingMessage(roomIdRef.current, messageId);
+    const body = await readApiJson<{ data?: { state?: RoomRuntimeState } }>(response);
+    dispatch({ type: 'room_message_deleted', messageId });
+    if (body.data?.state) {
+      dispatch({ type: 'room_state', state: body.data.state });
+    }
+  }, []);
+
   const updateParticipant = useCallback(async (
     participantId: string,
     changes: {
@@ -214,6 +225,7 @@ export function useRoom(hostSessionId: string) {
     loadError,
     postMessage,
     interrupt,
+    cancelPendingMessage,
     stop,
     updateSettings,
     compact,

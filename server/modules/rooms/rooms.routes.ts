@@ -217,6 +217,18 @@ router.post(
   }),
 );
 
+router.delete(
+  '/:roomId/messages/:messageId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const messageId = Number(req.params.messageId);
+    if (!Number.isInteger(messageId) || messageId <= 0) {
+      throw new AppError('메시지 번호가 올바르지 않습니다.', { code: 'INVALID_MESSAGE_ID', statusCode: 400 });
+    }
+    const state = roomsService.cancelPendingMessage(readRequiredString(req.params.roomId, 'roomId'), messageId);
+    res.json(createApiSuccessResponse({ state }));
+  }),
+);
+
 router.post(
   '/:roomId/stop',
   asyncHandler(async (req: Request, res: Response) => {

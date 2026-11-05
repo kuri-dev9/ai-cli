@@ -1452,6 +1452,8 @@ export type RoomRuntimeState = {
   turnCount: number;
   maxAutoTurns: number;
   pendingUserMessage: boolean;
+  /** The last of the waiting messages; the one the room view shows and can cancel. */
+  pendingMessageId?: number | null;
   /** Participants shrinking their context apart from the turns; set when only the idle ones are compacted mid-round. */
   compactingParticipantIds?: string[];
   /** Grows with every state the server builds, so a late REST reply cannot roll back a newer `room_state` frame. */

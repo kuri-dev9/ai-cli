@@ -467,6 +467,15 @@ export const roomsDb = {
     return (rows as RoomMessageRow[]).reverse();
   },
 
+  /** 메시지 하나를 지운다. 아직 아무도 받지 않은 사용자 글을 취소할 때만 쓴다. */
+  deleteMessage(roomId: string, messageId: number): boolean {
+    const deleted = getConnection()
+      .prepare('DELETE FROM room_messages WHERE id = ? AND room_id = ?')
+      .run(messageId, roomId).changes > 0;
+    if (deleted) this.touchRoom(roomId);
+    return deleted;
+  },
+
   /** 마지막 사용자 글. 타임라인 전체를 읽지 않고 찾는다. */
   getLatestUserMessage(roomId: string): RoomMessageRow | null {
     return (getConnection()
