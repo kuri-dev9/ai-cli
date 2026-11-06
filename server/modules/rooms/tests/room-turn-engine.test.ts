@@ -255,6 +255,36 @@ test('곁가지로 글을 받은 방장이 다른 참가자를 부르면 그 참
   }, { hostLed: true, thirdParticipant: true });
 });
 
+test('둘이 동시에 방장을 부르면 방장은 한 번만 답하고, 빈 차례를 돌지 않는다', async () => {
+  await withRoom(10, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const hostGate = new Promise<void>((resolve) => { release = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await hostGate; return '[PASS]'; }, '둘 다 받았습니다 [PASS]', '또 불렸습니다 [PASS]'],
+      [REVIEWER]: ['확인했습니다\n@Claude'],
+      [SECOND_REVIEWER]: ['저도 확인했습니다\n@Claude'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+
+    // 방장이 일하는 동안 두 참가자가 곁가지로 답하고, 둘 다 방장 앞에 줄을 선다.
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 봐줘' }, 1);
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude3 봐줘' }, 1);
+    await waitFor(() => speakers().filter((speaker) => speaker === 'p-rev' || speaker === 'p-rev2').length === 2, 'both replied');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+
+    await waitFor(isIdle, 'round done');
+    const hostCalls = calls.filter((call) => call.sessionId === HOST);
+    assert.equal(hostCalls.length, 2);
+    assert.match(hostCalls[1].command, /저도 확인했습니다/);
+    assert.equal(calls.some((call) => call.command.includes('새 메시지 없음')), false);
+  }, { hostLed: true, thirdParticipant: true });
+});
+
 test('곁가지 차례가 일하는 중인 참가자를 부르면 그 차례가 끝난 뒤에 답한다', async () => {
   await withRoom(10, async () => {
     const calls: Call[] = [];

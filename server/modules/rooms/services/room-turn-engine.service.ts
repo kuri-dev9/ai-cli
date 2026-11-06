@@ -486,12 +486,26 @@ function resolveTurnPermissions(me: RoomParticipant, readOnly: boolean): AnyReco
   };
 }
 
+/** 이 참가자가 아직 읽지 않은, 다른 사람의 글이 있는지. */
+function hasUnreadFromOthers(room: RoomRow, participant: RoomParticipant): boolean {
+  const row = roomsDb.listParticipants(room.room_id).find((candidate) => candidate.participant_id === participant.participantId);
+  return roomsDb.listMessagesAfter(room.room_id, row?.last_seen_message_id ?? 0)
+    .some((message) => message.speaker !== participant.participantId);
+}
+
 /**
  * 참가자 한 명의 차례를 다른 차례와 겹치지 않게 돌린다. 그 참가자가 이미 다른
  * 흐름에서 일하는 중이면 끝나기를 기다린 뒤 시작한다.
+ *
+ * 여러 흐름이 한 참가자를 동시에 부르면 앞선 차례가 글을 다 읽어 간다. 뒤따른
+ * 부름은 답할 것이 없으니 돌리지 않고 그 흐름을 끝낸다 — 돌리면 "(새 메시지
+ * 없음)" 프롬프트로 같은 답을 되풀이하고 턴만 쓴다. 넘김은 실제로 돈 차례가 잇는다.
+ * 기다리지 않은 차례는 새 글이 없어도 돈다 — 의견 차례에서 글을 읽은 참가자가
+ * 순서대로 받는 제 차례가 그렇다.
  */
 async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, loop: RoomLoopState, options: TurnOptions): Promise<TurnResult> {
   let held = loop.turnLocks.get(participant.participantId);
+  const waitedBehindAnotherTurn = Boolean(held);
   while (held) {
     await held;
     held = loop.turnLocks.get(participant.participantId);
@@ -499,6 +513,13 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
   let release!: () => void;
   loop.turnLocks.set(participant.participantId, new Promise<void>((resolve) => { release = resolve; }));
   try {
+    if (waitedBehindAnotherTurn && options.mode.kind === 'turn' && !hasUnreadFromOthers(room, participant)) {
+      console.log('[Rooms] 새 글이 없어 차례를 건너뜁니다', { roomId: room.room_id, participantId: participant.participantId });
+      // 부른 쪽이 이 차례를 미리 세었다. 돌지 않은 차례는 한도에서 빼 준다.
+      loop.turnCount = Math.max(0, loop.turnCount - 1);
+      broadcastState(room);
+      return { message: null, handoff: { kind: 'none' }, assignments: [] };
+    }
     return await runParticipantTurnNow(room, participant, loop, options);
   } finally {
     loop.turnLocks.delete(participant.participantId);
