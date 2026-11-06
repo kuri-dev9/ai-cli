@@ -119,7 +119,7 @@ test('saveDraft stores the text and queued message under the given scope', () =>
   }]]);
 });
 
-test('saveDraft defaults a missing queued message to null rather than dropping the row', () => {
+test('saveDraft leaves the queue out when the request carries text only', () => {
   const saved: unknown[][] = [];
   const service = createUserService(createDependencies({
     drafts: {
@@ -131,7 +131,7 @@ test('saveDraft defaults a missing queued message to null rather than dropping t
 
   service.saveDraft(5, 'session-1', { scope: 'session-1', text: 'typing' });
 
-  assert.deepEqual(saved, [[5, 'session-1', { text: 'typing', queuedMessage: null }]]);
+  assert.deepEqual(saved, [[5, 'session-1', { text: 'typing' }]]);
 });
 
 test('saveDraft rejects a blank or over-long scope', () => {

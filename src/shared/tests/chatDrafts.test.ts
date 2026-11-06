@@ -70,7 +70,7 @@ test('a draft is readable synchronously and reaches the server after the debounc
 
   await vi.advanceTimersByTimeAsync(1_500);
   assert.deepEqual(savedDrafts, [
-    { scope: 'session-a', text: 'half a thought', queuedMessage: null },
+    { scope: 'session-a', text: 'half a thought' },
   ]);
 });
 
@@ -389,4 +389,49 @@ test('another session claiming its queue leaves this session untouched', async (
   assert.deepEqual(seen, ['session-busy']);
   assert.deepEqual(store.readQueuedMessages('session-busy'), []);
   assert.equal(store.readDraftText('session-mine'), 'half written');
+});
+
+test('typing after the server took the queue does not put the sent message back', async () => {
+  const store = await loadStore();
+  store.appendQueuedMessage('session-a', { content: 'run me once' });
+  await vi.advanceTimersByTimeAsync(0);
+  savedDrafts.length = 0;
+
+  // 디스패처가 가져갔지만 이 탭의 사본에는 아직 남아 있는 틈이다.
+  store.writeDraftText('session-a', 'next thought');
+  await vi.advanceTimersByTimeAsync(1_500);
+
+  assert.equal(savedDrafts.length, 1);
+  assert.equal(savedDrafts[0].text, 'next thought');
+  assert.equal('queuedMessage' in savedDrafts[0], false);
+});
+
+test('restoring the same queue into the composer writes nothing to the server', async () => {
+  const store = await loadStore();
+  store.appendQueuedMessage('session-a', { content: 'run me once', attachments: [] });
+  await vi.advanceTimersByTimeAsync(0);
+  savedDrafts.length = 0;
+
+  // 다른 세션에 다녀오면 컴포저가 사본에서 큐를 되살려 그대로 다시 쓴다.
+  store.writeQueuedMessages('session-a', store.readQueuedMessages('session-a'));
+  await vi.advanceTimersByTimeAsync(1_500);
+
+  assert.deepEqual(savedDrafts, []);
+});
+
+test('a queue change whose save failed goes out again with the queue', async () => {
+  const api = (await import('@/shared/api')).api;
+  const saveDraft = vi.spyOn(api.user, 'saveDraft')
+    .mockResolvedValueOnce(new Response('{}', { status: 500 }));
+
+  const store = await loadStore();
+  store.appendQueuedMessage('session-a', { content: 'must arrive' });
+  await vi.advanceTimersByTimeAsync(0);
+
+  store.writeDraftText('session-b', 'any other write');
+  await vi.advanceTimersByTimeAsync(1_500);
+
+  const retry = saveDraft.mock.calls.slice(1).find(([scope]) => scope === 'session-a');
+  assert.ok(retry && 'queuedMessage' in retry[1]);
+  saveDraft.mockRestore();
 });

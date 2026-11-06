@@ -289,13 +289,30 @@ export const sessionDraftsDb = {
    *
    * Deleting on empty is what stops the table growing a permanent row for every
    * session the user ever opened and typed a character into.
+   *
+   * `queuedMessage` left out means text only: the queue column stays as it is.
+   * The dispatcher takes turns off that column on its own schedule, so a client
+   * that merely typed must not write back the queue it last saw — that puts a
+   * turn that already ran back in line, and it runs a second time.
    */
   saveDraft(
     userId: number,
     scope: string,
-    draft: { text: string; queuedMessage: unknown | null }
+    draft: { text: string; queuedMessage?: unknown }
   ): void {
     const db = getConnection();
+
+    if (draft.queuedMessage === undefined) {
+      db.prepare(
+        `INSERT INTO session_drafts (user_id, draft_scope, draft_text, queued_message, updated_at)
+         VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP)
+         ON CONFLICT(user_id, draft_scope) DO UPDATE SET
+           draft_text = excluded.draft_text,
+           updated_at = CURRENT_TIMESTAMP`
+      ).run(userId, scope, draft.text);
+      sessionDraftsDb.deleteEmptyDraft(userId, scope);
+      return;
+    }
 
     if (!draft.text && draft.queuedMessage === null) {
       db.prepare('DELETE FROM session_drafts WHERE user_id = ? AND draft_scope = ?')

@@ -120,6 +120,29 @@ test('saving an empty draft deletes the row rather than keeping a blank one', as
   });
 });
 
+test('a text-only save leaves the queue as the dispatcher left it', async () => {
+  await withDatabase(() => {
+    sessionDraftsDb.saveDraft(USER_ID, 'session-a', { text: 'typed', queuedMessage: { content: 'run it' } });
+    sessionDraftsDb.saveDraft(USER_ID, 'session-a', { text: 'typed more' });
+
+    const [kept] = sessionDraftsDb.getDrafts(USER_ID);
+    assert.equal(kept.text, 'typed more');
+    assert.deepEqual(kept.queuedMessage, { content: 'run it' });
+  });
+});
+
+test('a text-only save of nothing removes a row with no queue, and keeps one with a queue', async () => {
+  await withDatabase(() => {
+    sessionDraftsDb.saveDraft(USER_ID, 'session-a', { text: 'typed', queuedMessage: null });
+    sessionDraftsDb.saveDraft(USER_ID, 'session-a', { text: '' });
+    assert.deepEqual(sessionDraftsDb.getDrafts(USER_ID), []);
+
+    sessionDraftsDb.saveDraft(USER_ID, 'session-b', { text: 'typed', queuedMessage: { content: 'run it' } });
+    sessionDraftsDb.saveDraft(USER_ID, 'session-b', { text: '' });
+    assert.deepEqual(sessionDraftsDb.getDrafts(USER_ID)[0].queuedMessage, { content: 'run it' });
+  });
+});
+
 test('deleteDraft removes only the named scope', async () => {
   await withDatabase(() => {
     sessionDraftsDb.saveDraft(USER_ID, 'session-a', { text: 'a', queuedMessage: null });

@@ -26,7 +26,7 @@ type UserDependencies = {
   };
   drafts: {
     getDrafts(userId: number): DraftRecord[];
-    saveDraft(userId: number, scope: string, draft: { text: string; queuedMessage: unknown | null }): void;
+    saveDraft(userId: number, scope: string, draft: { text: string; queuedMessage?: unknown }): void;
     deleteDraft(userId: number, scope: string): void;
   };
   readSystemGitConfig(): Promise<GitConfig>;
@@ -177,7 +177,8 @@ export function createUserService(dependencies: UserDependencies) {
 
       dependencies.drafts.saveDraft(userId, scope, {
         text,
-        queuedMessage: payload.queuedMessage ?? null,
+        // 키가 없으면 글자만 저장하는 요청이다. 큐는 건드리지 않는다.
+        ...('queuedMessage' in payload ? { queuedMessage: payload.queuedMessage ?? null } : {}),
       });
       return { success: true };
     },

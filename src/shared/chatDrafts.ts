@@ -70,6 +70,8 @@ const listeners = new Set<ChatDraftListener>();
 
 let drafts = new Map<string, DraftRecord>();
 const pendingScopes = new Set<string>();
+/** 이 탭이 큐를 바꿨는데 아직 서버에 닿지 않은 스코프. 이 스코프만 저장에 큐를 싣는다. */
+const dirtyQueueScopes = new Set<string>();
 /**
  * 서버로 떠났지만 아직 답을 받지 못한 저장. 스코프마다 가장 최근 요청만 둔다.
  *
@@ -186,17 +188,24 @@ function flushServerWrites(): void {
     // A save that fails must never surface as an unhandled rejection out of a
     // timer callback: the mirror already holds the draft, and the next
     // keystroke re-sends it.
+    // 큐는 이 탭이 바꿨을 때만 싣는다. 디스패처가 꺼내 간 메시지가 사본에 남아
+    // 있는 동안 글자 저장에 큐를 실어 보내면, 이미 나간 메시지가 되살아나 한 번
+    // 더 실행된다.
+    const queueChanged = dirtyQueueScopes.delete(scope);
     try {
       const request = !draft || isEmptyDraft(draft)
         ? api.user.deleteDraft(scope)
         : api.user.saveDraft(scope, {
           text: draft.text,
-          queuedMessage: toQueuePayload(draft.queuedMessages),
+          ...(queueChanged ? { queuedMessage: toQueuePayload(draft.queuedMessages) } : {}),
         });
-      trackServerWrite(scope, request);
+      trackServerWrite(scope, request, queueChanged);
     } catch (error) {
       console.error('Failed to save chat draft:', error);
       pendingScopes.add(scope);
+      if (queueChanged) {
+        dirtyQueueScopes.add(scope);
+      }
     }
   }
 }
@@ -206,7 +215,7 @@ function flushServerWrites(): void {
  * `pendingScopes` 로 돌려놓는다 — 서버에는 이 글이 없으니 hydrate 가 지우면
  * 안 되고, 다음 flush 가 다시 보낸다.
  */
-function trackServerWrite(scope: string, request: Promise<Response>): void {
+function trackServerWrite(scope: string, request: Promise<Response>, queueChanged: boolean): void {
   const tracked: Promise<unknown> = request
     .then((response) => {
       if (!response.ok) {
@@ -216,6 +225,9 @@ function trackServerWrite(scope: string, request: Promise<Response>): void {
     .catch((error: unknown) => {
       console.error('Failed to save chat draft:', error);
       pendingScopes.add(scope);
+      if (queueChanged) {
+        dirtyQueueScopes.add(scope);
+      }
     })
     .finally(() => {
       if (inFlightWrites.get(scope) === tracked) {
@@ -299,6 +311,7 @@ export function readQueuedMessages(scope: string): StoredQueuedMessage[] {
 /** 대기 목록 맨 뒤에 한 건 추가한다. 기존 항목은 그대로 둔다. */
 export function appendQueuedMessage(scope: string, message: StoredQueuedMessage): void {
   const current = drafts.get(scope)?.queuedMessages ?? [];
+  dirtyQueueScopes.add(scope);
   updateDraft(scope, { queuedMessages: [...current, message] });
   // Queueing is a send-like action, so persist it before the tab can close.
   flushServerWritesNow();
@@ -306,6 +319,13 @@ export function appendQueuedMessage(scope: string, message: StoredQueuedMessage)
 
 /** 대기 목록 전체를 갈아끼운다. 순서 변경·수정·부분 삭제가 모두 여기로 온다. */
 export function writeQueuedMessages(scope: string, messages: StoredQueuedMessage[]): void {
+  // 컴포저는 사본에서 되살린 큐도 이 함수로 다시 쓴다. 내용이 같으면 사용자가
+  // 바꾼 것이 없으니 서버로 보내지 않는다.
+  const current = drafts.get(scope)?.queuedMessages ?? [];
+  if (JSON.stringify(current) === JSON.stringify(messages)) {
+    return;
+  }
+  dirtyQueueScopes.add(scope);
   updateDraft(scope, { queuedMessages: messages });
   // Editing or cancelling must beat the server's next dispatcher poll.
   flushServerWritesNow();
@@ -419,6 +439,7 @@ export async function hydrateChatDrafts(): Promise<void> {
 export function resetChatDrafts(): void {
   drafts = new Map();
   pendingScopes.clear();
+  dirtyQueueScopes.clear();
   inFlightWrites.clear();
   lastLocalWrite.clear();
   if (serverWriteTimer !== null) {
