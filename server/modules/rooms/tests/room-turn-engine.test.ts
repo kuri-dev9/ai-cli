@@ -285,6 +285,87 @@ test('둘이 동시에 방장을 부르면 방장은 한 번만 답하고, 빈 �
   }, { hostLed: true, thirdParticipant: true });
 });
 
+test('둘을 부른 글은 쉬는 참가자가 먼저 받고, 일하는 참가자는 차례가 끝나면 받는다', async () => {
+  await withRoom(10, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const hostGate = new Promise<void>((resolve) => { release = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await hostGate; return '[PASS]'; }, '봤습니다 [PASS]'],
+      [REVIEWER]: ['먼저 봤습니다'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+
+    const { state } = roomsService.postUserMessage(ROOM_ID, { content: '@Claude @Claude2 둘 다 봐줘' }, 1);
+    // 이미 받기 시작한 글이다. 대기 카드로 남으면 나간 글이 안 나간 것처럼 보인다.
+    assert.equal(state.pendingUserMessage, false);
+    await waitFor(() => calls.length === 2, 'idle participant started first');
+    assert.equal(calls[1].sessionId, REVIEWER);
+
+    release();
+    await waitFor(() => isIdle() && calls.length === 3, 'host answered after its turn');
+    assert.equal(calls[2].sessionId, HOST);
+    assert.match(calls[2].command, /둘 다 봐줘/);
+  });
+});
+
+test('받을 참가자가 곁가지 차례를 끝내면 메인 차례가 끝나기 전에 글을 받는다', async () => {
+  await withRoom(10, async () => {
+    const calls: Call[] = [];
+    let releaseHost: () => void = () => {};
+    let releaseReviewer: () => void = () => {};
+    const hostGate = new Promise<void>((resolve) => { releaseHost = resolve; });
+    const reviewerGate = new Promise<void>((resolve) => { releaseReviewer = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await hostGate; return '[PASS]'; }],
+      [REVIEWER]: [async () => { await reviewerGate; return '첫 일 끝'; }, '다음 일도 끝'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude2 첫 일' }, 1);
+    await waitFor(() => calls.length === 2, 'reviewer side turn');
+
+    const { state } = roomsService.postUserMessage(ROOM_ID, { content: '⏰ 예약: @Claude2 다음 일' }, 1);
+    assert.equal(state.pendingUserMessage, true);
+
+    releaseReviewer();
+    await waitFor(() => calls.length === 3, 'reviewer took the waiting message');
+    assert.match(calls[2].command, /다음 일/);
+    assert.equal(roomTurnEngine.getState(ROOM_ID, 0).pendingUserMessage, false);
+
+    releaseHost();
+    await waitFor(isIdle, 'round done');
+  });
+});
+
+test('정지하면 차례를 기다리던 참가자는 시작하지 않는다', async () => {
+  await withRoom(10, async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const hostGate = new Promise<void>((resolve) => { release = resolve; });
+
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [async () => { await hostGate; return '[PASS]'; }],
+      [REVIEWER]: ['먼저 봤습니다'],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작해줘' }, 1);
+    await waitFor(() => calls.length === 1, 'host turn started');
+    roomsService.postUserMessage(ROOM_ID, { content: '@Claude @Claude2 둘 다 봐줘' }, 1);
+    await waitFor(() => calls.length === 2, 'reviewer started');
+
+    await roomTurnEngine.stop(roomsDb.getRoom(ROOM_ID)!);
+    release();
+    await waitFor(isIdle, 'round stopped');
+    assert.equal(calls.filter((call) => call.sessionId === HOST).length, 1);
+  });
+});
+
 test('곁가지 차례가 일하는 중인 참가자를 부르면 그 차례가 끝난 뒤에 답한다', async () => {
   await withRoom(10, async () => {
     const calls: Call[] = [];

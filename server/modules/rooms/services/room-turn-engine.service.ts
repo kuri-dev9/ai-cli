@@ -94,6 +94,8 @@ type RoomLoopState = {
    * 알아야 지울 수 있다. 라운드가 글을 받거나 정지하면 비운다.
    */
   pendingMessageIds: number[];
+  /** 메인 루프가 지금 돌리는 참가자. 그 차례 뒤의 글은 메인 루프가 직접 받는다. */
+  mainSpeakerId: string | null;
   /**
    * 사용자가 끼어들어 끊은 세션. 그 답은 실패가 아니라 중단으로 남기고, 루프는
    * 멈추지 않은 채 기다리던 글로 넘어간다.
@@ -242,6 +244,7 @@ function getLoop(roomId: string): RoomLoopState {
       turnCount: 0,
       pendingUserMessage: false,
       pendingMessageIds: [],
+      mainSpeakerId: null,
       interruptedSessions: new Set(),
       releaseWaiters: new Map(),
       sideTurns: new Set(),
@@ -513,6 +516,10 @@ async function runParticipantTurn(room: RoomRow, participant: RoomParticipant, l
   let release!: () => void;
   loop.turnLocks.set(participant.participantId, new Promise<void>((resolve) => { release = resolve; }));
   try {
+    // 기다리는 사이 정지를 눌렀다. 차례를 시작하지 않는다.
+    if (waitedBehindAnotherTurn && loop.halted) {
+      return { message: null, handoff: { kind: 'none' }, assignments: [] };
+    }
     if (waitedBehindAnotherTurn && options.mode.kind === 'turn' && !hasUnreadFromOthers(room, participant)) {
       console.log('[Rooms] 새 글이 없어 차례를 건너뜁니다', { roomId: room.room_id, participantId: participant.participantId });
       // 부른 쪽이 이 차례를 미리 세었다. 돌지 않은 차례는 한도에서 빼 준다.
@@ -595,6 +602,7 @@ async function runParticipantTurnNow(room: RoomRow, participant: RoomParticipant
 
   // 이 세션이 룸에서 다시 차례를 받았다. 기다리던 백그라운드 보고는 이 차례가 거둔다.
   backgroundWaits.delete(me.sessionId);
+  let interrupted = false;
   try {
     let result = await runTurnInSession(room, me, loop, prompt, attachments, options.readOnly);
 
@@ -618,6 +626,8 @@ async function runParticipantTurnNow(room: RoomRow, participant: RoomParticipant
       }
     }
 
+    // 기록하면서 표시가 지워지므로 먼저 읽어 둔다.
+    interrupted = loop.interruptedSessions.has(me.sessionId);
     const recorded = recordTurnReply(room, me, loop, result, {
       ...options,
       task: options.mode.kind === 'task' ? options.mode.task : undefined,
@@ -629,6 +639,9 @@ async function runParticipantTurnNow(room: RoomRow, participant: RoomParticipant
     return recorded;
   } finally {
     finishActiveTurn(room, me, loop);
+    if (!interrupted) {
+      releaseWaitingMessages(room, me, loop);
+    }
   }
 }
 
@@ -687,6 +700,31 @@ function finishActiveTurn(room: RoomRow, me: SpeakingParticipant, loop: RoomLoop
   loop.active.delete(me.participantId);
   loop.readOnlyActive.delete(me.participantId);
   broadcastState(room);
+}
+
+/**
+ * 방금 차례를 끝낸 참가자를 기다리던 글을 바로 보낸다.
+ *
+ * 메인 루프는 자기 차례 경계에서만 글을 받는다. 그래서 곁가지로 일하던 참가자가
+ * 끝나 쉬고 있어도, 상관없는 메인 차례가 끝날 때까지 글이 대기로 남았다. 메인
+ * 루프가 돌리던 참가자는 뺀다 — 그 글은 곧바로 메인 루프가 받아 흐름을 넘긴다.
+ * 끼어들기로 끊긴 차례도 같은 까닭으로 부르지 않는다.
+ */
+function releaseWaitingMessages(room: RoomRow, me: SpeakingParticipant, loop: RoomLoopState): void {
+  if (loop.halted || loop.mainSpeakerId === me.participantId) {
+    return;
+  }
+  const roster = listRoster(room);
+  for (const messageId of [...loop.pendingMessageIds]) {
+    const message = roomsDb.listMessagesAfter(room.room_id, messageId - 1).find((row) => row.id === messageId);
+    const targets = message ? pickSpeakersForUserMessage(message.text, roster) : [];
+    if (!targets.some((target) => target.participantId === me.participantId)) {
+      continue;
+    }
+    loop.pendingMessageIds = loop.pendingMessageIds.filter((id) => id !== messageId);
+    loop.pendingUserMessage = loop.pendingMessageIds.length > 0;
+    startSideTurn(room, targets, loop);
+  }
 }
 
 /**
@@ -1226,6 +1264,7 @@ async function finishRound(roomId: string, loop: RoomLoopState): Promise<void> {
     await Promise.allSettled([...loop.sideTurns]);
   }
   loop.running = false;
+  loop.mainSpeakerId = null;
   loop.active.clear();
   loop.readOnlyActive.clear();
   loop.phase = 'idle';
@@ -1421,6 +1460,7 @@ async function runLoop(roomId: string): Promise<void> {
           ? { kind: 'summary' }
           : nextKind === 'opening' && splitting ? { kind: 'plan' } : { kind: 'turn' };
       resumingHost = false;
+      loop.mainSpeakerId = speaker.participantId;
       const { message, handoff, assignments } = await runParticipantTurn(room, speaker, loop, {
         mode,
         readOnly: false,
@@ -1428,6 +1468,7 @@ async function runLoop(roomId: string): Promise<void> {
         readAssignments: splitting,
         dropPass: false,
       });
+      loop.mainSpeakerId = null;
       broadcastState(room);
 
       if (loop.halted) {
@@ -1869,12 +1910,13 @@ export const roomTurnEngine = {
         void runLoop(room.room_id);
       } else {
         // 라운드가 도는 중이다. 일하는 참가자는 그대로 두고, 글을 받을 참가자(이름을
-        // 부른 참가자, 없으면 방장)가 쉬고 있으면 그 자리에서 바로 받게 한다. 받을
-        // 참가자가 지금 일하는 바로 그 참가자라면 한 세션에서 두 실행을 돌릴 수
-        // 없으므로 그 차례 뒤로 줄을 선다 — 급하면 "지금 끼어들기" 로 끊는다.
+        // 부른 참가자, 없으면 방장) 중 쉬는 쪽은 그 자리에서 바로 받게 한다. 함께 불린
+        // 참가자가 일하는 중이면 차례 잠금이 그 차례 뒤로 세운다. 받을 참가자가 모두
+        // 일하는 중이면 한 세션에서 두 실행을 돌릴 수 없으므로 줄을 선다 — 급하면
+        // "지금 끼어들기" 로 끊는다.
         const targets = pickSpeakersForUserMessage(content, listRoster(room));
-        const allFree = targets.length > 0 && targets.every((target) => !loop.active.has(target.participantId));
-        if (allFree) {
+        const anyFree = targets.some((target) => !loop.active.has(target.participantId));
+        if (anyFree) {
           startSideTurn(room, targets, loop);
         } else {
           loop.pendingUserMessage = true;
