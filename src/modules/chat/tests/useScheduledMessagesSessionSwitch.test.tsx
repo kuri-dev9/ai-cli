@@ -60,3 +60,28 @@ test('a slow fetch for the previous session cannot land on the next one', async 
 
   assert.equal(result.current.scheduledMessages.length, 0);
 });
+
+test('a schedule that came due is reread, so it does not stay listed as next', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date('2026-08-28T11:59:00.000Z'));
+    const list = vi.spyOn(api.scheduledMessages, 'list')
+      .mockResolvedValueOnce(listResponse([MESSAGE_A]))
+      .mockResolvedValue(listResponse([{ ...MESSAGE_A, status: 'sent' }]));
+
+    const { result } = renderHook(() => useScheduledMessages('session-a'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    assert.equal(result.current.scheduledMessages[0]?.status, 'pending');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(64_000);
+    });
+
+    assert.equal(list.mock.calls.length, 2);
+    assert.equal(result.current.scheduledMessages[0]?.status, 'sent');
+  } finally {
+    vi.useRealTimers();
+  }
+});

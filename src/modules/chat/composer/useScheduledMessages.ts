@@ -12,12 +12,17 @@ export function notifyScheduledMessagesChanged(): void {
   }
 }
 
+/** 예약 시각이 지난 뒤 서버가 보내고 상태를 바꿀 때까지 기다리는 여유. */
+const DUE_REFRESH_DELAY_MS = 3_000;
+/** `setTimeout` 이 넘치지 않는 상한. 그보다 먼 예약은 이 간격마다 다시 잰다. */
+const MAX_TIMER_MS = 2_147_000_000;
+
 /**
  * The messages queued to be sent to one session later.
  *
  * Scheduling is a server-side timer, so this is a plain fetch rather than
- * anything realtime: the list changes only when this client schedules or
- * cancels something, and it is refetched when the session is reopened.
+ * anything realtime. Nothing tells the client when a schedule goes out, so the
+ * list also rereads itself just after the earliest pending one comes due.
  */
 export function useScheduledMessages(sessionId: string | null) {
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
@@ -65,6 +70,19 @@ export function useScheduledMessages(sessionId: string | null) {
     window.addEventListener(SCHEDULED_MESSAGES_CHANGED, handleChange);
     return () => window.removeEventListener(SCHEDULED_MESSAGES_CHANGED, handleChange);
   }, [refresh]);
+
+  // 나간 예약이 "다음" 으로 남지 않게, 가장 이른 예약의 시각이 지나면 다시 읽는다.
+  useEffect(() => {
+    const dueTimes = scheduledMessages
+      .filter((message) => message.status === 'pending')
+      .map((message) => new Date(message.scheduledFor).getTime());
+    if (dueTimes.length === 0) {
+      return;
+    }
+    const delay = Math.max(0, Math.min(...dueTimes) - Date.now()) + DUE_REFRESH_DELAY_MS;
+    const timer = setTimeout(() => void refresh(), Math.min(delay, MAX_TIMER_MS));
+    return () => clearTimeout(timer);
+  }, [refresh, scheduledMessages]);
 
   const schedule = useCallback(async (input: {
     content: string;
