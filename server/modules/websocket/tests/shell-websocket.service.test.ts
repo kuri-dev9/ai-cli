@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { WebSocket } from 'ws';
 
-import { handleShellConnection } from '@/modules/websocket/services/shell-websocket.service.js';
+import { handleShellConnection, resolveShellLaunch } from '@/modules/websocket/services/shell-websocket.service.js';
 
 function createFakeSocket() {
   const socket = new EventEmitter() as EventEmitter & {
@@ -224,4 +224,46 @@ test('a missing project directory is reported as an error frame and starts no pt
     socket.frames.map((frame) => JSON.parse(frame) as Record<string, unknown>),
     [{ type: 'error', message: 'Invalid project path' }]
   );
+});
+
+test('명령 없이 연 일반 쉘은 사용자의 로그인 쉘을 띄운다', () => {
+  const spawned: Array<{ shell: string; args: string[] }> = [];
+  const dependencies = {
+    resolveProviderSessionId: () => null,
+    spawnPty: (shell: string, args: string | string[]) => {
+      spawned.push({ shell, args: Array.isArray(args) ? args : [args] });
+      return createFakePty() as never;
+    },
+  };
+
+  const socket = createFakeSocket();
+  handleShellConnection(socket as never, dependencies);
+  socket.emit(
+    'message',
+    JSON.stringify({
+      type: 'init',
+      projectPath: process.cwd(),
+      sessionId: null,
+      hasSession: false,
+      provider: 'plain-shell',
+      isPlainShell: true,
+      forceRestart: true,
+    })
+  );
+
+  const expected = resolveShellLaunch('', true);
+  assert.deepEqual(spawned, [{ shell: expected.shell, args: expected.shellArgs }]);
+});
+
+test('로그인 쉘은 $SHELL 을 -l 로 띄우고, 명령이 있으면 예전처럼 bash -c 로 돌린다', () => {
+  assert.deepEqual(resolveShellLaunch('', true, 'darwin', { SHELL: '/opt/homebrew/bin/fish' }), {
+    shell: '/opt/homebrew/bin/fish',
+    shellArgs: ['-l'],
+  });
+  assert.deepEqual(resolveShellLaunch('', true, 'darwin', {}), { shell: '/bin/zsh', shellArgs: ['-l'] });
+  assert.deepEqual(resolveShellLaunch('npm test', false, 'linux', { SHELL: '/bin/zsh' }), {
+    shell: 'bash',
+    shellArgs: ['-c', 'npm test'],
+  });
+  assert.deepEqual(resolveShellLaunch('', true, 'win32', {}), { shell: 'powershell.exe', shellArgs: ['-NoLogo'] });
 });

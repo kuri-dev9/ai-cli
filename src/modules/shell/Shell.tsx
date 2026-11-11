@@ -275,7 +275,9 @@ export default function Shell({
     );
   }
 
-  const readyDescription = isPlainShell
+  const readyDescription = isPlainShell && !initialCommand
+    ? t('shell.startTerminal', { projectName: selectedProject.displayName })
+    : isPlainShell
     ? t('shell.runCommand', {
         command: initialCommand || t('shell.defaultCommand'),
         projectName: selectedProject.displayName,
@@ -284,7 +286,9 @@ export default function Shell({
       ? t('shell.resumeSession', { displayName: sessionDisplayNameLong })
       : t('shell.startSession');
 
-  const connectingDescription = isPlainShell
+  const connectingDescription = isPlainShell && !initialCommand
+    ? t('shell.startTerminal', { projectName: selectedProject.displayName })
+    : isPlainShell
     ? t('shell.runCommand', {
         command: initialCommand || t('shell.defaultCommand'),
         projectName: selectedProject.displayName,
@@ -304,7 +308,7 @@ export default function Shell({
         sessionDisplayNameShort={sessionDisplayNameShort}
         onDisconnect={handleDisconnectShell}
         onRestart={handleRestartShell}
-        statusNewSessionText={t('shell.status.newSession')}
+        statusNewSessionText={isPlainShell && !initialCommand ? t('shell.status.terminal') : t('shell.status.newSession')}
         statusInitializingText={t('shell.status.initializing')}
         statusRestartingText={t('shell.status.restarting')}
         disconnectLabel={t('shell.actions.disconnect')}

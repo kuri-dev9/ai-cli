@@ -233,6 +233,24 @@ function buildShellCommand(
   return command;
 }
 
+/** 띄울 프로그램과 인자. 대화형 쉘이면 로그인 쉘을, 아니면 명령을 `-c` 로 넘긴다. */
+export function resolveShellLaunch(
+  shellCommand: string,
+  isInteractiveShell: boolean,
+  platform: NodeJS.Platform = os.platform(),
+  env: NodeJS.ProcessEnv = process.env,
+): { shell: string; shellArgs: string[] } {
+  if (platform === 'win32') {
+    return isInteractiveShell
+      ? { shell: 'powershell.exe', shellArgs: ['-NoLogo'] }
+      : { shell: 'powershell.exe', shellArgs: ['-Command', shellCommand] };
+  }
+  if (isInteractiveShell) {
+    return { shell: env.SHELL || (platform === 'darwin' ? '/bin/zsh' : '/bin/bash'), shellArgs: ['-l'] };
+  }
+  return { shell: 'bash', shellArgs: ['-c', shellCommand] };
+}
+
 function readEnvValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const resolvedKey = Object.keys(env).find((envKey) => envKey.toLowerCase() === key.toLowerCase());
   return resolvedKey ? env[resolvedKey] : undefined;
@@ -332,10 +350,13 @@ export function handleShellConnection(
             initialCommand.includes('cursor-agent login') ||
             initialCommand.includes('auth login'));
 
+        // 명령 없이 연 일반 쉘(웹 터미널)은 같은 프로젝트의 CLI 셸과 키가 겹치지 않게 따로 둔다.
         const commandSuffix =
           isPlainShell && initialCommand
             ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
-            : '';
+            : isPlainShell
+              ? '_terminal'
+              : '';
         ptySessionKey = `${projectPath}_${sessionId ?? 'default'}${commandSuffix}`;
 
         if (isLoginCommand || forceRestart) {
@@ -399,9 +420,11 @@ export function handleShellConnection(
 
         const shellCommand = buildShellCommand(data, dependencies);
         const resumeSessionId = resolveResumeSessionId(data, dependencies);
-        const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
-        const shellArgs =
-          os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
+        // 실행할 명령 없이 연 일반 쉘은 사용자의 로그인 쉘을 그대로 띄운다 — 터미널
+        // 앱에서 새 탭을 연 것처럼 .zshrc·PATH·별칭이 적용된다. 예전에는 빈 명령을
+        // `bash -c` 로 돌려 열리자마자 끝났다.
+        const isInteractiveShell = isPlainShell && !initialCommand;
+        const { shell, shellArgs } = resolveShellLaunch(shellCommand, isInteractiveShell);
         const termCols = readNumber(data.cols, 80);
         const termRows = readNumber(data.rows, 24);
         const prioritizedPath = prioritizeUserNpmGlobalBin(process.env);

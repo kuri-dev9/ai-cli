@@ -295,9 +295,12 @@ function WorkspaceMain({
 
           {activeTab === 'shell' && (
             <div className="h-full w-full overflow-hidden">
+              {/* 에이전트 CLI 가 아니라 내 로그인 쉘을 띄우는 웹 터미널이다. 대화는 채팅 탭이
+                  맡으므로 세션과 묶지 않는다 — 프로젝트마다 터미널 하나가 유지된다. */}
               <StandaloneShell
                 project={selectedProject}
-                session={selectedSession}
+                session={null}
+                isPlainShell
                 showHeader={false}
                 isActive={activeTab === 'shell'}
               />

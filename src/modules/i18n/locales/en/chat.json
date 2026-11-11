@@ -216,7 +216,8 @@
     "status": {
       "newSession": "New Session",
       "initializing": "Initializing...",
-      "restarting": "Restarting..."
+      "restarting": "Restarting...",
+      "terminal": "Terminal"
     },
     "actions": {
       "disconnect": "Disconnect",
@@ -235,7 +236,8 @@
     "resumeSession": "Resume session: {{displayName}}...",
     "runCommand": "Run {{command}} in {{projectName}}",
     "startCli": "Starting Claude CLI in {{projectName}}",
-    "defaultCommand": "command"
+    "defaultCommand": "command",
+    "startTerminal": "Open a terminal in {{projectName}}"
   },
   "claudeStatus": {
     "actions": {

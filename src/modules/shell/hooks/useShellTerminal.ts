@@ -16,6 +16,8 @@ import { ensureXtermFocusStyles } from '@/modules/shell/utils/terminalStyles';
 
 const TERMINAL_RESIZE_DELAY_MS = 50;
 
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
 const TERMINAL_OPTIONS: ITerminalOptions = {
   cursorBlink: true,
   fontSize: 14,
@@ -264,9 +266,12 @@ export function useShellTerminal({
         return false;
       }
 
+      // Mac 에서 Ctrl+V 는 터미널 프로그램의 것(vim 비주얼 블록 등)이라 그대로 넘기고,
+      // 붙여넣기는 Cmd+V 로만 받는다. 다른 OS 는 Ctrl+V 가 붙여넣기다.
+      const isPasteShortcut = IS_MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey || event.metaKey;
       if (
         event.type === 'keydown' &&
-        (event.ctrlKey || event.metaKey) &&
+        isPasteShortcut &&
         event.key?.toLowerCase() === 'v'
       ) {
         // Block native paste so data is only injected after clipboard-read resolves.
