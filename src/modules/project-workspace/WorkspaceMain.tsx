@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useTranslation } from 'react-i18next';
+import { ArrowLeft, X } from 'lucide-react';
 
 import { ChatInterface } from '@/modules/chat';
 import { RoomInterface, RoomSessionNotice } from '@/modules/rooms';
@@ -12,7 +14,7 @@ import { TaskMasterPanel, useTaskMasterProjectSync, useTasksSettings } from '@/m
 import type { AppTab, Project, ProjectSession, SessionEstablishedContext, SessionNavigationOptions, SettingsMainTab } from '@/shared/types';
 import { useUiPreferences } from '@/shared/context/UiPreferencesContext';
 import { useFileOpenResolver } from '@/modules/project-workspace/hooks/useFileOpenResolver';
-import { EditorSidebar, getPreviewKind, useEditorSidebar } from '@/modules/code-editor';
+import { CodeEditor, EditorSidebar, getPreviewKind, useEditorSidebar } from '@/modules/code-editor';
 import { MediaLibraryPanel } from '@/modules/media-library';
 import type { CodeEditorDiffInfo } from '@/shared/types';
 import { useMediaFolders } from '@/shared/hooks/useMediaFolders';
@@ -20,6 +22,11 @@ import { useIsPlainChatView, useRoomIndexSync, useRoomMembership } from '@/share
 import WorkspaceHeader from '@/modules/project-workspace/WorkspaceHeader';
 import WorkspaceStateView from '@/modules/project-workspace/WorkspaceStateView';
 import WorkspaceErrorBoundary from '@/modules/project-workspace/WorkspaceErrorBoundary';
+
+/** 데스크톱에서 탭 대신 오른쪽 절반에 여는 화면. */
+type SidePanelTab = 'files' | 'git';
+
+const isSidePanelTab = (tab: AppTab): tab is SidePanelTab => tab === 'files' || tab === 'git';
 
 type WorkspaceMainProps = {
   selectedProject: Project | null;
@@ -61,6 +68,7 @@ function WorkspaceMain({
   onProjectSelect,
   onProjectsRefresh,
 }: WorkspaceMainProps) {
+  const { t } = useTranslation();
   const preferences = useUiPreferences();
   const { showRawParameters, showThinking, sendByCtrlEnter } = preferences;
 
@@ -131,6 +139,41 @@ function WorkspaceMain({
   // real project files before opening them in the in-app editor.
   const resolvedFileOpen = useFileOpenResolver(selectedProject, handleWorkspaceFileOpen);
 
+  // 파일과 소스 관리는 데스크톱에서 탭을 바꾸지 않고, 지금 화면(채팅·셸 등)
+  // 오른쪽 절반에 띄운다. 크게 볼 일이 없어 대화를 보면서 곁에 두는 편이 낫다.
+  // 모바일은 폭이 모자라 예전처럼 화면 전체로 연다.
+  const [sidePanel, setSidePanel] = useState<SidePanelTab | null>(null);
+  // 오른쪽 패널을 여는 동안 왼쪽에 남길 화면. 파일·소스 관리가 아닌 마지막 탭이다.
+  const lastMainTabRef = useRef<AppTab>(isSidePanelTab(activeTab) ? 'chat' : activeTab);
+  const useSplitPanels = !isMobile;
+
+  const selectTab = useCallback<Dispatch<SetStateAction<AppTab>>>((next) => {
+    if (!useSplitPanels) {
+      setActiveTab(next);
+      return;
+    }
+    const target = typeof next === 'function' ? next(activeTab) : next;
+    if (isSidePanelTab(target)) {
+      // 같은 단추를 다시 누르면 닫는다.
+      setSidePanel((current) => (current === target ? null : target));
+      return;
+    }
+    setActiveTab(target);
+  }, [activeTab, setActiveTab, useSplitPanels]);
+
+  // 명령 팔레트, 저장된 마지막 탭 등 다른 길로 파일·소스 관리 탭이 열려도
+  // 데스크톱에서는 오른쪽 패널로 돌린다.
+  useEffect(() => {
+    if (!isSidePanelTab(activeTab)) {
+      lastMainTabRef.current = activeTab;
+      return;
+    }
+    if (useSplitPanels) {
+      setSidePanel(activeTab);
+      setActiveTab(lastMainTabRef.current);
+    }
+  }, [activeTab, setActiveTab, useSplitPanels]);
+
   useEffect(() => {
     if (!shouldShowTasksTab && activeTab === 'tasks') {
       setActiveTab('chat');
@@ -164,6 +207,11 @@ function WorkspaceMain({
   // rewriting the whole palette registry on every render.
   usePaletteOpsRegister({ openFile, openFileInEditor });
 
+  // 오른쪽 패널이 열려 있으면 파일은 그 패널 안에서 연다. 바깥에 에디터를 하나 더
+  // 붙이면 채팅·패널·에디터 세 칸이 되어 채팅이 최소 폭까지 밀린다. 크게 보기를
+  // 누르면 예전처럼 바깥 에디터가 화면을 채운다.
+  const editorInSidePanel = Boolean(useSplitPanels && sidePanel && editingFile && !editorExpanded);
+
   if (isLoading) {
     return <WorkspaceStateView mode="loading" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
@@ -176,7 +224,8 @@ function WorkspaceMain({
     <div className="flex h-full flex-col">
       <WorkspaceHeader
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={selectTab}
+        sidePanel={useSplitPanels ? sidePanel : null}
         selectedProject={selectedProject}
         selectedSession={selectedSession}
         shouldShowTasksTab={shouldShowTasksTab}
@@ -286,6 +335,61 @@ function WorkspaceMain({
           )}
         </div>
 
+        {useSplitPanels && sidePanel && (
+          <div className={`flex min-h-0 w-1/2 min-w-[320px] shrink-0 flex-col border-l border-border ${editorExpanded ? 'hidden' : ''}`}>
+            <div className="flex flex-shrink-0 items-center justify-between border-b border-border/60 px-3 py-1.5">
+              {editorInSidePanel ? (
+                <button
+                  type="button"
+                  onClick={handleCloseEditor}
+                  className="inline-flex items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  {t(sidePanel === 'files' ? 'tabs.files' : 'tabs.git')}
+                </button>
+              ) : (
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(sidePanel === 'files' ? 'tabs.files' : 'tabs.git')}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setSidePanel(null)}
+                aria-label={t('buttons.close')}
+                title={t('buttons.close')}
+                className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {editorInSidePanel && editingFile && (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <CodeEditor
+                  file={editingFile}
+                  onClose={handleCloseEditor}
+                  projectPath={selectedProject.path}
+                  isSidebar
+                  onToggleExpand={handleToggleEditorExpand}
+                />
+              </div>
+            )}
+            {/* 파일을 보는 동안에도 목록은 내리지 않는다. 펼친 폴더와 스크롤이 그대로 남는다. */}
+            <div className={`min-h-0 flex-1 overflow-hidden ${editorInSidePanel ? 'hidden' : ''}`}>
+              {sidePanel === 'files' ? (
+                <FileTree selectedProject={selectedProject} onFileOpen={handleWorkspaceFileOpen} />
+              ) : (
+                <GitPanel
+                  selectedProject={selectedProject}
+                  isMobile={isMobile}
+                  onFileOpen={handleWorkspaceFileOpen}
+                  onProjectSelect={onProjectSelect}
+                  onProjectsRefresh={onProjectsRefresh}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 한 번 열면 계속 마운트된 채로 둔다. 에디터를 열면 가려질 뿐이라
             듣던 곡이 끊기지 않고, 돌아오면 그 지점부터 이어진다. */}
         {/* 폴더를 연결하지 않았어도, 바깥에서 파일을 열어 달라고 하면 띄운다.
@@ -304,7 +408,7 @@ function WorkspaceMain({
         )}
 
         <EditorSidebar
-          editingFile={editingFile}
+          editingFile={editorInSidePanel ? null : editingFile}
           isMobile={isMobile}
           editorExpanded={editorExpanded}
           editorWidth={editorWidth}

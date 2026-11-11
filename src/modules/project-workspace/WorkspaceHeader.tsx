@@ -14,6 +14,8 @@ import WorkspaceTitle from '@/modules/project-workspace/WorkspaceTitle';
 type WorkspaceHeaderProps = {
   activeTab: AppTab;
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
+  /** 오른쪽 절반에 열린 파일·소스 관리. 그 탭 단추도 켜진 것으로 보인다. */
+  sidePanel?: AppTab | null;
   selectedProject: Project;
   selectedSession: ProjectSession | null;
   shouldShowTasksTab: boolean;
@@ -32,6 +34,7 @@ type WorkspaceHeaderProps = {
 export default function WorkspaceHeader({
   activeTab,
   setActiveTab,
+  sidePanel = null,
   selectedProject,
   selectedSession,
   shouldShowTasksTab,
@@ -172,6 +175,7 @@ export default function WorkspaceHeader({
               <WorkspaceTabs
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
+                sidePanel={sidePanel}
                 shouldShowTasksTab={shouldShowTasksTab}
                 shouldShowBrowserTab={shouldShowBrowserTab}
               />

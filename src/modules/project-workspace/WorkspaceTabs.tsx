@@ -10,6 +10,8 @@ import { usePlugins,PluginIcon } from '@/modules/plugins';
 type WorkspaceTabsProps = {
   activeTab: AppTab;
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
+  /** 오른쪽 절반에 열린 화면. 지금 탭과 함께 켜진 것으로 보인다. */
+  sidePanel?: AppTab | null;
   shouldShowTasksTab: boolean;
   shouldShowBrowserTab: boolean;
 };
@@ -56,6 +58,7 @@ const TASKS_TAB: BuiltInTab = {
 export default function WorkspaceTabs({
   activeTab,
   setActiveTab,
+  sidePanel = null,
   shouldShowTasksTab,
   shouldShowBrowserTab,
 }: WorkspaceTabsProps) {
@@ -106,7 +109,7 @@ export default function WorkspaceTabs({
       className="min-w-max border border-border/40 bg-muted/50 shadow-inner shadow-black/[0.025] dark:shadow-black/10"
     >
       {tabs.map((tab, index) => {
-        const isActive = tab.id === activeTab;
+        const isActive = tab.id === activeTab || tab.id === sidePanel;
         const displayLabel = tab.kind === 'builtin' ? t(tab.labelKey) : tab.label;
 
         return (
