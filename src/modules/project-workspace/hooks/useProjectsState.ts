@@ -880,6 +880,16 @@ export function useProjectsState({
         return mergeProjectSelectionMetadata(previousProject, upsert.project);
       });
 
+      // 열려 있는 세션의 이름이 바뀌었다(세션 설정 창, 다른 탭). 헤더 제목이 따라가게 한다.
+      const upsertedSummary = typeof upsert.session.summary === 'string' ? upsert.session.summary.trim() : '';
+      if (upsertedSummary) {
+        setSelectedSession((previousSession) => (
+          previousSession?.id === upsert.sessionId && previousSession.summary !== upsertedSummary
+            ? { ...previousSession, summary: upsertedSummary }
+            : previousSession
+        ));
+      }
+
       const aliasedSelectedSessionId =
         typeof upsert.providerSessionId === 'string' && upsert.providerSessionId !== upsert.sessionId
           ? upsert.providerSessionId

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/shared/ui';
 import type { AppTab, Project, ProjectSession, SessionEstablishedContext } from '@/shared/types';
 import { cn } from '@/shared/utils';
+import { SESSION_SETTINGS_SLOT_ID } from '@/modules/chat';
 import { InviteParticipantButton, ROOM_HEADER_SLOT_ID } from '@/modules/rooms';
 import MobileMenuButton from '@/modules/project-workspace/MobileMenuButton';
 import WorkspaceTabs from '@/modules/project-workspace/WorkspaceTabs';
@@ -126,6 +127,9 @@ export default function WorkspaceHeader({
               onNavigateToSession={onNavigateToSession}
             />
           )}
+
+          {/* 채팅 화면은 세션 설정, 룸 화면은 룸 설정 단추를 여기에 그린다. */}
+          <div id={SESSION_SETTINGS_SLOT_ID} className={cn('flex flex-shrink-0 items-center', activeTab !== 'chat' && 'hidden')} />
 
           {onToggleMediaLibrary && (
             <Button

@@ -1038,6 +1038,28 @@ router.get(
   }),
 );
 
+// 세션 설정 — 자동 대화 줄이기 기준. 이름과 프로젝트는 각자의 라우트로 고친다.
+router.get(
+  '/sessions/:sessionId/settings',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    res.json(createApiSuccessResponse(sessionsService.getSessionSettings(sessionId)));
+  }),
+);
+
+router.patch(
+  '/sessions/:sessionId/settings',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    const result = sessionsService.updateSessionSettings(sessionId, {
+      autoCompactEveryTurns: body.autoCompactEveryTurns,
+      autoCompactTokens: body.autoCompactTokens,
+    });
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
 // Must stay registered after the static and session-specific routes so their
 // literals never match the generic `:sessionId` parameter.
 router.get(

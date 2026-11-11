@@ -514,6 +514,60 @@ export const sessionsDb = {
     ).run(customName, sessionId);
   },
 
+  /** 자동 대화 줄이기 기준과 지난번에 줄인 뒤로 쌓인 턴 수. 세션이 없으면 `null`. */
+  getAutoCompactState(sessionId: string): {
+    everyTurns: number;
+    tokens: number;
+    turnsSinceCompact: number;
+    /** 줄인 뒤 아직 한 턴도 돌지 않았는지. */
+    awaitingTurnAfterCompact: boolean;
+  } | null {
+    const row = getConnection()
+      .prepare(
+        `SELECT auto_compact_every_turns AS everyTurns, auto_compact_tokens AS tokens,
+                turns_since_compact AS turnsSinceCompact, compacted_awaiting_turn AS awaiting
+         FROM sessions
+         WHERE session_id = ?`
+      )
+      .get(sessionId) as {
+        everyTurns: number | null;
+        tokens: number | null;
+        turnsSinceCompact: number | null;
+        awaiting: number | null;
+      } | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      everyTurns: Number(row.everyTurns ?? 0),
+      tokens: Number(row.tokens ?? 0),
+      turnsSinceCompact: Number(row.turnsSinceCompact ?? 0),
+      awaitingTurnAfterCompact: Number(row.awaiting ?? 0) !== 0,
+    };
+  },
+
+  /** 고친 칸만 적는다. `updated_at` 은 건드리지 않는다 — 설정을 바꿨다고 최근 대화 순서가 바뀌면 안 된다. */
+  setAutoCompactSettings(sessionId: string, settings: { everyTurns?: number; tokens?: number }): void {
+    const db = getConnection();
+    if (settings.everyTurns !== undefined) {
+      db.prepare('UPDATE sessions SET auto_compact_every_turns = ? WHERE session_id = ?').run(settings.everyTurns, sessionId);
+    }
+    if (settings.tokens !== undefined) {
+      db.prepare('UPDATE sessions SET auto_compact_tokens = ? WHERE session_id = ?').run(settings.tokens, sessionId);
+    }
+  },
+
+  /** 턴이 하나 돌았다. `/compact` 는 셈에서 빼고 대신 `resetTurnsSinceCompact` 를 부른다. */
+  incrementTurnsSinceCompact(sessionId: string): void {
+    getConnection()
+      .prepare('UPDATE sessions SET turns_since_compact = COALESCE(turns_since_compact, 0) + 1, compacted_awaiting_turn = 0 WHERE session_id = ?')
+      .run(sessionId);
+  },
+
+  resetTurnsSinceCompact(sessionId: string): void {
+    getConnection().prepare('UPDATE sessions SET turns_since_compact = 0, compacted_awaiting_turn = 1 WHERE session_id = ?').run(sessionId);
+  },
+
   getSessionById(sessionId: string): SessionRow | null {
     const db = getConnection();
     const row = db

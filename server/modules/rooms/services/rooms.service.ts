@@ -26,6 +26,7 @@ import type {
   RoomPermissionMode,
   RoomRuntimeState,
 } from '@/shared/types.js';
+import { AUTO_COMPACT_MAX_EVERY_TURNS, AUTO_COMPACT_MAX_TOKENS, parseAutoCompactSetting } from '@/shared/auto-compact.js';
 import { AppError } from '@/shared/utils.js';
 
 /**
@@ -118,6 +119,8 @@ function buildDetail(room: RoomRow): RoomDetail {
       discussion: room.discussion !== 0,
       hostLed: room.host_led !== 0,
       autoCompact: room.auto_compact !== 0,
+      autoCompactEveryTurns: Number(room.auto_compact_every_turns ?? 0),
+      autoCompactTokens: Number(room.auto_compact_tokens ?? 0),
       notifyTelegram: room.notify_telegram !== 0,
       createdAt: toIsoTimestamp(room.created_at),
     },
@@ -451,10 +454,26 @@ export const roomsService = {
       discussion?: boolean;
       hostLed?: boolean;
       autoCompact?: boolean;
+      autoCompactEveryTurns?: number;
+      autoCompactTokens?: number;
       notifyTelegram?: boolean;
     },
   ): RoomDetail {
     requireRoom(roomId);
+    if (settings.autoCompactEveryTurns !== undefined
+      && parseAutoCompactSetting(settings.autoCompactEveryTurns, AUTO_COMPACT_MAX_EVERY_TURNS) === null) {
+      throw new AppError(`자동 압축 턴 기준은 0~${AUTO_COMPACT_MAX_EVERY_TURNS} 사이여야 합니다.`, {
+        code: 'INVALID_AUTO_COMPACT_EVERY_TURNS',
+        statusCode: 400,
+      });
+    }
+    if (settings.autoCompactTokens !== undefined
+      && parseAutoCompactSetting(settings.autoCompactTokens, AUTO_COMPACT_MAX_TOKENS) === null) {
+      throw new AppError(`자동 압축 토큰 기준은 0~${AUTO_COMPACT_MAX_TOKENS} 사이여야 합니다.`, {
+        code: 'INVALID_AUTO_COMPACT_TOKENS',
+        statusCode: 400,
+      });
+    }
     if (settings.maxAutoTurns !== undefined
       && (!Number.isInteger(settings.maxAutoTurns) || settings.maxAutoTurns < 1 || settings.maxAutoTurns > MAX_AUTO_TURNS_LIMIT)) {
       throw new AppError(`자동 턴 수는 1~${MAX_AUTO_TURNS_LIMIT} 사이여야 합니다.`, {

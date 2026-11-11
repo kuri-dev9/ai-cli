@@ -1651,6 +1651,10 @@ export type RoomDetail = {
     hostLed: boolean;
     /** 참가자 세션의 맥락이 많이 차면 그 차례 전에 스스로 줄이는지. */
     autoCompact: boolean;
+    /** 자동 압축 턴 기준. 지난번에 줄인 뒤로 이만큼 차례가 돌면 줄인다. 0 이면 끔. */
+    autoCompactEveryTurns: number;
+    /** 자동 압축 토큰 기준. 맥락에 이만큼 차면 줄인다. 0 이면 맥락 창의 60%. */
+    autoCompactTokens: number;
     /** 라운드가 완전히 끝났을 때(참가자 한 명이 아니라 전체) 텔레그램으로 알리는지. */
     notifyTelegram: boolean;
     createdAt: string;

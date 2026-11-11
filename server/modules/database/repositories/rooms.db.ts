@@ -21,6 +21,10 @@ export type RoomRow = {
   host_led: number;
   /** 1 이면 맥락이 많이 찬 참가자 세션을 차례 전에 스스로 줄인다. */
   auto_compact: number;
+  /** 자동 압축 턴 기준. 0 이면 끔. */
+  auto_compact_every_turns?: number;
+  /** 자동 압축 토큰 기준. 0 이면 맥락 창의 60%. */
+  auto_compact_tokens?: number;
   /** 1 이면 라운드가 완전히 끝났을 때 텔레그램으로 알린다. */
   notify_telegram: number;
   /** 방장 참가자. NULL 이면 원래 대화의 참가자가 방장이다. */
@@ -347,6 +351,8 @@ export const roomsDb = {
       discussion?: boolean;
       hostLed?: boolean;
       autoCompact?: boolean;
+      autoCompactEveryTurns?: number;
+      autoCompactTokens?: number;
       notifyTelegram?: boolean;
     },
   ): void {
@@ -362,6 +368,12 @@ export const roomsDb = {
     }
     if (settings.autoCompact !== undefined) {
       db.prepare('UPDATE rooms SET auto_compact = ? WHERE room_id = ?').run(settings.autoCompact ? 1 : 0, roomId);
+    }
+    if (settings.autoCompactEveryTurns !== undefined) {
+      db.prepare('UPDATE rooms SET auto_compact_every_turns = ? WHERE room_id = ?').run(settings.autoCompactEveryTurns, roomId);
+    }
+    if (settings.autoCompactTokens !== undefined) {
+      db.prepare('UPDATE rooms SET auto_compact_tokens = ? WHERE room_id = ?').run(settings.autoCompactTokens, roomId);
     }
     if (settings.notifyTelegram !== undefined) {
       db.prepare('UPDATE rooms SET notify_telegram = ? WHERE room_id = ?').run(settings.notifyTelegram ? 1 : 0, roomId);

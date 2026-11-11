@@ -5,11 +5,18 @@ import type { WebSocket } from 'ws';
 
 import { appConfigDb, sessionsDb } from '@/modules/database/index.js';
 import type { ActiveRunOwner } from '@/modules/database/index.js';
-import { providerModelsService, sessionsService } from '@/modules/providers/index.js';
+import { providerModelsService, providerTokenUsageService, sessionsService } from '@/modules/providers/index.js';
 import { activeRunJournal } from '@/modules/websocket/services/active-run-journal.service.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import type { ChatRunOrigin } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
+import {
+  autoCompactNeedsUsage,
+  COMPACT_COMMAND,
+  COMPACTABLE_PROVIDERS,
+  decideAutoCompact,
+  isCompactCommand,
+} from '@/shared/auto-compact.js';
 import {
   getGlobalImageAssetsDir,
   isImageAttachmentDescriptor,
@@ -249,7 +256,90 @@ async function handleChatSend(
     return;
   }
 
-  await dispatchRun(ws, userId, resolved.sessionId, resolved.session, data, dependencies);
+  const content = typeof data.content === 'string' ? data.content : '';
+  const session = await compactBeforeTurnIfDue(resolved.sessionId, resolved.session, userId, content, dependencies, 'web');
+  await dispatchRun(ws, userId, resolved.sessionId, session, data, dependencies);
+}
+
+type SessionRowForRun = NonNullable<ReturnType<typeof sessionsDb.getSessionById>>;
+
+/**
+ * 세션에 자동 대화 줄이기 기준이 있고 지금 걸리면, 보낸 글보다 먼저 `/compact`
+ * 를 따로 한 턴 돌린다. 프로바이더가 턴 도중에 스스로 줄이면 답이 끊기거나
+ * 앞뒤가 흐려지므로, 턴 사이에 미리 줄여 둔다.
+ *
+ * 슬래시 명령(사용자가 직접 보낸 `/compact` 포함)과 아직 첫 턴도 돌지 않은
+ * 세션은 건너뛴다. 사용량을 읽지 못하거나 줄이다 실패해도 보낸 글은 그대로
+ * 나간다 — 압축은 살림이지 턴의 조건이 아니다. 줄인 뒤의 세션 행을 돌려준다.
+ */
+async function compactBeforeTurnIfDue(
+  sessionId: string,
+  session: SessionRowForRun,
+  userId: string | number | null,
+  content: string,
+  dependencies: ChatWebSocketDependencies,
+  origin: ChatRunOrigin,
+): Promise<SessionRowForRun> {
+  if (!COMPACTABLE_PROVIDERS.has(session.provider) || !session.provider_session_id || content.trim().startsWith('/')) {
+    return session;
+  }
+  const state = sessionsDb.getAutoCompactState(sessionId);
+  if (!state || (state.everyTurns <= 0 && state.tokens <= 0) || state.awaitingTurnAfterCompact) {
+    return session;
+  }
+
+  const policy = { everyTurns: state.everyTurns, tokens: state.tokens };
+  let usage: { used?: number; total?: number } | null = null;
+  const dueByTurns = policy.everyTurns > 0 && state.turnsSinceCompact >= policy.everyTurns;
+  if (!dueByTurns && autoCompactNeedsUsage(policy)) {
+    try {
+      usage = await providerTokenUsageService.getSessionTokenUsage(sessionId);
+    } catch {
+      // 아직 기록이 없는 세션이면 읽을 사용량도 없다.
+    }
+  }
+  const reason = decideAutoCompact(policy, {
+    turnsSinceCompact: state.turnsSinceCompact,
+    used: usage?.used,
+    total: usage?.total,
+  });
+  if (!reason) {
+    return session;
+  }
+
+  console.log('[Chat] 자동 대화 줄이기 기준에 걸려 보내기 전에 줄입니다', {
+    sessionId,
+    reason,
+    turnsSinceCompact: state.turnsSinceCompact,
+    used: usage?.used,
+  });
+  const options: AnyRecord = {
+    ...(session.model ? { model: session.model } : {}),
+    ...(session.effort ? { effort: session.effort } : {}),
+    ...(session.claude_account_id ? { claudeAccountId: session.claude_account_id } : {}),
+  };
+  // 프로바이더는 턴이 끝난 뒤에도 프로세스를 한동안 붙잡고 있을 수 있다. 턴의
+  // 마지막 `complete` 가 지나가면 줄이기는 끝난 것이다.
+  let stopWatching = () => {};
+  const settled = new Promise<void>((resolve) => {
+    stopWatching = chatRunRegistry.onRunSettled((settledSessionId) => {
+      if (settledSessionId === sessionId) {
+        resolve();
+      }
+    });
+  });
+  try {
+    await Promise.race([
+      dispatchRun(null, userId, sessionId, session, { sessionId, content: COMPACT_COMMAND, options }, dependencies, {}, undefined, origin),
+      settled,
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Chat] Auto compaction failed', { sessionId, error: message });
+  } finally {
+    stopWatching();
+  }
+  return sessionsDb.getSessionById(sessionId) ?? session;
 }
 
 type ResolvedSendTarget = {
@@ -338,6 +428,14 @@ async function dispatchRun(
 
   const clientOptions = (data.options ?? {}) as AnyRecord;
   const command = typeof data.content === 'string' ? data.content : '';
+
+  // 자동 대화 줄이기의 "N턴마다" 셈. 실행이 끝나기를 기다리면 프로바이더가
+  // 프로세스를 붙잡는 동안 셈이 늦으므로 시작할 때 센다.
+  if (isCompactCommand(command)) {
+    sessionsDb.resetTurnsSinceCompact(sessionId);
+  } else if (command.trim()) {
+    sessionsDb.incrementTurnsSinceCompact(sessionId);
+  }
 
   // Record what this turn runs with so reopening the session later restores the
   // same model and reasoning effort, and so the resume path has a
@@ -765,11 +863,16 @@ export async function runDetachedChatTurn(
     });
   }
 
+  // 룸 차례는 룸 엔진이 룸 설정대로 줄이고, 끊긴 실행을 이어 가는 것은 새 턴이 아니다.
+  const target = input.owner === 'room' || input.resumeCount
+    ? session
+    : await compactBeforeTurnIfDue(input.sessionId, session, input.userId, input.content, dependencies, input.origin ?? 'web');
+
   return dispatchRun(
     null,
     input.userId,
     input.sessionId,
-    session,
+    target,
     { sessionId: input.sessionId, content: input.content, options: input.options ?? {} },
     dependencies,
     {},

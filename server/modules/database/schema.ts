@@ -148,6 +148,15 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- normally. Informational only: a fork is a fully independent provider
     -- session, and deleting the source does not affect it.
     forked_from_session_id TEXT,
+    -- 자동 대화 줄이기. N턴마다 / 맥락 토큰이 이만큼 차면 보내기 전에 /compact
+    -- 를 먼저 돌린다. 0 이면 그 기준은 꺼짐. turns_since_compact 는 지난번에
+    -- 줄인 뒤로 쌓인 턴 수다.
+    auto_compact_every_turns INTEGER NOT NULL DEFAULT 0,
+    auto_compact_tokens INTEGER NOT NULL DEFAULT 0,
+    turns_since_compact INTEGER NOT NULL DEFAULT 0,
+    -- 1 이면 줄인 뒤 아직 한 턴도 돌지 않았다. 트랜스크립트의 토큰 사용량은
+    -- 다음 턴이 돌기 전까지 줄이기 전 값으로 남으므로, 이때는 다시 줄이지 않는다.
+    compacted_awaiting_turn INTEGER NOT NULL DEFAULT 0,
     isArchived BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -307,6 +316,10 @@ CREATE TABLE IF NOT EXISTS rooms (
     host_led INTEGER NOT NULL DEFAULT 1,
     -- 1 이면 참가자 세션의 맥락이 많이 차면 그 차례 전에 스스로 줄인다.
     auto_compact INTEGER NOT NULL DEFAULT 1,
+    -- 자동 압축 기준. N턴마다 / 토큰이 이만큼 차면. 0 이면 턴 기준은 끄고,
+    -- 토큰 기준은 맥락 창의 60% 로 본다.
+    auto_compact_every_turns INTEGER NOT NULL DEFAULT 0,
+    auto_compact_tokens INTEGER NOT NULL DEFAULT 0,
     -- 1 이면 라운드가 완전히 끝났을 때(참가자 한 명이 아니라 전체) 텔레그램으로
     -- 알린다. 기본은 꺼짐.
     notify_telegram INTEGER NOT NULL DEFAULT 0,

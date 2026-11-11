@@ -12,6 +12,7 @@ import type {
   LLMProvider,
   NormalizedMessage,
 } from '@/shared/types.js';
+import { AUTO_COMPACT_MAX_EVERY_TURNS, AUTO_COMPACT_MAX_TOKENS, parseAutoCompactSetting } from '@/shared/auto-compact.js';
 import { AppError, sliceTailPage } from '@/shared/utils.js';
 
 type CreateAppSessionResult = {
@@ -43,6 +44,12 @@ type RecentSessionsPage = {
   conversations: RecentSessionListItem[];
   total: number;
   hasMore: boolean;
+};
+
+type SessionSettings = {
+  autoCompactEveryTurns: number;
+  autoCompactTokens: number;
+  turnsSinceCompact: number;
 };
 
 type SessionDetails = {
@@ -634,6 +641,50 @@ export const sessionsService = {
     };
   },
 
+  /** 세션 하나의 자동 대화 줄이기 기준과, 지난번에 줄인 뒤로 쌓인 턴 수. */
+  getSessionSettings(sessionId: string): SessionSettings {
+    const state = sessionsDb.getAutoCompactState(sessionId);
+    if (!state) {
+      throw new AppError(`Session "${sessionId}" was not found.`, {
+        code: 'SESSION_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+    return {
+      autoCompactEveryTurns: state.everyTurns,
+      autoCompactTokens: state.tokens,
+      turnsSinceCompact: state.turnsSinceCompact,
+    };
+  },
+
+  /** 넘어온 칸만 고친다. 범위를 벗어난 값은 400 으로 돌려보낸다. */
+  updateSessionSettings(
+    sessionId: string,
+    changes: { autoCompactEveryTurns?: unknown; autoCompactTokens?: unknown },
+  ): SessionSettings {
+    this.getSessionSettings(sessionId);
+    const everyTurns = changes.autoCompactEveryTurns === undefined
+      ? undefined
+      : parseAutoCompactSetting(changes.autoCompactEveryTurns, AUTO_COMPACT_MAX_EVERY_TURNS);
+    if (everyTurns === null) {
+      throw new AppError(`자동 압축 턴 기준은 0~${AUTO_COMPACT_MAX_EVERY_TURNS} 사이여야 합니다.`, {
+        code: 'INVALID_AUTO_COMPACT_EVERY_TURNS',
+        statusCode: 400,
+      });
+    }
+    const tokens = changes.autoCompactTokens === undefined
+      ? undefined
+      : parseAutoCompactSetting(changes.autoCompactTokens, AUTO_COMPACT_MAX_TOKENS);
+    if (tokens === null) {
+      throw new AppError(`자동 압축 토큰 기준은 0~${AUTO_COMPACT_MAX_TOKENS} 사이여야 합니다.`, {
+        code: 'INVALID_AUTO_COMPACT_TOKENS',
+        statusCode: 400,
+      });
+    }
+    sessionsDb.setAutoCompactSettings(sessionId, { everyTurns, tokens });
+    return this.getSessionSettings(sessionId);
+  },
+
   /**
    * Returns archived sessions with enough project metadata for the sidebar to
    * group, filter, open, and restore them without a per-row follow-up query.
@@ -760,6 +811,8 @@ export const sessionsService = {
     }
 
     sessionsDb.updateSessionCustomName(sessionId, summary);
+    // 사이드바 밖(세션 설정 창, 다른 탭)에서 바꾼 이름도 목록과 헤더에 바로 반영되게 한다.
+    void broadcastSessionUpserted(sessionId);
     return { sessionId, summary };
   },
 };

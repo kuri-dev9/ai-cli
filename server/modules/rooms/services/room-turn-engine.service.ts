@@ -52,6 +52,12 @@ import type {
   RoomTask,
   RoomTurnKind,
 } from '@/shared/types.js';
+import {
+  autoCompactNeedsUsage,
+  COMPACT_COMMAND,
+  COMPACTABLE_PROVIDERS,
+  decideAutoCompact,
+} from '@/shared/auto-compact.js';
 import { AppError } from '@/shared/utils.js';
 
 /**
@@ -191,16 +197,11 @@ const WAITING_FOR_BACKGROUND_TEXT = '(백그라운드 작업을 기다리는 중
 const PRIOR_CONTEXT_MESSAGES = 12;
 const PRIOR_CONTEXT_MESSAGE_CHARS = 800;
 
-/** 지난 대화를 요약해 맥락을 줄이는 명령. Claude 와 Codex 가 같은 이름을 쓴다. */
-const COMPACT_COMMAND = '/compact';
-
-/** `/compact` 를 알아듣는 프로바이더. 나머지는 줄일 방법이 없어 자동 압축에서 빠진다. */
-const COMPACTABLE_PROVIDERS = new Set(['claude', 'codex']);
-
 /**
- * 맥락 창이 이만큼 차면 그 참가자의 차례 전에 스스로 줄인다. 룸은 한 요청에
- * 여럿이 답해 토큰이 빨리 쌓이고, 창이 넘치면 프로바이더가 차례 도중에 줄이거나
- * 실패한다. 차례 사이에 미리 줄이는 편이 답이 끊기지 않는다.
+ * 토큰 기준을 따로 정하지 않은 룸은 맥락 창이 이만큼 차면 그 참가자의 차례 전에
+ * 스스로 줄인다. 룸은 한 요청에 여럿이 답해 토큰이 빨리 쌓이고, 창이 넘치면
+ * 프로바이더가 차례 도중에 줄이거나 실패한다. 차례 사이에 미리 줄이는 편이 답이
+ * 끊기지 않는다.
  */
 const AUTO_COMPACT_RATIO = 0.6;
 
@@ -659,24 +660,39 @@ async function compactIfNearlyFull(room: RoomRow, me: SpeakingParticipant, loop:
   if (!COMPACTABLE_PROVIDERS.has(me.provider)) {
     return;
   }
-  let usage: { used?: number; total?: number } | null = null;
-  try {
-    usage = await readTokenUsage(me.sessionId);
-  } catch {
-    // 아직 기록이 없는 새 세션이면 읽을 사용량도 없다.
+  // 기준은 도는 중에도 바뀔 수 있어 차례마다 새로 읽는다.
+  const current = roomsDb.getRoom(room.room_id) ?? room;
+  const policy = {
+    everyTurns: Number(current.auto_compact_every_turns ?? 0),
+    tokens: Number(current.auto_compact_tokens ?? 0),
+    fallbackRatio: AUTO_COMPACT_RATIO,
+  };
+  const compactState = sessionsDb.getAutoCompactState(me.sessionId);
+  const turnsSinceCompact = compactState?.turnsSinceCompact ?? 0;
+  // 줄인 뒤 아직 차례가 돌지 않았다. 사용량은 줄이기 전 값으로 남아 있으니 다시 줄이지 않는다.
+  if (compactState?.awaitingTurnAfterCompact) {
     return;
   }
-  const used = Number(usage?.used ?? 0);
-  const total = Number(usage?.total ?? 0);
-  if (!(total > 0) || used / total < AUTO_COMPACT_RATIO) {
+  let usage: { used?: number; total?: number } | null = null;
+  if (!(policy.everyTurns > 0 && turnsSinceCompact >= policy.everyTurns) && autoCompactNeedsUsage(policy)) {
+    try {
+      usage = await readTokenUsage(me.sessionId);
+    } catch {
+      // 아직 기록이 없는 새 세션이면 읽을 사용량도 없다.
+    }
+  }
+  const reason = decideAutoCompact(policy, { turnsSinceCompact, used: usage?.used, total: usage?.total });
+  if (!reason) {
     return;
   }
 
-  console.log('[Rooms] 맥락이 많이 차서 차례 전에 줄입니다', {
+  console.log('[Rooms] 자동 압축 기준에 걸려 차례 전에 줄입니다', {
     roomId: room.room_id,
     participantId: me.participantId,
-    used,
-    total,
+    reason,
+    turnsSinceCompact,
+    used: usage?.used,
+    total: usage?.total,
   });
   try {
     await runTurnInSession(room, me, loop, COMPACT_COMMAND, [], false);

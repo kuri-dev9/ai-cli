@@ -34,3 +34,4 @@ export { FrontendBuildRefresh } from '@/shared/ui/FrontendBuildRefresh';
 export { ScrollArea } from '@/shared/ui/ScrollArea';
 export { Shimmer } from '@/shared/ui/Shimmer';
 export { Tooltip } from '@/shared/ui/Tooltip';
+export { Slider } from '@/shared/ui/Slider';

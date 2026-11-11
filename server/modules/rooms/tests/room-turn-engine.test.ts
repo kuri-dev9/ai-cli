@@ -1718,6 +1718,83 @@ test('맥락이 60% 를 넘으면 줄이고, 그 아래면 두지 않는다', as
   });
 });
 
+test('룸의 토큰 기준을 정하면 비율 대신 그 토큰 수를 넘은 참가자만 줄인다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(
+      createRuntime({ [HOST]: ['답 @Claude2'], [REVIEWER]: ['줄였습니다', '리뷰\n[DONE]'] }, calls),
+      // 둘 다 60% 에는 한참 못 미친다. 토큰 기준(100k)만 리뷰어를 건다.
+      { readTokenUsage: async (sessionId) => (sessionId === REVIEWER ? { used: 110_000, total: 1_000_000 } : { used: 90_000, total: 1_000_000 }) },
+    );
+    roomsService.updateSettings(ROOM_ID, { autoCompactTokens: 100_000 });
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'two turns');
+
+    assert.deepEqual(
+      calls.map((call) => [call.sessionId, call.command === '/compact' ? 'compact' : 'turn']),
+      [[HOST, 'turn'], [REVIEWER, 'compact'], [REVIEWER, 'turn']],
+    );
+    assert.equal(roomsService.getRoomDetail(ROOM_ID).room.autoCompactTokens, 100_000);
+  });
+});
+
+test('룸의 턴 기준에 닿은 참가자는 맥락이 비어 있어도 차례 전에 줄인다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(
+      createRuntime({ [HOST]: ['답 @Claude2'], [REVIEWER]: ['줄였습니다', '리뷰\n[DONE]'] }, calls),
+      { readTokenUsage: async () => ({ used: 1_000, total: 200_000 }) },
+    );
+    roomsService.updateSettings(ROOM_ID, { autoCompactEveryTurns: 2 });
+    // 리뷰어는 지난번에 줄인 뒤로 이미 두 턴을 돌았다.
+    sessionsDb.incrementTurnsSinceCompact(REVIEWER);
+    sessionsDb.incrementTurnsSinceCompact(REVIEWER);
+
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'two turns');
+
+    assert.deepEqual(
+      calls.map((call) => [call.sessionId, call.command === '/compact' ? 'compact' : 'turn']),
+      [[HOST, 'turn'], [REVIEWER, 'compact'], [REVIEWER, 'turn']],
+    );
+    // 줄인 뒤 다시 센다. 방금 돈 차례 하나만 남는다.
+    assert.equal(sessionsDb.getAutoCompactState(REVIEWER)?.turnsSinceCompact, 1);
+  });
+});
+
+test('방금 줄인 참가자는 사용량이 줄이기 전 값으로 남아 있어도 차례 전에 또 줄이지 않는다', async () => {
+  await withRoom(6, async () => {
+    const calls: Call[] = [];
+    roomTurnEngine.initialize(
+      createRuntime({ [REVIEWER]: ['줄였습니다', '리뷰\n[DONE]'], [HOST]: ['답 @Claude2'] }, calls),
+      // Claude 트랜스크립트는 /compact 뒤에 새 사용량을 남기지 않는다. 다음 차례 전까지 같은 큰 값이 읽힌다.
+      { readTokenUsage: async (sessionId) => (sessionId === REVIEWER ? { used: 190_000, total: 200_000 } : { used: 1_000, total: 200_000 }) },
+    );
+
+    // 쉬는 동안 "대화 줄이기" 로 먼저 줄였다.
+    await roomsService.compact(ROOM_ID, 'p-rev');
+    roomsService.postUserMessage(ROOM_ID, { content: '시작' }, 1);
+    await waitFor(() => isIdle() && speakers().length === 3, 'two turns');
+
+    assert.deepEqual(
+      calls.map((call) => [call.sessionId, call.command === '/compact' ? 'compact' : 'turn']),
+      [[REVIEWER, 'compact'], [HOST, 'turn'], [REVIEWER, 'turn']],
+    );
+    // 차례가 한 번 돌았으니 다음부터는 다시 기준대로 본다.
+    assert.equal(sessionsDb.getAutoCompactState(REVIEWER)?.awaitingTurnAfterCompact, false);
+  });
+});
+
+test('자동 압축 기준이 범위를 벗어나면 저장하지 않는다', async () => {
+  await withRoom(6, async () => {
+    assert.throws(() => roomsService.updateSettings(ROOM_ID, { autoCompactEveryTurns: 51 }), /0~50/);
+    assert.throws(() => roomsService.updateSettings(ROOM_ID, { autoCompactTokens: -1 }), /0~1000000/);
+    const { room } = roomsService.getRoomDetail(ROOM_ID);
+    assert.deepEqual([room.autoCompactEveryTurns, room.autoCompactTokens], [0, 0]);
+  });
+});
+
 test('이름만 여럿 적은 마지막 줄은 모두를 동시에 부르고, 답이 모이면 부른 참가자가 정리한다', async () => {
   await withRoom(6, async () => {
     const calls: Call[] = [];

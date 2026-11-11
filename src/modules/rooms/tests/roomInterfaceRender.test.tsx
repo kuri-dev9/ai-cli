@@ -33,6 +33,8 @@ const roomDetail: RoomDetail = {
     discussion: true,
     hostLed: false,
     autoCompact: true,
+    autoCompactEveryTurns: 0,
+    autoCompactTokens: 0,
     notifyTelegram: false,
     createdAt: '2026-10-25T00:00:00.000Z',
   },

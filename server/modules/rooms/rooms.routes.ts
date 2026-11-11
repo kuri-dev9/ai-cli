@@ -173,6 +173,8 @@ router.patch(
       discussion: typeof body.discussion === 'boolean' ? body.discussion : undefined,
       hostLed: typeof body.hostLed === 'boolean' ? body.hostLed : undefined,
       autoCompact: typeof body.autoCompact === 'boolean' ? body.autoCompact : undefined,
+      autoCompactEveryTurns: body.autoCompactEveryTurns === undefined ? undefined : Number(body.autoCompactEveryTurns),
+      autoCompactTokens: body.autoCompactTokens === undefined ? undefined : Number(body.autoCompactTokens),
       notifyTelegram: typeof body.notifyTelegram === 'boolean' ? body.notifyTelegram : undefined,
     });
     res.json(createApiSuccessResponse(detail));

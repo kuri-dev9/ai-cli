@@ -1482,6 +1482,10 @@ export type RoomDetail = {
     hostLed: boolean;
     /** Whether a participant session compacts itself before its turn once its context fills up. */
     autoCompact: boolean;
+    /** 자동 압축 턴 기준. 지난번에 줄인 뒤로 이만큼 차례가 돌면 줄인다. 0 이면 끔. */
+    autoCompactEveryTurns: number;
+    /** 자동 압축 토큰 기준. 맥락에 이만큼 차면 줄인다. 0 이면 맥락 창의 60%. */
+    autoCompactTokens: number;
     /** Whether Telegram gets a ping once a round fully finishes (not per participant turn). */
     notifyTelegram: boolean;
     createdAt: string;

@@ -72,7 +72,8 @@
           "server/shared/claude-cli-path.ts",
           "server/shared/image-attachments.ts",
           "server/shared/message-unification.ts",
-          "server/shared/schedule-time.ts"
+          "server/shared/schedule-time.ts",
+          "server/shared/auto-compact.ts"
         ],
         "mode": "file"
       },

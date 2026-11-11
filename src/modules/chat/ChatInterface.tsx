@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDownIcon } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowDownIcon, Settings2 } from 'lucide-react';
 
 import { useTasksSettings } from '@/modules/task-master';
 import { useWebSocket } from '@/shared/context/WebSocketContext';
@@ -29,6 +30,8 @@ import {
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import ChatComposer from '@/modules/chat/composer/ChatComposer';
 import CommandResultModal from '@/modules/chat/modals/CommandResultModal';
+import SessionSettingsModal from '@/modules/chat/modals/SessionSettingsModal';
+import { SESSION_SETTINGS_SLOT_ID } from '@/modules/chat/settings/sessionSettingsSlot';
 
 type ChatInterfaceProps = {
   isActive: boolean;
@@ -505,6 +508,14 @@ function ChatInterface({
             ? t('messageTypes.opencode', { defaultValue: 'OpenCode' })
           : t('messageTypes.claude');
 
+  // 세션 설정 단추는 워크스페이스 헤더의 빈자리에 그린다. 설정 창이 바꾸는 권한과
+  // 메시지 목록은 이 화면의 상태라, 창은 여기서 띄운다.
+  const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
+  const [sessionSettingsSlot, setSessionSettingsSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setSessionSettingsSlot(document.getElementById(SESSION_SETTINGS_SLOT_ID));
+  }, []);
+
   if (!selectedProject) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -520,9 +531,42 @@ function ChatInterface({
     );
   }
 
+  const settingsSessionId = selectedSession?.id ?? null;
+  const sessionSettingsButton = settingsSessionId ? (
+    <button
+      type="button"
+      onClick={() => setSessionSettingsOpen(true)}
+      title={t('sessionSettings.title')}
+      aria-label={t('sessionSettings.title')}
+      className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+    >
+      <Settings2 className="h-4 w-4" />
+    </button>
+  ) : null;
 
   return (
     <PermissionContext.Provider value={permissionContextValue}>
+      {isActive && sessionSettingsSlot && sessionSettingsButton && createPortal(sessionSettingsButton, sessionSettingsSlot)}
+      {settingsSessionId && (
+        <SessionSettingsModal
+          open={sessionSettingsOpen}
+          onOpenChange={setSessionSettingsOpen}
+          sessionId={settingsSessionId}
+          sessionName={String(selectedSession?.summary ?? '')}
+          provider={provider}
+          providerLabel={selectedProviderLabel}
+          model={currentProviderModel}
+          project={selectedProject}
+          permissionMode={permissionMode}
+          permissionModes={availablePermissionModes}
+          onSelectPermissionMode={selectPermissionMode}
+          supportsMove={supportsSessionForking}
+          isProcessing={isProcessing}
+          messages={chatMessages}
+          allMessagesLoaded={allMessagesLoaded}
+          onLoadAllMessages={loadAllMessages}
+        />
+      )}
       <div className="flex h-full min-h-0 flex-col">
         <ChatMessagesPane
           scrollContainerRef={scrollContainerRef}

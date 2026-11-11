@@ -291,6 +291,11 @@ export const api = {
     post(`/api/providers/sessions/${encodeURIComponent(sessionId)}/move`, { projectId }),
   renameSession: (sessionId: string, summary: string) =>
     put(`/api/providers/sessions/${sessionId}`, { summary }),
+  // 세션 설정 — 자동 대화 줄이기 기준(N턴마다 / 토큰 X 이상). 0 이면 그 기준은 꺼짐.
+  sessionSettings: (sessionId: string) =>
+    get(`/api/providers/sessions/${encodeURIComponent(sessionId)}/settings`),
+  updateSessionSettings: (sessionId: string, body: { autoCompactEveryTurns?: number; autoCompactTokens?: number }) =>
+    patch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/settings`, body),
 
   // Scheduled messages: send a message to a session at a future time.
   scheduledMessages: {
@@ -449,6 +454,9 @@ export const api = {
       discussion?: boolean;
       hostLed?: boolean;
       autoCompact?: boolean;
+      autoCompactEveryTurns?: number;
+      autoCompactTokens?: number;
+      notifyTelegram?: boolean;
     }) =>
       patch(`/api/rooms/${encodeURIComponent(roomId)}`, changes),
     // `hostCommand` runs the text as written in the host session instead of starting a round.

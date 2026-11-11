@@ -8,6 +8,7 @@ import {
   ChatComposer,
   CommandResultModal,
   MessageComponent,
+  SESSION_SETTINGS_SLOT_ID,
   createCachedDiffCalculator,
   grantClaudeToolPermission,
   normalizedToChatMessages,
@@ -44,6 +45,7 @@ import { ParticipantBadge, participantColor } from '@/modules/rooms/ParticipantB
 import { ROOM_PERMISSION_LABEL_KEYS, ROOM_PERMISSION_MODES } from '@/modules/rooms/utils/roomPermissions';
 import { foldLiveTurn } from '@/modules/rooms/utils/roomLiveTurn';
 import ParticipantSettingsPanel from '@/modules/rooms/ParticipantSettingsPanel';
+import RoomSettingsModal from '@/modules/rooms/RoomSettingsModal';
 import RoomTurnCard from '@/modules/rooms/RoomTurnCard';
 import {
   applyMention,
@@ -687,6 +689,13 @@ export function RoomInterface({
     };
   }, [membersOpen]);
 
+  // 룸 설정 단추는 워크스페이스 헤더의 세션 설정 자리에 그린다.
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
+  const [settingsSlot, setSettingsSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setSettingsSlot(document.getElementById(SESSION_SETTINGS_SLOT_ID));
+  }, []);
+
   if (!detail) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -1096,8 +1105,28 @@ export function RoomInterface({
     </ul>
   ) : null;
 
+  const roomSettingsButton = (
+    <button
+      type="button"
+      onClick={() => setRoomSettingsOpen(true)}
+      title={t('rooms.settingsTitle')}
+      aria-label={t('rooms.settingsTitle')}
+      className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+    >
+      <Settings2 className="h-4 w-4" />
+    </button>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {settingsSlot && createPortal(roomSettingsButton, settingsSlot)}
+      <RoomSettingsModal
+        open={roomSettingsOpen}
+        onOpenChange={setRoomSettingsOpen}
+        room={detail.room}
+        roomName={String(hostSession?.summary ?? '')}
+        onUpdateSettings={updateSettings}
+      />
       {/*
         Participant strip and room status, kept to one line. The strip scrolls
         sideways once the room has more members than fit: wrapping onto a second

@@ -169,6 +169,8 @@ export function useRoom(hostSessionId: string) {
     discussion?: boolean;
     hostLed?: boolean;
     autoCompact?: boolean;
+    autoCompactEveryTurns?: number;
+    autoCompactTokens?: number;
     notifyTelegram?: boolean;
     /** 룸 전체 권한. 참가자별로 따로 둔 값은 서버가 함께 지운다. */
     permissionMode?: RoomPermissionMode;

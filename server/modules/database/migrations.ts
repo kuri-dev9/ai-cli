@@ -481,6 +481,24 @@ const addClaudeAccountIdColumns = (db: Database): void => {
   }
 };
 
+/**
+ * 자동 대화 줄이기 기준과, 지난번에 줄인 뒤로 쌓인 턴 수. 기존 행은 0 —
+ * 세션은 꺼짐, 룸은 예전처럼 맥락 60% 기준으로 읽힌다.
+ */
+const addAutoCompactColumns = (db: Database): void => {
+  const sessionColumns = getTableInfo(db, 'sessions').map((column) => column.name);
+  addColumnToTableIfNotExists(db, 'sessions', sessionColumns, 'auto_compact_every_turns', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnToTableIfNotExists(db, 'sessions', sessionColumns, 'auto_compact_tokens', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnToTableIfNotExists(db, 'sessions', sessionColumns, 'turns_since_compact', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnToTableIfNotExists(db, 'sessions', sessionColumns, 'compacted_awaiting_turn', 'INTEGER NOT NULL DEFAULT 0');
+
+  if (tableExists(db, 'rooms')) {
+    const roomColumns = getTableInfo(db, 'rooms').map((column) => column.name);
+    addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'auto_compact_every_turns', 'INTEGER NOT NULL DEFAULT 0');
+    addColumnToTableIfNotExists(db, 'rooms', roomColumns, 'auto_compact_tokens', 'INTEGER NOT NULL DEFAULT 0');
+  }
+};
+
 const ensureProjectsForSessionPaths = (db: Database): void => {
   if (!tableExists(db, 'sessions')) {
     return;
@@ -652,6 +670,7 @@ export const runMigrations = (db: Database) => {
     db.exec(ROOM_MESSAGES_TABLE_SCHEMA_SQL);
     addRoomSettingsColumns(db);
     addClaudeAccountIdColumns(db);
+    addAutoCompactColumns(db);
     stripRoomPrefixFromSessionNames(db);
     // 서버가 내려갔다 떠도 하던 일을 이어 가기 위한 기록.
     db.exec(ACTIVE_RUNS_TABLE_SCHEMA_SQL);
