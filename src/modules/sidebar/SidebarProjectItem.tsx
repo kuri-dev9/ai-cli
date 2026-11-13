@@ -188,6 +188,14 @@ function SidebarProjectItem({
   const selectAndToggleProject = () => {
     if (selectedProject?.projectId !== project.projectId) {
       onProjectSelect(project);
+      // 다른 프로젝트로 옮기면 가장 최근 대화를 바로 연다. 빈 새 세션 화면에서
+      // 다시 세션을 고르는 한 번의 클릭을 줄인다. `sessions` 는 최근 순으로
+      // 정렬되어 있고, 접힌 프로젝트도 첫 페이지는 받아 두었다. 대화가 없으면
+      // 예전처럼 새 세션 화면이 열린다.
+      const latestSession = sessions[0];
+      if (latestSession) {
+        onSessionSelect(latestSession, project.projectId);
+      }
     }
 
     toggleProject();
