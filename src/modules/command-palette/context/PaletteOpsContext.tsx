@@ -6,6 +6,8 @@ export type PaletteOps = {
   // Opens a file in the editor side panel without changing the active tab
   // (used by in-chat file links so they behave like the inline edit view).
   openFileInEditor: (path: string) => void;
+  // 채팅의 "보기" 단추: 문서를 오른쪽에 읽기용으로 열고, 바뀌면 따라 갱신한다.
+  openDocument: (path: string) => void;
   openSettings: (tab?: string) => void;
   refreshProjects: () => Promise<void> | void;
 };
@@ -17,6 +19,7 @@ const PaletteOpsContext = createContext<Registry | null>(null);
 const defaultOps: PaletteOps = {
   openFile: () => undefined,
   openFileInEditor: () => undefined,
+  openDocument: () => undefined,
   openSettings: () => undefined,
   refreshProjects: () => undefined,
 };
@@ -34,6 +37,7 @@ export function usePaletteOps(): PaletteOps {
       openFile: (path) => (ref?.current.openFile ?? defaultOps.openFile)(path),
       openFileInEditor: (path) =>
         (ref?.current.openFileInEditor ?? defaultOps.openFileInEditor)(path),
+      openDocument: (path) => (ref?.current.openDocument ?? defaultOps.openDocument)(path),
       openSettings: (tab) => (ref?.current.openSettings ?? defaultOps.openSettings)(tab),
       refreshProjects: () => (ref?.current.refreshProjects ?? defaultOps.refreshProjects)(),
     }),
@@ -43,7 +47,7 @@ export function usePaletteOps(): PaletteOps {
 
 export function usePaletteOpsRegister(partial: Partial<PaletteOps>) {
   const ref = useContext(PaletteOpsContext);
-  const { openFile, openFileInEditor, openSettings, refreshProjects } = partial;
+  const { openFile, openFileInEditor, openDocument, openSettings, refreshProjects } = partial;
 
   useEffect(() => {
     if (!ref) return undefined;
@@ -54,13 +58,15 @@ export function usePaletteOpsRegister(partial: Partial<PaletteOps>) {
     const prev = { ...registry };
     if (openFile) registry.openFile = openFile;
     if (openFileInEditor) registry.openFileInEditor = openFileInEditor;
+    if (openDocument) registry.openDocument = openDocument;
     if (openSettings) registry.openSettings = openSettings;
     if (refreshProjects) registry.refreshProjects = refreshProjects;
     return () => {
       if (openFile && registry.openFile === openFile) registry.openFile = prev.openFile;
       if (openFileInEditor && registry.openFileInEditor === openFileInEditor) registry.openFileInEditor = prev.openFileInEditor;
+      if (openDocument && registry.openDocument === openDocument) registry.openDocument = prev.openDocument;
       if (openSettings && registry.openSettings === openSettings) registry.openSettings = prev.openSettings;
       if (refreshProjects && registry.refreshProjects === refreshProjects) registry.refreshProjects = prev.refreshProjects;
     };
-  }, [ref, openFile, openFileInEditor, openSettings, refreshProjects]);
+  }, [ref, openFile, openFileInEditor, openDocument, openSettings, refreshProjects]);
 }

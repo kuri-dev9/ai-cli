@@ -3,7 +3,8 @@
     "copy": "Copier",
     "copied": "Copié",
     "copyCode": "Copier le code",
-    "playMedia": "Lire"
+    "playMedia": "Lire",
+    "viewDocument": "Voir"
   },
   "copyMessage": {
     "copy": "Copier le message",

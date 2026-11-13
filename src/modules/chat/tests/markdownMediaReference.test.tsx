@@ -92,7 +92,8 @@ test('ordinary inline code is left as inert code', () => {
   // Identifiers, MIME types and non-playable files must not become buttons.
   for (const span of ['rate_track', 'lyrics', 'audio/flac', 'src/presets/compile.ts', 'package.json', 'v1.37.3']) {
     const { container } = renderMarkdown(`\`${span}\``);
-    assert.equal(container.querySelector('button'), null, `${span} must not be a play button`);
+    // 소스 파일에는 "보기" 단추가 붙을 수 있다. 여기서 막는 것은 재생 단추뿐이다.
+    assert.equal(container.querySelector('button[aria-expanded]'), null, `${span} must not be a play button`);
     assert.ok(container.querySelector('code'), `${span} must stay code`);
     document.body.innerHTML = '';
   }

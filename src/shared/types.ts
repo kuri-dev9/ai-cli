@@ -745,6 +745,8 @@ export type CodeEditorFile = {
   // URLs for reading and saving content.
   projectId?: string;
   diffInfo?: CodeEditorDiffInfo | null;
+  // 채팅의 "보기" 단추로 연 파일. 문서는 미리보기로 시작하고, 디스크에서 바뀌면 다시 읽는다.
+  document?: boolean;
   [key: string]: unknown;
 };
 

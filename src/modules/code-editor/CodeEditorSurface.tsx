@@ -9,6 +9,9 @@ type CodeEditorSurfaceProps = {
   onChange: (value: string) => void;
   markdownPreview: boolean;
   isMarkdownFile: boolean;
+  /** HTML 은 미리보기를 켜면 패널 안에서 렌더링한다. */
+  isHtmlFile?: boolean;
+  fileName?: string;
   isDarkMode: boolean;
   fontSize: number;
   showLineNumbers: boolean;
@@ -21,6 +24,8 @@ export default function CodeEditorSurface({
   onChange,
   markdownPreview,
   isMarkdownFile,
+  isHtmlFile = false,
+  fileName,
   isDarkMode,
   fontSize,
   showLineNumbers,
@@ -33,6 +38,18 @@ export default function CodeEditorSurface({
           <MarkdownPreview content={content} />
         </div>
       </div>
+    );
+  }
+
+  if (markdownPreview && isHtmlFile) {
+    // 새 탭 미리보기와 같은 sandbox. 같은 출처 권한은 주지 않는다.
+    return (
+      <iframe
+        title={fileName}
+        srcDoc={content}
+        sandbox="allow-forms allow-modals allow-popups allow-scripts"
+        className="h-full w-full border-0 bg-white"
+      />
     );
   }
 

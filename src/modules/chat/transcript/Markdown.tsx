@@ -7,7 +7,8 @@ import rehypeKatex from 'rehype-katex';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTranslation } from 'react-i18next';
 
-import { getPreviewKind, MermaidDiagram } from '@/modules/code-editor';
+import { getPreviewKind, isViewableFile, MermaidDiagram } from '@/modules/code-editor';
+import { ViewDocumentButton } from '@/modules/chat/tools/ViewDocumentButton';
 import { MediaPlayer } from '@/modules/media-library';
 import { normalizeInlineCodeFences } from '@/modules/chat/utils/chatFormatting';
 import { orderedListIndent } from '@/modules/chat/utils/orderedListIndent';
@@ -117,6 +118,16 @@ const playableMediaReferencesIn = (text: string): string[] => {
   return [...found];
 };
 
+// `초안.md`, `apps-script/Code.gs`, `docs/guide.html:12` 처럼 파일 하나만 적힌 인라인 코드.
+// 공백(명령), 와일드카드(`*.md`), URL 은 파일 하나를 가리키는 것이 아니므로 뺀다.
+const documentReference = (value: string): string | null => {
+  const cleaned = stripLineSuffix(value.trim());
+  if (!cleaned || /[\s*?]/.test(cleaned) || /^[a-z]+:\/\//i.test(cleaned)) {
+    return null;
+  }
+  return isViewableFile(cleaned) ? cleaned : null;
+};
+
 type CodeBlockProps = {
   node?: any;
   className?: string;
@@ -174,7 +185,7 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
       );
     }
 
-    return (
+    const code = (
       <code
         className={`whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted px-1.5 py-0.5 font-mono text-[0.875em] text-foreground ${className || ''
           }`}
@@ -183,6 +194,18 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
         {children}
       </code>
     );
+
+    const docReference = documentReference(raw);
+    if (docReference) {
+      return (
+        <>
+          {code}
+          <ViewDocumentButton filePath={docReference} />
+        </>
+      );
+    }
+
+    return code;
   }
 
   const references = playableMediaReferencesIn(raw);

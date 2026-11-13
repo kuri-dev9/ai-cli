@@ -3,7 +3,8 @@
     "copy": "複製",
     "copied": "已複製",
     "copyCode": "複製程式碼",
-    "playMedia": "播放"
+    "playMedia": "播放",
+    "viewDocument": "檢視"
   },
   "copyMessage": {
     "copy": "複製訊息",

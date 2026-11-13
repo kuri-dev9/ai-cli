@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@/shared/api';
 import type { CodeEditorFile } from '@/shared/types';
@@ -9,6 +9,9 @@ type UseCodeEditorDocumentParams = {
   file: CodeEditorFile;
   projectPath?: string;
 };
+
+// 채팅의 "보기" 단추로 연 문서를 디스크에서 다시 읽는 간격.
+const LIVE_RELOAD_INTERVAL_MS = 2000;
 
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
@@ -36,12 +39,20 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   const fileName = file.name;
   const fileDiffNewString = file.diffInfo?.new_string;
   const fileDiffOldString = file.diffInfo?.old_string;
+  const isLiveDocument = Boolean(file.document) && !file.diffInfo;
+  // 마지막으로 디스크에서 읽은 글. 지금 버퍼와 같으면 손대지 않은 것이다.
+  const loadedContentRef = useRef<string | null>(null);
+  const contentRef = useRef(content);
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
 
   useEffect(() => {
     const loadFileContent = async () => {
       try {
         setLoading(true);
         setIsBinary(false);
+        loadedContentRef.current = null;
 
         // Natively previewable media (image/pdf/audio/video) is rendered by
         // CodeEditorMediaPreview, so there is nothing to read as text here.
@@ -78,6 +89,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
         }
 
         const data = await response.json();
+        loadedContentRef.current = data.content;
         setContent(data.content);
       } catch (error) {
         const message = getErrorMessage(error);
@@ -90,6 +102,48 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
 
     loadFileContent();
   }, [file.diffInfo, file.name, fileDiffNewString, fileDiffOldString, fileName, filePath, fileProjectId]);
+
+  // 문서로 연 파일은 Claude 가 Write·Edit·sed 등 무엇으로 고치든 화면이 따라가도록
+  // 디스크를 주기적으로 다시 읽는다. 사용자가 고치는 중(버퍼가 디스크와 다름)이면
+  // 덮어쓰지 않는다.
+  useEffect(() => {
+    if (!isLiveDocument || !fileProjectId || getPreviewKind(fileName) || isBinaryFile(fileName)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const reload = async () => {
+      if (document.visibilityState !== 'visible' || loadedContentRef.current === null) {
+        return;
+      }
+      try {
+        const response = await api.readFile(fileProjectId, filePath);
+        if (!response.ok || cancelled) {
+          return;
+        }
+        const data = await response.json();
+        const next = typeof data.content === 'string' ? data.content : null;
+        if (
+          cancelled
+          || next === null
+          || next === loadedContentRef.current
+          || contentRef.current !== loadedContentRef.current
+        ) {
+          return;
+        }
+        loadedContentRef.current = next;
+        setContent(next);
+      } catch {
+        // 잠깐 못 읽어도 다음 차례에 다시 본다.
+      }
+    };
+
+    const timer = window.setInterval(() => { void reload(); }, LIVE_RELOAD_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [fileName, filePath, fileProjectId, isLiveDocument]);
 
   const handleSave = useCallback(async () => {
     // Preview-only and binary files have no editable text buffer; never write
@@ -121,6 +175,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
       }
 
       await response.json();
+      loadedContentRef.current = content;
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);

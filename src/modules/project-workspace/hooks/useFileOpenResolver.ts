@@ -98,11 +98,17 @@ export function useFileOpenResolver(
   return useCallback(
     (filePath: string, diffInfo?: any) => {
       const ref = normalize(filePath).trim();
-      void loadFiles().then((files) => {
-        const match = findBestMatch(files, ref);
+      void loadFiles().then(async (files) => {
+        let match = findBestMatch(files, ref);
+        if (!match) {
+          // 목록을 받은 뒤에 새로 생긴 파일(방금 Claude 가 쓴 문서 등)일 수 있다.
+          // 한 번만 새로 받아 다시 찾는다.
+          cacheRef.current = { projectId, files: null };
+          match = findBestMatch(await loadFiles(), ref);
+        }
         onFileOpen(match ?? filePath, diffInfo);
       });
     },
-    [loadFiles, onFileOpen],
+    [loadFiles, onFileOpen, projectId],
   );
 }

@@ -3,7 +3,8 @@
     "copy": "コピー",
     "copied": "コピーしました",
     "copyCode": "コードをコピー",
-    "playMedia": "再生"
+    "playMedia": "再生",
+    "viewDocument": "表示"
   },
   "copyMessage": {
     "copy": "メッセージをコピー",

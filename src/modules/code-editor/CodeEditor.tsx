@@ -44,7 +44,15 @@ export default function CodeEditor({
   const paletteOps = usePaletteOps();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDiff, setShowDiff] = useState(Boolean(file.diffInfo));
-  const [markdownPreview, setMarkdownPreview] = useState(false);
+  // 채팅의 "보기" 단추로 연 문서는 원문이 아니라 읽기 좋은 미리보기로 시작한다.
+  const [markdownPreview, setMarkdownPreview] = useState(Boolean(file.document));
+  // 같은 에디터에 다른 파일이 열리면 그 파일이 문서인지에 맞춰 다시 정한다.
+  const previewKey = `${file.path}:${file.document ? 'document' : 'file'}`;
+  const [previewKeyShown, setPreviewKeyShown] = useState(previewKey);
+  if (previewKeyShown !== previewKey) {
+    setPreviewKeyShown(previewKey);
+    setMarkdownPreview(Boolean(file.document));
+  }
 
   // The code editor follows the app-wide theme; it has no theme of its own.
   const { isDarkMode } = useTheme();
@@ -75,7 +83,7 @@ export default function CodeEditor({
 
   const isMarkdownFile = useMemo(() => {
     const extension = file.name.split('.').pop()?.toLowerCase();
-    return extension === 'md' || extension === 'markdown';
+    return extension === 'md' || extension === 'markdown' || extension === 'mdx';
   }, [file.name]);
 
   const isHtmlPreviewFile = useMemo(() => {
@@ -251,7 +259,7 @@ export default function CodeEditor({
             file={file}
             isSidebar={isSidebar}
             isFullscreen={isFullscreen}
-            isMarkdownFile={isMarkdownFile}
+            isMarkdownFile={isMarkdownFile || isHtmlPreviewFile}
             isHtmlPreviewFile={isHtmlPreviewFile}
             markdownPreview={markdownPreview}
             saving={saving}
@@ -293,6 +301,8 @@ export default function CodeEditor({
               onChange={setContent}
               markdownPreview={markdownPreview}
               isMarkdownFile={isMarkdownFile}
+              isHtmlFile={isHtmlPreviewFile}
+              fileName={file.name}
               isDarkMode={isDarkMode}
               fontSize={fontSize}
               showLineNumbers={showLineNumbers}

@@ -4,4 +4,4 @@ export { default as CodeEditor } from '@/modules/code-editor/CodeEditor';
 export { useEditorSidebar } from '@/modules/code-editor/hooks/useEditorSidebar';
 export { default as MarkdownPreview } from '@/modules/code-editor/markdown/MarkdownPreview';
 export { default as MermaidDiagram } from '@/modules/code-editor/markdown/MermaidDiagram';
-export { getPreviewKind } from '@/modules/code-editor/utils/previewableFile';
+export { getPreviewKind, isViewableFile } from '@/modules/code-editor/utils/previewableFile';

@@ -15,6 +15,7 @@ import { QuestionAnswerContent } from '@/modules/chat/tools/ContentRenderers/Que
 import { PlanDisplay } from '@/modules/chat/tools/PlanDisplay';
 import { ToolStatusBadge } from '@/modules/chat/tools/ToolStatusBadge';
 import { DiffStatsBadge } from '@/modules/chat/tools/DiffStatsBadge';
+import { ViewDocumentButton } from '@/modules/chat/tools/ViewDocumentButton';
 import { parseToolPayload, summarizeDiff } from '@/modules/chat/utils/messageTransforms';
 
 type ToolRendererProps = {
@@ -305,6 +306,17 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
       ? summarizeDiff(createDiff(contentProps.oldContent, contentProps.newContent))
       : null;
 
+    // 파일을 쓰거나 고친 카드에는 지금 디스크의 내용을 대화 옆에 띄우는 "보기"
+    // 단추를 붙인다. 제목을 누르면 그 한 번의 diff 가, 보기를 누르면 이후 수정까지
+    // 따라가는 최신본이 열린다. 실패·거부된 쓰기는 볼 것이 없으므로 뺀다.
+    const documentPath = (toolName === 'Edit' || toolName === 'Write' || toolName === 'ApplyPatch')
+      && typeof contentProps.filePath === 'string'
+      && contentProps.filePath.length > 0
+      && toolStatus !== 'error'
+      && toolStatus !== 'denied'
+      ? contentProps.filePath
+      : null;
+
     const statusBadge = toolStatus && toolStatus !== 'completed'
       ? <ToolStatusBadge status={toolStatus} />
       : null;
@@ -328,6 +340,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
         defaultOpen={defaultOpen}
         onTitleClick={handleTitleClick}
         badge={badgeElement}
+        action={documentPath ? <ViewDocumentButton filePath={documentPath} /> : undefined}
         showRawParameters={mode === 'input' && showRawParameters}
         rawContent={rawToolInput}
         toolCategory={getToolCategory(toolName)}

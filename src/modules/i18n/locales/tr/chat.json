@@ -3,7 +3,8 @@
     "copy": "Kopyala",
     "copied": "Kopyalandı",
     "copyCode": "Kodu kopyala",
-    "playMedia": "Oynat"
+    "playMedia": "Oynat",
+    "viewDocument": "Görüntüle"
   },
   "copyMessage": {
     "copy": "Mesajı kopyala",

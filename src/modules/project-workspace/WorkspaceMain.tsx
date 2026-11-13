@@ -139,6 +139,13 @@ function WorkspaceMain({
   // real project files before opening them in the in-app editor.
   const resolvedFileOpen = useFileOpenResolver(selectedProject, handleWorkspaceFileOpen);
 
+  // 채팅의 "보기" 단추. 문서는 미리보기로 열고, Claude 가 고치면 따라 갱신한다.
+  // 답변 속 `초안.md` 처럼 이름만 적힌 것도 프로젝트에서 찾아 연다.
+  const handleDocumentOpen = useCallback((filePath: string) => {
+    handleFileOpen(filePath, null, { document: true });
+  }, [handleFileOpen]);
+  const openDocument = useFileOpenResolver(selectedProject, handleDocumentOpen);
+
   // 파일과 소스 관리는 데스크톱에서 탭을 바꾸지 않고, 지금 화면(채팅·셸 등)
   // 오른쪽 절반에 띄운다. 크게 볼 일이 없어 대화를 보면서 곁에 두는 편이 낫다.
   // 모바일은 폭이 모자라 예전처럼 화면 전체로 연다.
@@ -205,7 +212,7 @@ function WorkspaceMain({
 
   // Stable arguments keep usePaletteOpsRegister's effect from tearing down and
   // rewriting the whole palette registry on every render.
-  usePaletteOpsRegister({ openFile, openFileInEditor });
+  usePaletteOpsRegister({ openFile, openFileInEditor, openDocument });
 
   // 오른쪽 패널이 열려 있으면 파일은 그 패널 안에서 연다. 바깥에 에디터를 하나 더
   // 붙이면 채팅·패널·에디터 세 칸이 되어 채팅이 최소 폭까지 밀린다. 크게 보기를
