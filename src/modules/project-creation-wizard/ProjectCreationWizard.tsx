@@ -2,7 +2,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { FolderPlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { api } from '@/shared/api';
+import { useProjectGroups } from '@/modules/sidebar';
 import ErrorBanner from '@/modules/project-creation-wizard/ErrorBanner';
+import ProjectOptionsFields, { NEW_PROJECT_GROUP } from '@/modules/project-creation-wizard/ProjectOptionsFields';
 import StepConfiguration from '@/modules/project-creation-wizard/StepConfiguration';
 import StepReview from '@/modules/project-creation-wizard/StepReview';
 import WizardFooter from '@/modules/project-creation-wizard/WizardFooter';
@@ -13,7 +16,11 @@ import {
   createProjectRequest,
   fetchClonePreflight,
 } from '@/modules/project-creation-wizard/utils/workspaceApi';
-import { isCloneWorkflow, shouldShowGithubAuthentication } from '@/modules/project-creation-wizard/utils/pathUtils';
+import {
+  getDefaultProjectName,
+  isCloneWorkflow,
+  shouldShowGithubAuthentication,
+} from '@/modules/project-creation-wizard/utils/pathUtils';
 import type {
   CloneTargetMode,
   CloneTargetPreflightResult,
@@ -35,6 +42,10 @@ const initialFormState: WizardFormState = {
   newGithubToken: '',
   cloneTarget: 'direct',
   skipClone: false,
+  displayName: '',
+  groupId: '',
+  newGroupName: '',
+  starred: false,
 };
 
 /** Rendered by the sidebar module's modal layer to create a new project or clone one from GitHub. */
@@ -50,6 +61,7 @@ export default function ProjectCreationWizard({
   const [cloneProgress, setCloneProgress] = useState('');
   const [preflight, setPreflight] = useState<CloneTargetPreflightResult | null>(null);
   const [isInspectingTarget, setIsInspectingTarget] = useState(false);
+  const { groups, createGroup, assignProject } = useProjectGroups();
 
   const shouldLoadTokens =
     step === 1 && shouldShowGithubAuthentication(formState.githubUrl);
@@ -133,6 +145,52 @@ export default function ProjectCreationWizard({
     [],
   );
 
+  /**
+   * 만들어진 프로젝트에 확인 화면에서 고른 설정을 입힌다. 프로젝트는 이미
+   * 만들어졌으므로 여기서 하나가 실패해도 창을 막지 않는다 — 프로젝트 설정
+   * 창에서 다시 바꿀 수 있다.
+   */
+  const applyProjectOptions = useCallback(async (
+    project: Record<string, unknown> | undefined,
+    { nameAlreadySet }: { nameAlreadySet: boolean },
+  ) => {
+    const projectId = typeof project?.projectId === 'string' ? project.projectId : null;
+    if (!projectId) {
+      return;
+    }
+
+    const displayName = formState.displayName.trim();
+    if (displayName && !nameAlreadySet) {
+      try {
+        const response = await api.renameProject(projectId, displayName);
+        if (!response.ok) {
+          console.warn('Failed to apply project name after creation:', response.status);
+        }
+      } catch (renameError) {
+        console.warn('Failed to apply project name after creation:', renameError);
+      }
+    }
+
+    // 예전에 보관했던 경로를 되살린 경우 이미 즐겨찾기일 수 있다. 토글이라 다시 누르면 풀린다.
+    if (formState.starred && project?.isStarred !== true) {
+      try {
+        const response = await api.toggleProjectStar(projectId);
+        if (!response.ok) {
+          console.warn('Failed to star project after creation:', response.status);
+        }
+      } catch (starError) {
+        console.warn('Failed to star project after creation:', starError);
+      }
+    }
+
+    const groupId = formState.groupId === NEW_PROJECT_GROUP
+      ? createGroup(formState.newGroupName)
+      : formState.groupId;
+    if (groupId) {
+      assignProject(projectId, groupId);
+    }
+  }, [assignProject, createGroup, formState]);
+
   const handleCreate = useCallback(async () => {
     setIsCreating(true);
     setError(null);
@@ -156,15 +214,19 @@ export default function ProjectCreationWizard({
           },
         );
 
+        await applyProjectOptions(project, { nameAlreadySet: false });
         onProjectCreated?.(project);
         onClose();
         return;
       }
 
+      const customName = formState.displayName.trim();
       const project = await createProjectRequest({
         path: formState.workspacePath.trim(),
+        ...(customName ? { customName } : {}),
       });
 
+      await applyProjectOptions(project, { nameAlreadySet: Boolean(customName) });
       onProjectCreated?.(project);
       onClose();
     } catch (createError) {
@@ -176,7 +238,7 @@ export default function ProjectCreationWizard({
     } finally {
       setIsCreating(false);
     }
-  }, [formState, onClose, onProjectCreated, t]);
+  }, [applyProjectOptions, formState, onClose, onProjectCreated, t]);
 
   const shouldCloneRepository = useMemo(
     () => isCloneWorkflow(formState.githubUrl) && !formState.skipClone,
@@ -188,6 +250,9 @@ export default function ProjectCreationWizard({
     Boolean(preflight?.requiresConfirmation)
     && !formState.skipClone
     && formState.cloneTarget !== 'subdirectory';
+  // 새 그룹을 고르고 이름을 비워 두면 이름 없는 그룹이 생긴다.
+  const isMissingNewGroupName =
+    formState.groupId === NEW_PROJECT_GROUP && !formState.newGroupName.trim();
 
   return (
     <div className="fixed bottom-0 left-0 right-0 top-0 z-[60] flex items-center justify-center bg-black/50 p-0 backdrop-blur-sm sm:p-4">
@@ -250,13 +315,29 @@ export default function ProjectCreationWizard({
               onCloneTargetChange={handleCloneTargetChange}
             />
           )}
+
+          {step === 2 && (
+            <ProjectOptionsFields
+              displayName={formState.displayName}
+              defaultName={getDefaultProjectName(formState.workspacePath, formState.githubUrl)}
+              groupId={formState.groupId}
+              newGroupName={formState.newGroupName}
+              starred={formState.starred}
+              groups={groups}
+              disabled={isCreating}
+              onDisplayNameChange={(displayName) => updateField('displayName', displayName)}
+              onGroupIdChange={(groupId) => updateField('groupId', groupId)}
+              onNewGroupNameChange={(newGroupName) => updateField('newGroupName', newGroupName)}
+              onStarredChange={(starred) => updateField('starred', starred)}
+            />
+          )}
         </div>
 
         <WizardFooter
           step={step}
           isCreating={isCreating}
           isBusy={isCreating || isInspectingTarget}
-          isNextDisabled={isBlockedOnCloneTargetChoice}
+          isNextDisabled={isBlockedOnCloneTargetChoice || (step === 2 && isMissingNewGroupName)}
           isCloneWorkflow={shouldCloneRepository}
           onClose={onClose}
           onBack={handleBack}

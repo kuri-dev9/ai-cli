@@ -206,6 +206,12 @@
       "providePath": "Veuillez fournir un chemin d'espace de travail",
       "failedToCreate": "Échec de la création de l'espace de travail",
       "failedToCreateFolder": "Échec de la création du dossier"
+    },
+    "options": {
+      "title": "Paramètres du projet",
+      "displayNameHelp": "Laissez vide pour utiliser le nom du dossier. Modifiable ensuite dans les paramètres du projet.",
+      "newGroup": "+ Nouveau groupe…",
+      "starred": "Ajouter aux favoris"
     }
   },
   "notifications": {

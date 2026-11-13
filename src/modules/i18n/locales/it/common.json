@@ -206,6 +206,12 @@
       "providePath": "Fornisci un percorso per l'area di lavoro",
       "failedToCreate": "Impossibile creare l'area di lavoro",
       "failedToCreateFolder": "Impossibile creare la cartella"
+    },
+    "options": {
+      "title": "Impostazioni progetto",
+      "displayNameHelp": "Lascia vuoto per usare il nome della cartella. Puoi cambiarlo dopo nelle impostazioni del progetto.",
+      "newGroup": "+ Nuovo gruppo…",
+      "starred": "Aggiungi ai preferiti"
     }
   },
   "notifications": {

@@ -206,6 +206,12 @@
       "providePath": "Lütfen bir çalışma alanı yolu gir",
       "failedToCreate": "Çalışma alanı oluşturulamadı",
       "failedToCreateFolder": "Klasör oluşturulamadı"
+    },
+    "options": {
+      "title": "Proje ayarları",
+      "displayNameHelp": "Klasör adını kullanmak için boş bırakın. Daha sonra proje ayarlarından değiştirebilirsiniz.",
+      "newGroup": "+ Yeni grup…",
+      "starred": "Favorilere ekle"
     }
   },
   "notifications": {

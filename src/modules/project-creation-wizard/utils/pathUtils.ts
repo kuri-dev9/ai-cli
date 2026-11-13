@@ -46,3 +46,13 @@ export const joinFolderPath = (basePath: string, folderName: string): string => 
     normalizedBasePath.includes('\\') && !normalizedBasePath.includes('/') ? '\\' : '/';
   return `${normalizedBasePath}${separator}${folderName.trim()}`;
 };
+
+/**
+ * 표시 이름을 비워 두었을 때 쓰일 이름. 입력란의 placeholder 로 보여 준다.
+ * clone 이면 저장소 이름, 아니면 폴더 이름이다.
+ */
+export const getDefaultProjectName = (workspacePath: string, githubUrl: string): string => {
+  const source = isCloneWorkflow(githubUrl) ? githubUrl.trim() : workspacePath.trim();
+  const last = source.replace(/[\\/]+$/, '').split(/[\\/:]/).pop() ?? '';
+  return last.replace(/\.git$/i, '');
+};

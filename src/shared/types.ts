@@ -1151,6 +1151,14 @@ export type WizardFormState = {
   cloneTarget: CloneTargetMode;
   /** clone 을 건너뛰고 폴더만 프로젝트로 등록한다. */
   skipClone: boolean;
+  /** 사이드바에 보일 이름. 비우면 폴더 이름을 쓴다. */
+  displayName: string;
+  /** 넣을 사이드바 그룹. '' 은 그룹 없음, NEW_PROJECT_GROUP 은 새로 만들 그룹. */
+  groupId: string;
+  /** groupId 가 새 그룹일 때 그 이름. */
+  newGroupName: string;
+  /** 만들면서 바로 즐겨찾기에 올린다. */
+  starred: boolean;
 };
 
 // ---------------------------

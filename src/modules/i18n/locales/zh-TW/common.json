@@ -206,6 +206,12 @@
       "providePath": "請提供工作區路徑",
       "failedToCreate": "建立工作區失敗",
       "failedToCreateFolder": "建立資料夾失敗"
+    },
+    "options": {
+      "title": "專案設定",
+      "displayNameHelp": "留空則使用資料夾名稱。之後可在專案設定中變更。",
+      "newGroup": "+ 新增群組…",
+      "starred": "加入我的最愛"
     }
   },
   "notifications": {

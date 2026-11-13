@@ -206,6 +206,12 @@
       "providePath": "Proporciona la ruta del espacio de trabajo",
       "failedToCreate": "No se pudo crear el espacio de trabajo",
       "failedToCreateFolder": "No se pudo crear la carpeta"
+    },
+    "options": {
+      "title": "Ajustes del proyecto",
+      "displayNameHelp": "Déjalo vacío para usar el nombre de la carpeta. Puedes cambiarlo luego en los ajustes del proyecto.",
+      "newGroup": "+ Nuevo grupo…",
+      "starred": "Añadir a favoritos"
     }
   },
   "notifications": {

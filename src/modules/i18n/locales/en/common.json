@@ -235,6 +235,12 @@
       "saved": "Saved",
       "cancel": "Cancel",
       "failedToSave": "Failed to save the project settings"
+    },
+    "options": {
+      "title": "Project settings",
+      "displayNameHelp": "Leave empty to use the folder name. You can change it later in project settings.",
+      "newGroup": "+ New group…",
+      "starred": "Add to favorites"
     }
   },
   "notifications": {

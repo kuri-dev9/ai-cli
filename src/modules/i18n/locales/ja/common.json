@@ -206,6 +206,12 @@
       "providePath": "ワークスペースのパスを入力してください",
       "failedToCreate": "ワークスペースの作成に失敗しました",
       "failedToCreateFolder": "フォルダの作成に失敗しました"
+    },
+    "options": {
+      "title": "プロジェクト設定",
+      "displayNameHelp": "空欄の場合はフォルダー名を使います。後でプロジェクト設定で変更できます。",
+      "newGroup": "+ 新しいグループ…",
+      "starred": "お気に入りに追加"
     }
   },
   "notifications": {

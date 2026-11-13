@@ -206,6 +206,12 @@
       "providePath": "Bitte gib einen Arbeitsbereichspfad an",
       "failedToCreate": "Arbeitsbereich konnte nicht erstellt werden",
       "failedToCreateFolder": "Ordner konnte nicht erstellt werden"
+    },
+    "options": {
+      "title": "Projekteinstellungen",
+      "displayNameHelp": "Leer lassen, um den Ordnernamen zu verwenden. Später in den Projekteinstellungen änderbar.",
+      "newGroup": "+ Neue Gruppe…",
+      "starred": "Zu Favoriten hinzufügen"
     }
   },
   "versionUpdate": {

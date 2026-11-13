@@ -206,6 +206,12 @@
       "providePath": "请提供工作区路径",
       "failedToCreate": "创建工作区失败",
       "failedToCreateFolder": "创建文件夹失败"
+    },
+    "options": {
+      "title": "项目设置",
+      "displayNameHelp": "留空则使用文件夹名称。之后可在项目设置中更改。",
+      "newGroup": "+ 新建分组…",
+      "starred": "添加到收藏"
     }
   },
   "notifications": {
