@@ -15,6 +15,9 @@ export { scanStateDb } from '@/modules/database/repositories/scan-state.db.js';
 // messageSourcesDb: 앱 바깥(텔레그램)에서 들어온 메시지에 출처를 남기고, 기록을 내려줄 때 붙인다.
 export { messageSourcesDb } from '@/modules/database/repositories/message-sources.db.js';
 export type { MessageSource } from '@/modules/database/repositories/message-sources.db.js';
+// sessionSharesDb: 세션을 로그인 없이 바깥에 여는 공유 링크.
+export { isShareActive, sessionSharesDb } from '@/modules/database/repositories/session-shares.db.js';
+export type { SessionShareRow } from '@/modules/database/repositories/session-shares.db.js';
 
 // sessionDraftsDb: used by User for drafts and Scheduled Messages for server-owned queued turns.
 export { sessionDraftsDb } from '@/modules/database/repositories/session-drafts.db.js';

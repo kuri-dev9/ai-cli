@@ -518,7 +518,7 @@ async function dispatchRun(
       provider,
       // 밖에서 들어온 글이라는 표시. 기록을 나중에 볼 때 붙는 배지와 같은 것을
       // 지금 바로 보여준다.
-      ...(origin === 'telegram' ? { source: 'telegram' as const } : {}),
+      ...(origin !== 'web' ? { source: origin } : {}),
     }));
   }
 

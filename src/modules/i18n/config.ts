@@ -23,6 +23,8 @@ import enCodeEditor from '@/modules/i18n/locales/en/codeEditor.json';
 import enTasks from '@/modules/i18n/locales/en/tasks.json';
 // oxlint-disable-next-line importx/order
 import enGit from '@/modules/i18n/locales/en/git.json';
+// oxlint-disable-next-line importx/order
+import enShare from '@/modules/i18n/locales/en/share.json';
 
 import frCommon from '@/modules/i18n/locales/fr/common.json';
 import frSettings from '@/modules/i18n/locales/fr/settings.json';
@@ -51,6 +53,7 @@ import koCodeEditor from '@/modules/i18n/locales/ko/codeEditor.json';
 // oxlint-disable-next-line importx/order
 import koTasks from '@/modules/i18n/locales/ko/tasks.json';
 import koGit from '@/modules/i18n/locales/ko/git.json';
+import koShare from '@/modules/i18n/locales/ko/share.json';
 
 import zhCommon from '@/modules/i18n/locales/zh-CN/common.json';
 import zhSettings from '@/modules/i18n/locales/zh-CN/settings.json';
@@ -148,6 +151,7 @@ i18n
         codeEditor: enCodeEditor,
         tasks: enTasks,
 git: enGit,
+        share: enShare,
       },
       fr: {
         common: frCommon,
@@ -176,6 +180,7 @@ git: enGit,
         codeEditor: koCodeEditor,
         tasks: koTasks,
         git: koGit,
+        share: koShare,
       },
       'zh-CN': {
         common: zhCommon,
@@ -252,7 +257,7 @@ git: enGit,
     debug: false,
 
     // Namespaces - load only what's needed
-    ns: ['common', 'settings', 'auth', 'sidebar', 'chat', 'codeEditor', 'tasks', 'git'],
+    ns: ['common', 'settings', 'auth', 'sidebar', 'chat', 'codeEditor', 'tasks', 'git', 'share'],
     defaultNS: 'common',
 
     // Key separator for nested keys (default: '.')

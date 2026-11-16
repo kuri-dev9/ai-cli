@@ -303,7 +303,7 @@ export type ChatMessage = {
    * 이 메시지가 앱 바깥에서 들어왔을 때의 통로. 브라우저에서 친 메시지에는
    * 없다. 기록에 작은 배지로 표시된다.
    */
-  source?: 'telegram';
+  source?: 'telegram' | 'share';
   /**
    * Set on the optimistic echo of a message being sent as a replacement for an
    * already-sent one, naming the anchor it replaces. Local to this client.
@@ -459,7 +459,7 @@ export type NormalizedMessage = {
    * 이 메시지가 앱 바깥에서 들어왔을 때의 통로. 브라우저에서 친 메시지에는
    * 없다. 기록을 나중에 볼 때 밖에서 급히 시킨 것인지 구분하려고 붙인다.
    */
-  source?: 'telegram';
+  source?: 'telegram' | 'share';
   /**
    * Mirrors optional transcript metadata from the server.
    *

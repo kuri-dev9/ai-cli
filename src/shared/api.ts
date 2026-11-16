@@ -679,6 +679,19 @@ export const api = {
       put('/api/telegram/session-notifications', { sessionId, enabled }),
   },
 
+  // 세션 공유 링크. 링크를 받은 사람은 로그인 없이 그 세션만 읽고 질문한다.
+  // 게스트 쪽 호출은 로그인 토큰을 싣지 않아야 해서 여기가 아니라
+  // `modules/session-share/guestApi.ts` 에 있다.
+  sessionShares: {
+    list: (sessionId: string) => get(`/api/session-shares?sessionId=${encodeURIComponent(sessionId)}`),
+    create: (body: { sessionId: string; permissionMode: string; expiresInHours: number | null }) =>
+      post('/api/session-shares', body),
+    revoke: (id: number) => del(`/api/session-shares/${id}`),
+    // 세션 권한이 바뀌면 열린 링크도 따라가게 한다. 링크가 없으면 아무 일도 없다.
+    syncPermission: (sessionId: string, permissionMode: string) =>
+      put('/api/session-shares/permission', { sessionId, permissionMode }),
+  },
+
   plugins: {
     list: () => get('/api/plugins'),
     install: (url: string) => post('/api/plugins/install', { url }),

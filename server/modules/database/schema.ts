@@ -275,6 +275,32 @@ CREATE TABLE IF NOT EXISTS message_sources (
 );
 `;
 
+/**
+ * 세션을 로그인 없이 바깥에 여는 공유 링크.
+ *
+ * 링크를 받은 사람은 그 세션 하나만 읽고 질문할 수 있다. `token` 이 곧 열쇠라
+ * 추측할 수 없을 만큼 길게 만든다. 링크를 다시 복사할 수 있어야 해서 원문으로
+ * 둔다 — 이 DB 는 설치한 사람의 기계에만 있다.
+ *
+ * `permission_mode` 는 게스트 질문에 쓸 권한이다. 세션 권한은 브라우저에만
+ * 있어서 서버가 모르므로, 링크를 만들거나 권한을 바꿀 때 화면이 알려 준다.
+ *
+ * 지우지 않고 `revoked_at` 을 찍는다. 언제 누가 열어 뒀는지 남는 편이 낫다.
+ */
+export const SESSION_SHARES_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS session_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,
+    session_id TEXT NOT NULL,
+    permission_mode TEXT NOT NULL DEFAULT 'default',
+    created_by INTEGER,
+    expires_at DATETIME,
+    revoked_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_session_shares_session ON session_shares(session_id);
+`;
+
 export const SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS superseded_provider_sessions (
     provider_session_id TEXT NOT NULL,
@@ -484,6 +510,8 @@ ${MESSAGE_SOURCES_TABLE_SCHEMA_SQL}
 CREATE INDEX IF NOT EXISTS idx_message_sources_session ON message_sources(session_id);
 
 ${SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL}
+
+${SESSION_SHARES_TABLE_SCHEMA_SQL}
 
 ${ROOMS_TABLE_SCHEMA_SQL}
 ${ROOM_PARTICIPANTS_TABLE_SCHEMA_SQL}

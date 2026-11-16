@@ -60,6 +60,7 @@ import {
     telegramRoutes,
 } from './modules/telegram-bridge/index.js';
 import { roomsRoutes, roomTurnEngine } from './modules/rooms/index.js';
+import { createGuestShareRouter, sessionShareRoutes } from './modules/session-share/index.js';
 import { abortRunsForShutdown, beginShutdown, resumeInterruptedWork } from './modules/run-recovery/index.js';
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
@@ -202,6 +203,10 @@ app.get('/health', (req, res) => {
     });
 });
 
+// 세션 공유 링크로 들어온 게스트. 로그인도 API 키도 없이, 링크의 토큰 하나로
+// 그 세션만 읽고 질문한다. API 키 검사보다 앞에 둔다 — 게스트는 키를 모른다.
+app.use('/api/share', createGuestShareRouter(providerRuntimeService));
+
 // Optional API key validation (if configured)
 app.use('/api', validateApiKey);
 
@@ -261,6 +266,9 @@ app.use('/api/voice', authenticateToken, voiceRoutes);
 
 // Telegram Bridge API Routes (protected)
 app.use('/api/telegram', authenticateToken, telegramRoutes);
+
+// 세션 공유 링크를 만들고 끊는 주인 쪽.
+app.use('/api/session-shares', authenticateToken, sessionShareRoutes);
 
 // Serve public files (like api-docs.html)
 app.use(express.static(path.join(APP_ROOT, 'public')));

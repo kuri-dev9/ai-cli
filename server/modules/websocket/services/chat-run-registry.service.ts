@@ -19,8 +19,11 @@ type ChatRunStatus = 'running' | 'completed';
  *
  * 타이머(예약·대기열)에서 시작한 실행처럼 사람이 텔레그램으로 부른 것이 아닌
  * 모든 경우는 `web` 으로 본다. 기본이 조용한 쪽이어야 안전하다.
+ *
+ * `share` 는 공유 링크로 들어온 게스트가 시작한 실행이다. 텔레그램처럼 회신할
+ * 곳이 따로 있지는 않고, 기록에 출처 배지를 붙이는 데만 쓴다.
  */
-export type ChatRunOrigin = 'web' | 'telegram';
+export type ChatRunOrigin = 'web' | 'telegram' | 'share';
 
 /**
  * One live (or recently finished) provider run for a single app session.

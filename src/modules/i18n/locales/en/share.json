@@ -1,0 +1,53 @@
+{
+  "badge": "Guest",
+  "section": {
+    "title": "External sharing",
+    "description": "Anyone with the link can read this conversation and ask questions without signing in. Their questions land in this conversation with a \"Guest\" badge.",
+    "permission": "Guest permission: {{mode}} — follows this conversation's permission setting.",
+    "permissionAsk": "When a guest's request needs a tool, you have to approve it in this browser before it continues.",
+    "permissionDanger": "A single guest message can edit files and run commands without approval. Only share the link with people you trust.",
+    "expiry": "Expires after",
+    "expiryOptions": {
+      "1": "1 hour",
+      "24": "24 hours",
+      "168": "7 days",
+      "never": "Never"
+    },
+    "create": "Create link",
+    "creating": "Creating...",
+    "activeTitle": "Open links",
+    "empty": "No open links.",
+    "expiresAt": "Until {{date}}",
+    "noExpiry": "No expiry",
+    "copy": "Copy",
+    "copied": "Copied",
+    "revoke": "Revoke",
+    "publicUrl": "Public address (optional)",
+    "publicUrlPlaceholder": "e.g. https://my-tunnel.example.com",
+    "publicUrlHint": "The address people outside use to reach this server, such as a tunnel. Leave empty to use the current address ({{origin}}).",
+    "loadFailed": "Could not load share links",
+    "createFailed": "Could not create the link",
+    "revokeFailed": "Could not revoke the link"
+  },
+  "guest": {
+    "untitled": "Shared conversation",
+    "subtitle": "Shared conversation · your questions continue this conversation",
+    "loading": "Loading conversation...",
+    "notFoundTitle": "This link is not available",
+    "notFoundDescription": "The link was revoked or has expired. Ask the person who shared it for a new one.",
+    "loadFailed": "Could not load the conversation. Please try again shortly.",
+    "retry": "Retry",
+    "placeholder": "Ask a question (Enter to send, Shift+Enter for a new line)",
+    "send": "Send",
+    "sending": "Sending...",
+    "working": "Writing an answer...",
+    "awaitingApproval": "Waiting for approval. The answer continues once the owner approves.",
+    "busy": "Another task is running. Please send again when it finishes.",
+    "sendFailed": "Could not send",
+    "tooLong": "Questions can be up to {{max}} characters.",
+    "hasMore": "Earlier messages are not shown.",
+    "expiresAt": "Link open until {{date}}",
+    "empty": "No messages yet. Send the first question.",
+    "tool": "Tool used"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "badge": "게스트",
+  "section": {
+    "title": "외부 공유",
+    "description": "링크를 받은 사람은 로그인 없이 이 대화를 보고 질문할 수 있습니다. 질문은 이 대화에 그대로 쌓이고 \"게스트\" 표시가 붙습니다.",
+    "permission": "게스트 질문 권한: {{mode}} — 이 대화의 권한 설정을 따릅니다.",
+    "permissionAsk": "게스트가 도구를 쓰려 하면 이 브라우저에서 승인해야 진행됩니다.",
+    "permissionDanger": "게스트의 한 줄이 파일 수정·명령 실행까지 승인 없이 실행합니다. 믿을 수 있는 사람에게만 링크를 주세요.",
+    "expiry": "유효 기간",
+    "expiryOptions": {
+      "1": "1시간",
+      "24": "24시간",
+      "168": "7일",
+      "never": "기한 없음"
+    },
+    "create": "링크 만들기",
+    "creating": "만드는 중...",
+    "activeTitle": "열려 있는 링크",
+    "empty": "열려 있는 링크가 없습니다.",
+    "expiresAt": "{{date}}까지",
+    "noExpiry": "기한 없음",
+    "copy": "복사",
+    "copied": "복사됨",
+    "revoke": "끊기",
+    "publicUrl": "외부 주소 (선택)",
+    "publicUrlPlaceholder": "예: https://my-tunnel.example.com",
+    "publicUrlHint": "터널 등으로 바깥에서 접속하는 주소입니다. 비워 두면 지금 주소({{origin}})로 링크를 만듭니다.",
+    "loadFailed": "공유 링크를 불러오지 못했습니다",
+    "createFailed": "링크를 만들지 못했습니다",
+    "revokeFailed": "링크를 끊지 못했습니다"
+  },
+  "guest": {
+    "untitled": "공유된 대화",
+    "subtitle": "공유된 대화 · 질문하면 이 대화에 이어집니다",
+    "loading": "대화를 불러오는 중...",
+    "notFoundTitle": "열 수 없는 링크입니다",
+    "notFoundDescription": "링크가 끊겼거나 기한이 지났습니다. 링크를 준 사람에게 새 링크를 요청하세요.",
+    "loadFailed": "대화를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "retry": "다시 시도",
+    "placeholder": "질문을 입력하세요 (Enter 전송, Shift+Enter 줄바꿈)",
+    "send": "보내기",
+    "sending": "보내는 중...",
+    "working": "답을 쓰는 중...",
+    "awaitingApproval": "작업 승인을 기다리는 중입니다. 대화 주인이 승인하면 이어서 진행됩니다.",
+    "busy": "지금 다른 작업이 진행 중입니다. 끝난 뒤에 다시 보내 주세요.",
+    "sendFailed": "보내지 못했습니다",
+    "tooLong": "질문은 {{max}}자까지 보낼 수 있습니다.",
+    "hasMore": "앞부분 대화는 생략했습니다.",
+    "expiresAt": "{{date}}까지 열려 있는 링크",
+    "empty": "아직 대화가 없습니다. 첫 질문을 보내 보세요.",
+    "tool": "도구 사용"
+  }
+}

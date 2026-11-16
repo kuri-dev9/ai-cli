@@ -11,8 +11,8 @@ import { getConnection } from '@/modules/database/connection.js';
  * 기록을 화면에 내려줄 때 붙인다.
  */
 
-/** 지금은 텔레그램 하나뿐이지만, 다른 통로가 생겨도 표를 바꾸지 않도록 열어 둔다. */
-export type MessageSource = 'telegram';
+/** 텔레그램과 공유 링크(`share`). 다른 통로가 생겨도 표를 바꾸지 않도록 열어 둔다. */
+export type MessageSource = 'telegram' | 'share';
 
 type MessageSourceRow = {
   id: number;

@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client'
 import { scan } from 'react-scan'
 
 import App from '@/App'
+import { GuestSharePage, readShareTokenFromPath } from '@/modules/session-share'
+import { ThemeProvider } from '@/shared/context/ThemeContext'
 import { startFontSettingsSync } from '@/shared/fontSettings'
 import '@/index.css'
 import 'katex/dist/katex.min.css'
@@ -33,8 +35,18 @@ if (!rootElement) {
   throw new Error('Unable to mount the app: #root is missing from the document')
 }
 
+// 공유 링크(`/share/<토큰>`)로 들어온 게스트는 앱을 띄우지 않는다. 앱은 로그인
+// 화면부터 그리고 웹소켓을 열려 하는데, 게스트에게는 둘 다 없는 것이 맞다.
+const shareToken = readShareTokenFromPath(window.location.pathname)
+
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <App />
+    {shareToken ? (
+      <ThemeProvider>
+        <GuestSharePage token={shareToken} />
+      </ThemeProvider>
+    ) : (
+      <App />
+    )}
   </React.StrictMode>,
 )

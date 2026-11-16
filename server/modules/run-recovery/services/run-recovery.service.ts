@@ -120,7 +120,7 @@ export function resumeInterruptedWork(runtime: ProviderRuntimeGateway, now: Date
         userId: parseUserId(row.user_id),
         content: RESUME_PROMPT,
         options: parseOptions(row.options),
-        origin: row.origin === 'telegram' ? 'telegram' : 'web',
+        origin: row.origin === 'telegram' || row.origin === 'share' ? row.origin : 'web',
         resumeCount: row.resume_count + 1,
       },
       { runtime, isSessionHandedToTelegram },

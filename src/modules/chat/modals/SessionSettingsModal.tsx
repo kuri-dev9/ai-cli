@@ -9,6 +9,7 @@ import { cn } from '@/shared/utils';
 import AutoCompactFields from '@/modules/chat/settings/AutoCompactFields';
 import ChatMessageFiles from '@/modules/chat/transcript/ChatMessageFiles';
 import ChatMessageImages from '@/modules/chat/transcript/ChatMessageImages';
+import { SessionShareSection } from '@/modules/session-share';
 
 /** `/compact` 를 알아듣는 프로바이더. 나머지는 자동 대화 줄이기를 쓸 수 없다. */
 const COMPACTABLE_PROVIDERS = new Set<LLMProvider>(['claude', 'codex']);
@@ -299,6 +300,14 @@ export default function SessionSettingsModal({
               <p className="text-xs text-muted-foreground">{t('sessionSettings.permissionHint')}</p>
             </Section>
           )}
+
+          <Section title={t('share:section.title')}>
+            <SessionShareSection
+              sessionId={sessionId}
+              permissionMode={permissionMode}
+              permissionLabel={t(`codex.modes.${permissionMode}`, { defaultValue: permissionMode })}
+            />
+          </Section>
 
           <Section title={t('autoCompact.title')}>
             {!canCompact ? (

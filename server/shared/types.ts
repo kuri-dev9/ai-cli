@@ -286,7 +286,7 @@ export type NormalizedMessage = {
    * 이 메시지가 앱 바깥에서 들어왔을 때의 통로. 브라우저에서 친 메시지에는
    * 없다. 기록을 나중에 볼 때 밖에서 급히 시킨 것인지 구분하려고 붙인다.
    */
-  source?: 'telegram';
+  source?: 'telegram' | 'share';
   /**
    * Optional display-oriented metadata used by providers that need to expose
    * richer transcript artifacts without introducing a brand-new message kind.

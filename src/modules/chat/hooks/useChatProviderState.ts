@@ -483,6 +483,10 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     localStorage.setItem(`permissionMode-last-${provider}`, nextMode);
     if (selectedSession?.id) {
       localStorage.setItem(`permissionMode-${selectedSession.id}`, nextMode);
+      // 공유 링크로 들어온 질문은 "이 세션의 권한"을 따른다. 그런데 세션 권한은
+      // 이 브라우저에만 있어서, 바꿀 때마다 서버의 열린 링크에도 알려 준다.
+      // 실패해도 대화에는 지장이 없으므로 기다리지 않는다.
+      void api.sessionShares.syncPermission(selectedSession.id, nextMode).catch(() => {});
     }
   }, [provider, selectedSession?.id]);
 
