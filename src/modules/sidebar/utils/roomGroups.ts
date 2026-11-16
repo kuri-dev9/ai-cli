@@ -76,3 +76,31 @@ export function roomParticipantSessionIds(rooms: RoomIndexEntry[] | null): Set<s
   }
   return ids;
 }
+
+/**
+ * 프로젝트를 눌렀을 때 열 세션. 목록 맨 위(가장 최근) 세션이지만, 그것이 방장
+ * 행 아래에 묶이는 룸 참가자라면 그 룸의 방장 세션을 연다 — 방장 세션은 룸
+ * 화면으로 열린다. 참가자 개인 세션으로 바로 들어가면 룸이 아니라 그 참가자
+ * 하나와 대화하게 된다. 묶는 규칙은 groupRoomSessions 와 같다.
+ */
+export function sessionToOpenForProject(
+  sessions: SessionWithProvider[],
+  rooms: RoomIndexEntry[] | null,
+): SessionWithProvider | null {
+  const latest = sessions[0];
+  if (!latest) {
+    return null;
+  }
+
+  for (const room of rooms ?? []) {
+    if (room.hostSessionId === latest.id) {
+      return latest;
+    }
+    const isParticipant = room.participants.some((participant) => participant.sessionId === latest.id);
+    if (!isParticipant) continue;
+    // 방장이 이 목록에 없으면 사이드바도 묶지 않고 참가자 행을 그대로 보여 준다.
+    return sessions.find((session) => session.id === room.hostSessionId) ?? latest;
+  }
+
+  return latest;
+}

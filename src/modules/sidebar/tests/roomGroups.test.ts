@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RoomIndexEntry, SessionWithProvider } from '@/shared/types';
-import { groupRoomSessions, roomParticipantSessionIds, sessionIdsOfRow } from '@/modules/sidebar/utils/roomGroups';
+import {
+  groupRoomSessions,
+  roomParticipantSessionIds,
+  sessionIdsOfRow,
+  sessionToOpenForProject,
+} from '@/modules/sidebar/utils/roomGroups';
 
 const session = (id: string): SessionWithProvider => ({ id, __provider: 'claude' });
 
@@ -45,5 +50,32 @@ describe('room session grouping', () => {
 
   it('lists non-host participants for flat lists', () => {
     expect([...roomParticipantSessionIds([room])]).toEqual(['codex', 'unloaded']);
+  });
+});
+
+describe('session to open when a project is clicked', () => {
+  it('opens the latest session when it is an ordinary chat', () => {
+    expect(sessionToOpenForProject([session('plain'), session('host')], [room])?.id).toBe('plain');
+  });
+
+  it('opens the room (its host session) when the latest session is a participant', () => {
+    // 참가자가 가장 최근에 움직였어도 그 개인 세션이 아니라 룸으로 들어간다.
+    expect(sessionToOpenForProject([session('codex'), session('plain'), session('host')], [room])?.id).toBe('host');
+  });
+
+  it('opens the host session itself, which shows the room', () => {
+    expect(sessionToOpenForProject([session('host'), session('codex')], [room])?.id).toBe('host');
+  });
+
+  it('keeps a participant whose host is not in the list, as the sidebar does', () => {
+    expect(sessionToOpenForProject([session('codex'), session('plain')], [room])?.id).toBe('codex');
+  });
+
+  it('falls back to the latest session while the room index is loading', () => {
+    expect(sessionToOpenForProject([session('codex'), session('host')], null)?.id).toBe('codex');
+  });
+
+  it('opens nothing for a project without sessions', () => {
+    expect(sessionToOpenForProject([], [room])).toBeNull();
   });
 });

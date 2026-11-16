@@ -11,6 +11,8 @@ import { formatAbsoluteDateTime, formatCompactAge, getTaskIndicatorStatus } from
 import TaskIndicator from '@/modules/sidebar/TaskIndicator';
 import SidebarProjectSessions from '@/modules/sidebar/SidebarProjectSessions';
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
+import { sessionToOpenForProject } from '@/modules/sidebar/utils/roomGroups';
+import { useRoomIndex } from '@/shared/hooks/useRoomIndex';
 
 type SidebarProjectItemProps = {
   project: Project;
@@ -166,6 +168,8 @@ function SidebarProjectItem({
   }, [isEditing]);
 
   const isCompact = useCompactSidebar();
+  // 프로젝트를 눌러 최근 대화를 열 때 룸 참가자 세션을 룸으로 돌리는 데 쓴다.
+  const rooms = useRoomIndex();
 
   const toggleProject = () => onToggleProject(project.projectId);
   const toggleStarProject = () => onToggleStarProject(project.projectId);
@@ -190,9 +194,9 @@ function SidebarProjectItem({
       onProjectSelect(project);
       // 다른 프로젝트로 옮기면 가장 최근 대화를 바로 연다. 빈 새 세션 화면에서
       // 다시 세션을 고르는 한 번의 클릭을 줄인다. `sessions` 는 최근 순으로
-      // 정렬되어 있고, 접힌 프로젝트도 첫 페이지는 받아 두었다. 대화가 없으면
-      // 예전처럼 새 세션 화면이 열린다.
-      const latestSession = sessions[0];
+      // 정렬되어 있고, 접힌 프로젝트도 첫 페이지는 받아 두었다. 그 대화가 룸
+      // 참가자라면 룸(방장 세션)을 연다. 대화가 없으면 예전처럼 새 세션 화면이 열린다.
+      const latestSession = sessionToOpenForProject(sessions, rooms);
       if (latestSession) {
         onSessionSelect(latestSession, project.projectId);
       }
