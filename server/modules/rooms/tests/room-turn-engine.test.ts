@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, roomsDb, scheduledMessagesDb, sessionsDb, userDb } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, roomsDb, scheduledMessagesDb, sessionsDb, userDb, userPreferencesDb } from '@/modules/database/index.js';
 import { dispatchDueScheduledMessages } from '@/modules/scheduled-messages/index.js';
 import { roomsService } from '@/modules/rooms/services/rooms.service.js';
 import { roomTurnEngine } from '@/modules/rooms/services/room-turn-engine.service.js';
@@ -1137,6 +1137,41 @@ test('a read-only turn still asks when the participant is set to ask', async () 
     assert.ok(!tools.allowedTools.includes('Bash'), '매번 묻기에서는 셸도 승인을 받는다');
     // 스킬은 지시문을 읽어 올 뿐이라 매번 묻기에서도 묻지 않는다.
     assert.ok(tools.allowedTools.includes('Skill'), '매번 묻기에서도 Skill 은 허용 목록에 있어야 한다');
+  }, { splitWork: true });
+});
+
+test('a read-only turn follows the saved permission rules, without shell or write rules', async () => {
+  await withRoom(6, async () => {
+    // 설정 화면(권한)에 저장해 둔 규칙. 웹 세션은 기본 모드에서도 이것으로 묻지 않는다.
+    const userId = Number(userDb.createUser('room-owner', 'hash').id);
+    userPreferencesDb.savePreferences(userId, {
+      claudePermissions: { allowedTools: ['mcp__query_forge__*', 'Bash(git push:*)', 'Edit'], disallowedTools: [], skipPermissions: false },
+    });
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    roomTurnEngine.initialize(createRuntime({
+      [HOST]: [
+        '이렇게 나눕니다.\n[작업 @Claude2 수정] 테스트 작성\n[작업 @Claude] 기존 코드 조사',
+        async () => { await gate; return '조사했습니다'; },
+        '정리했습니다 [DONE]',
+      ],
+      [REVIEWER]: [async () => { await gate; return '테스트를 추가했습니다'; }],
+    }, calls));
+
+    roomsService.postUserMessage(ROOM_ID, { content: '손봐줘' }, userId);
+    await waitFor(() => calls.length === 3, 'both assignees started');
+    release();
+    await waitFor(() => isIdle(), 'round done');
+
+    const readOnlyTurn = calls[1].sessionId === HOST ? calls[1] : calls[2];
+    const tools = readOnlyTurn.options.toolsSettings as { allowedTools: string[]; disallowedTools: string[] };
+    // 조사 차례에서 QueryForge 하나에 승인 창이 떠 라운드가 멈췄다.
+    assert.ok(tools.allowedTools.includes('mcp__query_forge__*'), '저장된 MCP 규칙이 들어가야 한다');
+    // 조사만 하러 간 차례가 묻지 않고 푸시하면 안 된다.
+    assert.ok(!tools.allowedTools.includes('Bash(git push:*)'), '저장된 셸 규칙은 들이지 않는다');
+    assert.ok(!tools.allowedTools.includes('Edit'), '저장된 쓰기 도구는 들이지 않는다');
+    assert.deepEqual(tools.disallowedTools, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
   }, { splitWork: true });
 });
 

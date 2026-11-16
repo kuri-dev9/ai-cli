@@ -486,6 +486,8 @@ function resolveTurnPermissions(me: RoomParticipant, readOnly: boolean): AnyReco
       allowedTools,
       disallowedTools: me.provider === 'claude' ? [...CLAUDE_WRITE_TOOLS] : [],
       skipPermissions: false,
+      // 설정 화면에 저장된 규칙은 디스패치에서 합친다. 이 표시가 셸·쓰기 규칙을 거른다.
+      readOnlyTurn: true,
     },
   };
 }

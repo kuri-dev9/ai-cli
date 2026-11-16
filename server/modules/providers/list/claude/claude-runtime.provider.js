@@ -198,15 +198,22 @@ function resolveToolApproval(requestId, decision) {
 }
 
 // Match stored permission entries against a tool + input combo.
-// This only supports exact tool names and the Bash(command:*) shorthand
-// used by the UI; it intentionally does not implement full glob semantics,
-// introduced to stay consistent with the UI's "Allow rule" format.
+// This only supports exact tool names, the Bash(command:*) shorthand used by
+// the UI, and MCP server-wide rules (`mcp__server` / `mcp__server__*`, the same
+// meaning Claude Code gives them); it intentionally does not implement full
+// glob semantics, introduced to stay consistent with the UI's "Allow rule" format.
 function matchesToolPermission(entry, toolName, input) {
   if (!entry || !toolName) {
     return false;
   }
 
   if (entry === toolName) {
+    return true;
+  }
+
+  // 서버 단위 규칙. 끝에 `__` 까지 붙여 비교해 `mcp__a` 가 `mcp__ab__x` 를 열지 않게 한다.
+  const mcpServerMatch = entry.match(/^(mcp__[^_]+(?:_[^_]+)*)(?:__\*)?$/);
+  if (mcpServerMatch && toolName.startsWith(`${mcpServerMatch[1]}__`)) {
     return true;
   }
 
@@ -1291,6 +1298,7 @@ export const claudeRuntime = {
 // Export public API
 export {
   queryClaudeSDK,
+  matchesToolPermission,
   abortClaudeSDKSession,
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,

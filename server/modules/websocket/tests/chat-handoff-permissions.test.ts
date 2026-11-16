@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { appConfigDb, closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { appConfigDb, closeConnection, initializeDatabase, sessionsDb, userDb, userPreferencesDb } from '@/modules/database/index.js';
 import {
   handleChatConnection,
   runDetachedChatTurn,
@@ -207,4 +207,45 @@ test('브라우저에서 그냥 보낸 턴은 설정과 무관하게 컴포저�
     assert.equal(runs[0].options.permissionMode, 'default');
     assert.equal(runs[0].options.skipPermissions, undefined);
   }, 'full');
+});
+
+/** 설정 화면(권한)에 저장해 둔 규칙. 웹에서는 컴포저가 실어 보내는 값이다. */
+function saveClaudeRules(allowedTools: string[]) {
+  const userId = Number(userDb.createUser('phone-owner', 'hash').id);
+  userPreferencesDb.savePreferences(userId, {
+    claudePermissions: { allowedTools, disallowedTools: [], skipPermissions: false },
+  });
+  return userId;
+}
+
+test('매번 묻기여도 설정 화면에서 허용해 둔 도구는 묻지 않는다', async () => {
+  await withGateway(async ({ runs, runtime }) => {
+    const userId = saveClaudeRules(['mcp__query_forge__*']);
+    await runDetachedChatTurn(
+      { sessionId: SESSION_ID, userId, content: '조회해줘', origin: 'telegram' },
+      { runtime, isSessionHandedToTelegram: () => false } as never,
+    );
+
+    // 웹에서는 허용해 둔 MCP 가 폰에서만 승인을 물었다. 물어도 폰에는 뜨지 않는다.
+    const { allowedTools } = runs[0].options.toolsSettings as { allowedTools: string[] };
+    assert.ok(allowedTools.includes('mcp__query_forge__*'));
+  }, 'ask');
+});
+
+test('읽기만 허용이면 저장된 규칙 중 셸과 쓰기 도구는 들이지 않는다', async () => {
+  await withGateway(async ({ runs, runtime }) => {
+    const userId = saveClaudeRules(['mcp__query_forge__*', 'Bash(git push:*)', 'Edit']);
+    await runDetachedChatTurn(
+      { sessionId: SESSION_ID, userId, content: '훑어줘', origin: 'telegram' },
+      { runtime, isSessionHandedToTelegram: () => false } as never,
+    );
+
+    const toolsSettings = runs[0].options.toolsSettings as Record<string, unknown> & { allowedTools: string[] };
+    assert.ok(toolsSettings.allowedTools.includes('mcp__query_forge__*'));
+    assert.ok(toolsSettings.allowedTools.includes('Read'));
+    assert.equal(toolsSettings.allowedTools.includes('Bash(git push:*)'), false);
+    assert.equal(toolsSettings.allowedTools.includes('Edit'), false);
+    // 읽기 전용 표시는 런타임까지 가지 않는다.
+    assert.equal('readOnlyTurn' in toolsSettings, false);
+  }, 'read');
 });

@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import type { WebSocket } from 'ws';
 
-import { appConfigDb, sessionsDb } from '@/modules/database/index.js';
+import { appConfigDb, sessionsDb, userPreferencesDb } from '@/modules/database/index.js';
 import type { ActiveRunOwner } from '@/modules/database/index.js';
 import { providerModelsService, providerTokenUsageService, sessionsService } from '@/modules/providers/index.js';
 import { activeRunJournal } from '@/modules/websocket/services/active-run-journal.service.js';
@@ -103,8 +103,9 @@ export const TELEGRAM_PERMISSION_MODES: TelegramPermissionMode[] = ['ask', 'read
  * 읽기만 하고 아무것도 남기지 않는 것만 넣는다. `Bash` 는 읽는 명령도 있지만
  * 같은 도구로 지울 수도 있어서 넣지 않는다 — 도구 이름만으로는 가를 수 없다.
  *
- * 이름이 정확히 맞아야 통과한다. 런타임의 허용 규칙이 정확한 이름과 `Bash(...)`
- * 축약만 알아보기 때문이다.
+ * 런타임의 허용 규칙은 정확한 이름, `Bash(...)` 축약, MCP 서버 단위 규칙
+ * (`mcp__서버`, `mcp__서버__*`)만 알아본다. MCP 도구는 여기 넣지 않고 설정
+ * 화면에 저장된 규칙을 따른다 — `mergeSavedClaudeToolRules` 참고.
  */
 export const TELEGRAM_READ_ONLY_TOOLS = [
   'Read',
@@ -151,10 +152,64 @@ export function resolveTelegramRunPermissions(mode: TelegramPermissionMode): Any
         allowedTools: [...TELEGRAM_READ_ONLY_TOOLS],
         disallowedTools: [],
         skipPermissions: false,
+        readOnlyTurn: true,
       },
     };
   }
   return {};
+}
+
+/** 읽기 전용 턴에서는 저장된 규칙이 있어도 들이지 않는 쓰기 도구. */
+const SAVED_RULE_WRITE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+
+type SavedClaudeToolRules = { allowedTools: string[]; disallowedTools: string[] };
+
+/**
+ * 설정 화면(권한)에 저장된 Claude 허용·금지 규칙.
+ *
+ * 웹 턴은 컴포저가 이 값을 `toolsSettings` 로 실어 보내지만, 서버가 직접 돌리는
+ * 턴(텔레그램·룸 차례·예약)은 실어 보낼 화면이 없다. 그래서 웹에서 허용해 둔
+ * MCP 도구가 폰이나 룸에서는 "매번 묻기" 든 읽기 전용 차례든 승인을 물었다.
+ */
+export function readSavedClaudeToolRules(userId: string | number | null): SavedClaudeToolRules {
+  const id = Number(userId);
+  if (userId === null || !Number.isInteger(id)) {
+    return { allowedTools: [], disallowedTools: [] };
+  }
+  const saved = userPreferencesDb.getPreferences(id).claudePermissions as AnyRecord | undefined;
+  const rules = (value: unknown): string[] => (Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    : []);
+  return { allowedTools: rules(saved?.allowedTools), disallowedTools: rules(saved?.disallowedTools) };
+}
+
+/**
+ * 턴이 정한 권한에 저장된 규칙을 합친다.
+ *
+ * 읽기 전용 턴(`readOnlyTurn`)에는 저장된 셸 규칙과 쓰기 도구를 들이지 않는다.
+ * 저장된 규칙에 `Bash(git push:*)` 가 있으면 조사만 하러 간 차례가 묻지 않고
+ * 푸시한다. 셸을 열지는 그 턴이 정한다. 표시는 런타임에 넘기기 전에 뗀다.
+ */
+export function mergeSavedClaudeToolRules(toolsSettings: AnyRecord | undefined, saved: SavedClaudeToolRules): AnyRecord | undefined {
+  // 합칠 것도 정해 둔 것도 없으면 그대로 둔다. 런타임은 없는 값을 기본값으로 읽는다.
+  if (!toolsSettings && !saved.allowedTools.length && !saved.disallowedTools.length) {
+    return undefined;
+  }
+  const { readOnlyTurn, ...base } = toolsSettings ?? {};
+  const savedAllowed = readOnlyTurn
+    ? saved.allowedTools.filter((entry) => entry !== 'Bash'
+      && !entry.startsWith('Bash(')
+      && !SAVED_RULE_WRITE_TOOLS.includes(entry))
+    : saved.allowedTools;
+  const union = (current: unknown, extra: string[]): string[] => [
+    ...new Set([...(Array.isArray(current) ? current as string[] : []), ...extra]),
+  ];
+  return {
+    ...base,
+    allowedTools: union(base.allowedTools, savedAllowed),
+    disallowedTools: union(base.disallowedTools, saved.disallowedTools),
+    skipPermissions: base.skipPermissions ?? false,
+  };
 }
 
 
@@ -498,6 +553,15 @@ async function dispatchRun(
       ? resolveTelegramRunPermissions(readTelegramPermissionMode())
       : {}),
   };
+
+  // 화면 없이 도는 Claude 턴은 설정 화면의 규칙을 직접 읽어 합친다. 웹 턴은
+  // 컴포저가 이미 실어 보냈다.
+  if (!ws && provider === 'claude') {
+    runtimeOptions.toolsSettings = mergeSavedClaudeToolRules(runtimeOptions.toolsSettings, readSavedClaudeToolRules(userId));
+  } else if (runtimeOptions.toolsSettings?.readOnlyTurn) {
+    const { readOnlyTurn: _readOnlyTurn, ...toolsSettings } = runtimeOptions.toolsSettings;
+    runtimeOptions.toolsSettings = toolsSettings;
+  }
 
   // 브라우저가 시키지 않은 턴은 화면에 아무 말도 남기지 않은 채 시작된다.
   // 텔레그램으로 한 줄 보내 놓고 웹 화면을 보고 있으면, 보낸 글은 보이지 않고
