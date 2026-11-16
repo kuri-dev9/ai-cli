@@ -22,7 +22,7 @@ function QuickSettingsPanelView() {
   // 텔레그램 알림은 세션 단위로 켠다 — "지금 돌리는 이 작업만 알려 달라"가
   // 실제로 원하는 것이고, 전역 스위치는 다시 모든 세션을 울리게 만든다.
   const { activeSessionId } = useProjectActiveSessionState();
-  const telegramNotifications = useTelegramSessionNotifications(activeSessionId);
+  const telegramNotifications = useTelegramSessionNotifications(activeSessionId, isOpen);
   const {
     isDragging,
     handleStyle,

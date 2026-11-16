@@ -113,6 +113,9 @@ export default function TelegramTab() {
   const [discovery, setDiscovery] = useState<TelegramChatDiscovery | null>(null);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [discoverNotice, setDiscoverNotice] = useState<string | null>(null);
+  // 저장하면서 브리지를 대신 켰을 때 남기는 안내. 말없이 켜 두면 사용자는
+  // 폰에서 갑자기 응답이 오기 시작하는 이유를 모른다.
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   const applySettings = useCallback((next: TelegramSettingsState) => {
     setSettings(next);
@@ -156,13 +159,15 @@ export default function TelegramTab() {
     };
   }, [applySettings, t]);
 
-  const save = async (updates: TelegramSettingsUpdate) => {
+  const save = async (updates: TelegramSettingsUpdate, successNotice: string | null = null) => {
     setIsSaving(true);
     setError(null);
+    setSaveNotice(null);
     try {
       const response = await api.telegram.saveSettings(updates);
       const payload = await readApiJson<unknown>(response);
       applySettings(unwrapSettings(payload));
+      setSaveNotice(successNotice);
     } catch {
       setError(t('telegramSettings.saveFailed'));
     } finally {
@@ -240,7 +245,15 @@ export default function TelegramTab() {
     if (Object.keys(updates).length === 0) {
       return;
     }
-    void save(updates);
+    // chat id 를 새로 등록했다는 건 이제 쓰겠다는 뜻이다. "내 chat id 찾기"를
+    // 하려고 꺼 둔 브리지를 다시 켜는 걸 잊으면, 연결은 다 해 놓고도 아무것도
+    // 오지 않는다. 그래서 같이 켜고, 켰다고 알린다.
+    const hasNewChatId = chatIds.some((id) => !current.allowedChatIds.includes(id));
+    const willEnableBridge = hasNewChatId && !current.enabled && (current.hasToken || isTokenDirty);
+    if (willEnableBridge) {
+      updates.enabled = true;
+    }
+    void save(updates, willEnableBridge ? t('telegramSettings.bridgeAutoEnabled') : null);
   };
 
   const handleClearToken = () => {
@@ -648,6 +661,15 @@ export default function TelegramTab() {
           <span className="text-xs text-muted-foreground">{t('telegramSettings.unsaved')}</span>
         )}
       </div>
+
+      {saveNotice && (
+        <div
+          role="status"
+          className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-200"
+        >
+          {saveNotice}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">

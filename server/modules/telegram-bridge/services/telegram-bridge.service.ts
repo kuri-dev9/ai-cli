@@ -151,7 +151,11 @@ function readErrors(sessionId: string): string[] {
  */
 export function shouldRelayCompletion(sessionId: string): boolean {
   if (chatRunRegistry.describeRunOrigin(sessionId)?.origin === 'telegram') {
-    return true;
+    // 단, 그 사이 폰에서 `/off`·`/unwatch` 로 구독을 놓았으면 보내지 않는다.
+    // 대기열에 남아 있던 텔레그램 글은 한참 뒤에 실행되는데, 예전에는 그
+    // 결과가 "전부 껐다"고 답한 뒤에도 계속 왔다.
+    const userId = readBridgeUserId();
+    return userId !== null && readBridgeState(userId).watchedSessionId !== null;
   }
   if (readTelegramSettings().notifyOnCompletion) {
     return true;
@@ -222,10 +226,11 @@ const BOT_COMMAND_MENU = [
   { command: 'watch', description: '<번호|이름> 그 프로젝트의 최신 대화를 구독' },
   { command: 'unwatch', description: '구독을 놓는다 (이쪽으로 오는 것을 전부 멈춤)' },
   { command: 'on', description: '웹 작업 알림 켜기' },
-  { command: 'off', description: '웹 작업 알림 끄기' },
+  { command: 'off', description: '전부 끄기 (구독·넘기기·완료 알림·방 알림)' },
   { command: 'allow', description: '승인 대기 중인 도구를 허용' },
   { command: 'deny', description: '승인 대기 중인 도구를 거부' },
   { command: 'stop', description: '돌고 있는 턴을 중단' },
+  { command: 'queue', description: '대기열 보기 · 지금 끼어들기 · 비우기' },
 ];
 
 export function startTelegramBridge(config: BridgeConfig): BridgeHandle {

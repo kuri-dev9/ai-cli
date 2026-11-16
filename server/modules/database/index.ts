@@ -21,6 +21,8 @@ export type { SessionShareRow } from '@/modules/database/repositories/session-sh
 
 // sessionDraftsDb: used by User for drafts and Scheduled Messages for server-owned queued turns.
 export { sessionDraftsDb } from '@/modules/database/repositories/session-drafts.db.js';
+// 대기열 칸의 글 목록을 읽는다. 텔레그램 브리지가 /queue 로 보여 줄 때 쓴다.
+export { readQueuedMessageList } from '@/modules/database/repositories/session-drafts.db.js';
 export type {
   QueuedSessionMessageRecord,
   SessionDraftRecord,

@@ -154,3 +154,38 @@ test('토글은 세션 단위로 서버에 저장된다', async () => {
   });
   assert.deepEqual(saveSessionNotifications.mock.calls.at(-1), ['session-1', true]);
 });
+
+test('패널을 다시 열면 브리지 상태를 새로 읽는다', async () => {
+  // 처음 읽을 때는 꺼져 있다가, 설정 화면에서 켜고 돌아온 상황.
+  sessionNotifications.mockImplementationOnce(async () => jsonResponse({
+    sessionId: 'session-1',
+    enabled: false,
+    available: false,
+    hasToken: true,
+    bridgeEnabled: false,
+  }));
+
+  const { result, rerender } = renderHook(
+    ({ isVisible }) => useTelegramSessionNotifications('session-1', isVisible),
+    { initialProps: { isVisible: true } },
+  );
+
+  await waitFor(() => {
+    assert.equal(result.current.isLoading, false);
+  });
+  assert.equal(result.current.bridgeEnabled, false);
+
+  const callsBeforeReopen = sessionNotifications.mock.calls.length;
+  rerender({ isVisible: false });
+  // 닫혀 있는 동안에는 묻지 않는다.
+  assert.equal(sessionNotifications.mock.calls.length, callsBeforeReopen);
+
+  rerender({ isVisible: true });
+
+  await waitFor(() => {
+    assert.equal(result.current.bridgeEnabled, true);
+  });
+  assert.equal(sessionNotifications.mock.calls.length, callsBeforeReopen + 1);
+  // 같은 세션을 다시 읽는 동안 "확인 중"으로 깜빡이지 않는다.
+  assert.equal(result.current.isLoading, false);
+});

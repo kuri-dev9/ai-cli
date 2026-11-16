@@ -8,12 +8,29 @@ import {
   closeConnection,
   initializeDatabase,
   projectsDb,
+  roomsDb,
   sessionDraftsDb,
   sessionsDb,
   userDb,
 } from '@/modules/database/index.js';
-import { handleTelegramCommand, truncateForTelegram } from '@/modules/telegram-bridge/index.js';
-import { isSessionNotified } from '@/modules/telegram-bridge/services/telegram-state.service.js';
+import {
+  handleTelegramCommand,
+  isSessionHandedToTelegram,
+  truncateForTelegram,
+} from '@/modules/telegram-bridge/index.js';
+import {
+  handleTelegramButton,
+  resolveRoomLeaderSessionId,
+} from '@/modules/telegram-bridge/services/telegram-commands.service.js';
+import {
+  readTelegramSettings,
+  writeTelegramSettings,
+} from '@/modules/telegram-bridge/services/telegram-settings.service.js';
+import {
+  isSessionNotified,
+  readBridgeState,
+  setSessionNotified,
+} from '@/modules/telegram-bridge/services/telegram-state.service.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
 
 /** 답이 버튼을 달고 와도 글만 본다. */
@@ -145,6 +162,71 @@ test('작업 중에 보낸 명령은 거절되지 않고 대기열로 간다', a
   });
 });
 
+test('여기서 보낸 턴이 도는 동안에도 다음 명령을 바로 처리한다', async () => {
+  await withIsolatedDatabase(async ({ userId }) => {
+    // 끝나지 않는 턴. 예전에는 명령 처리가 이 턴이 끝날 때까지 돌아오지 않아,
+    // 브리지의 폴링 전체가 멈추고 /stop 조차 턴이 끝난 뒤에야 처리됐다.
+    let finishTurn: () => void = () => {};
+    const aborted: string[] = [];
+    const runtime = {
+      hasRuntime: () => true,
+      run: () => new Promise<void>((resolve) => { finishTurn = resolve; }),
+      abort: async (_provider: string, sessionId: string) => {
+        aborted.push(sessionId);
+        finishTurn();
+        return true;
+      },
+      getPendingApprovalsForSession: () => [],
+      resolveToolApproval: () => {},
+    } as never;
+    await handleTelegramCommand('/watch 1', { userId, runtime });
+
+    const reply = await handleTelegramCommand('오래 걸리는 일', { userId, runtime });
+    assert.equal(reply, null);
+    assert.equal(chatRunRegistry.isProcessing(SESSION_ID), true);
+
+    assert.match(replyText(await handleTelegramCommand('/status', { userId, runtime })), /작업 중/);
+    assert.match(replyText(await handleTelegramCommand('/stop', { userId, runtime })), /중단했습니다/);
+    assert.deepEqual(aborted, [SESSION_ID]);
+    assert.equal(chatRunRegistry.isProcessing(SESSION_ID), false);
+  });
+});
+
+test('작업 중에 보낸 글에는 끼어들기·비우기 버튼이 달리고, 누르면 그대로 된다', async () => {
+  await withIsolatedDatabase(async ({ userId }) => {
+    const runs: RunCall[] = [];
+    const runtime = createRuntime(runs);
+    await handleTelegramCommand('/watch 1', { userId, runtime });
+    chatRunRegistry.startRun({
+      appSessionId: SESSION_ID,
+      provider: 'claude',
+      providerSessionId: null,
+      connection: null,
+      userId,
+    });
+
+    const queued = await handleTelegramCommand('방향 바꿔', { userId, runtime });
+    assert.match(replyText(queued), /대기열에 넣었습니다 \(1번째\)/);
+    const buttons = typeof queued === 'object' && queued ? queued.buttons.flat().map((button) => button.data) : [];
+    assert.deepEqual(buttons, [`steer:${SESSION_ID}`, `qclear:${SESSION_ID}`]);
+
+    const listed = await handleTelegramCommand('/queue', { userId, runtime });
+    assert.match(replyText(listed), /1\. 방향 바꿔/);
+
+    // 끼어들기는 지금 턴을 멈춘다. 멈추면 대기열 맨 앞의 글이 이어서 나간다.
+    const steer = await handleTelegramButton(`steer:${SESSION_ID}`, { userId, runtime });
+    assert.match(replyText(steer.reply), /지금 턴을 멈췄습니다/);
+    assert.equal(chatRunRegistry.isProcessing(SESSION_ID), false);
+
+    // 여기에는 대기열을 비우는 디스패처가 떠 있지 않아 글이 아직 남아 있다.
+    // 비우기는 웹 화면과 같은 대기열 칸을 비운다.
+    assert.equal(sessionDraftsDb.countQueuedMessages(userId, SESSION_ID), 1);
+    const cleared = await handleTelegramButton(`qclear:${SESSION_ID}`, { userId, runtime });
+    assert.match(replyText(cleared.reply), /1건을 비웠습니다/);
+    assert.equal(sessionDraftsDb.countQueuedMessages(userId, SESSION_ID), 0);
+  });
+});
+
 test('/on 은 구독한 세션이 있어야 켤 수 있다', async () => {
   await withIsolatedDatabase(async ({ userId }) => {
     const runtime = createRuntime([]);
@@ -156,37 +238,96 @@ test('/on 은 구독한 세션이 있어야 켤 수 있다', async () => {
   });
 });
 
-test('/on 과 /off 는 구독 중인 세션의 웹 작업 알림을 켜고 끈다', async () => {
+test('/on 은 구독 중인 세션의 웹 작업 알림을 켠다', async () => {
   await withIsolatedDatabase(async ({ userId }) => {
     const runtime = createRuntime([]);
     await handleTelegramCommand('/watch 1', { userId, runtime });
 
     await handleTelegramCommand('/on', { userId, runtime });
     assert.equal(isSessionNotified(userId, SESSION_ID), true);
-    assert.match(replyText(await handleTelegramCommand('/status', { userId, runtime })), /웹 작업 알림: 켜짐/);
-
-    await handleTelegramCommand('/off', { userId, runtime });
-    assert.equal(isSessionNotified(userId, SESSION_ID), false);
-
-    // 꺼도 "여기서 보낸 작업의 결과는 온다"는 사실이 화면에 남아 있어야 한다 —
-    // 예전 문구는 알림이 통째로 꺼진 것처럼 읽혔다.
     const status = await handleTelegramCommand('/status', { userId, runtime });
-    assert.match(replyText(status), /웹 작업 알림: 꺼짐/);
+    assert.match(replyText(status), /웹 작업 알림: 켜짐/);
     assert.match(replyText(status), /여기서 보낸 작업의 결과는 항상 옵니다/);
   });
 });
 
-test('/off 는 명령 수신까지 막지는 않는다', async () => {
-  await withIsolatedDatabase(async ({ userId }) => {
+test('/off 는 구독·넘기기·완료 알림·방 알림을 전부 끈다', async () => {
+  await withIsolatedDatabase(async ({ userId, projectPath }) => {
     const runs: RunCall[] = [];
     const runtime = createRuntime(runs);
+    // 다른 대화 하나는 웹에서 넘기기로 켜 두었다.
+    sessionsDb.createAppSession('other-session', 'claude', projectPath, 'Other');
+    setSessionNotified(userId, 'other-session', true);
+    writeTelegramSettings({ notifyOnCompletion: true });
+    roomsDb.createRoom(
+      { roomId: 'room-1', hostSessionId: SESSION_ID, projectPath, permissionMode: 'ask', maxAutoTurns: 3 },
+      [],
+    );
+    roomsDb.updateRoomSettings('room-1', { notifyTelegram: true });
+
     await handleTelegramCommand('/watch 1', { userId, runtime });
+    await handleTelegramCommand('/on', { userId, runtime });
 
-    await handleTelegramCommand('/off', { userId, runtime });
-    const reply = await handleTelegramCommand('그래도 실행해줘', { userId, runtime });
+    const reply = replyText(await handleTelegramCommand('/off', { userId, runtime }));
+    assert.match(reply, /전부 껐습니다/);
+    assert.match(reply, /완료 알림/);
+    assert.match(reply, /방 라운드 알림 1개/);
 
-    assert.equal(reply, null);
-    assert.equal(runs.length, 1);
+    // 예전 `/off` 는 구독 중인 대화의 표시 하나만 껐고, 나머지가 계속 울렸다.
+    assert.equal(isSessionNotified(userId, SESSION_ID), false);
+    assert.equal(isSessionNotified(userId, 'other-session'), false);
+    assert.equal(readBridgeState(userId).watchedSessionId, null);
+    assert.equal(readTelegramSettings().notifyOnCompletion, false);
+    assert.equal(roomsDb.getRoom('room-1')?.notify_telegram, 0);
+    // 그 대화가 이제 폰으로 넘어가 있지 않다는 것이 웹 쪽에도 그대로 보인다.
+    assert.equal(isSessionHandedToTelegram(SESSION_ID), false);
+
+    // 구독도 놓았으므로 그냥 보낸 글은 실행되지 않는다.
+    const afterOff = await handleTelegramCommand('이건 가면 안 된다', { userId, runtime });
+    assert.match(replyText(afterOff), /구독 중인 세션이 없습니다/);
+    assert.equal(runs.length, 0);
+
+    // 이미 다 꺼져 있으면 그렇다고만 말한다.
+    assert.match(replyText(await handleTelegramCommand('/off', { userId, runtime })), /켜져 있는 알림이 없습니다/);
+  });
+});
+
+test('룸이 가장 최근이면 /watch 는 마지막에 말한 참가자가 아니라 방장을 구독한다', async () => {
+  await withIsolatedDatabase(async ({ userId, projectPath }) => {
+    const runs: RunCall[] = [];
+    const runtime = createRuntime(runs);
+    const earlier = '2026-11-14T00:00:00.000Z';
+    const later = '2026-11-14T01:00:00.000Z';
+    // 참가자가 방금 답해서 가장 최근에 손댄 세션이다.
+    sessionsDb.createSession('member-session', 'claude', projectPath, 'Member', earlier, later, null);
+    const participant = (id: string, sessionId: string, position: number) => ({
+      participant_id: id,
+      session_id: sessionId,
+      provider: 'claude',
+      model: null,
+      claude_account_id: null,
+      display_name: id,
+      role_name: '',
+      role_prompt: '',
+      persona: '',
+      status: 'active' as const,
+      position,
+    });
+    roomsDb.createRoom(
+      { roomId: 'room-1', hostSessionId: SESSION_ID, projectPath, permissionMode: 'ask', maxAutoTurns: 3 },
+      [participant('host', SESSION_ID, 0), participant('member', 'member-session', 1)],
+    );
+
+    await handleTelegramCommand('/watch 1', { userId, runtime });
+    assert.equal(readBridgeState(userId).watchedSessionId, SESSION_ID);
+    await handleTelegramCommand('방장에게', { userId, runtime });
+    assert.deepEqual(runs.map((run) => run.command), ['방장에게']);
+
+    // 방장을 다른 참가자에게 넘겼으면 그 참가자다.
+    roomsDb.setLeader('room-1', 'member');
+    assert.equal(resolveRoomLeaderSessionId(SESSION_ID), 'member-session');
+    // 룸이 아닌 대화는 그대로다.
+    assert.equal(resolveRoomLeaderSessionId('not-in-room'), 'not-in-room');
   });
 });
 

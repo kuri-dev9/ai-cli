@@ -130,9 +130,19 @@ test('넘기지 않은 대화의 웹 실행은 조용히 끝난다', async () =>
 
 // 폰 앞에서 답을 기다리는 사람이 있다. 넘기기 설정과 무관하게 돌려보낸다.
 test('텔레그램에서 시작한 실행은 넘기지 않았어도 회신한다', async () => {
-  await withIsolatedDatabase(() => {
+  await withIsolatedDatabase(({ userId }) => {
+    writeBridgeState(userId, { watchedSessionId: SESSION_ID });
     startRun(SESSION_ID, 'telegram');
 
     assert.equal(shouldRelayCompletion(SESSION_ID), true);
+  });
+});
+
+test('구독을 놓은 뒤(/off·/unwatch)에는 텔레그램에서 시작한 실행도 회신하지 않는다', async () => {
+  await withIsolatedDatabase(({ userId }) => {
+    writeBridgeState(userId, { watchedSessionId: null });
+    startRun(SESSION_ID, 'telegram');
+
+    assert.equal(shouldRelayCompletion(SESSION_ID), false);
   });
 });

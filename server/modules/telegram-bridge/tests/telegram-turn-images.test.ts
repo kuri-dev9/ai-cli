@@ -11,6 +11,7 @@ import {
   sessionsDb,
   userDb,
 } from '@/modules/database/index.js';
+import { writeBridgeState } from '@/modules/telegram-bridge/services/telegram-state.service.js';
 import { startTelegramBridge } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
 import { createTelegramClient } from '@/modules/telegram-bridge/services/telegram-client.service.js';
 import type { TelegramClient } from '@/modules/telegram-bridge/services/telegram-client.service.js';
@@ -108,6 +109,8 @@ async function withBridge(
     const user = userDb.createUser('bridge', 'hash');
     projectsDb.createProjectPath(tempDirectory, 'Images Project');
     sessionsDb.createAppSession(SESSION_ID, 'claude', tempDirectory, 'Images session');
+    // 폰이 이 대화를 구독 중이다. 구독을 놓았으면 결과가 오지 않는다.
+    writeBridgeState(Number(user.id), { watchedSessionId: SESSION_ID });
 
     await runTest({
       projectPath: tempDirectory,

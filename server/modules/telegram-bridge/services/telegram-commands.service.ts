@@ -1,4 +1,11 @@
-import { messageSourcesDb, projectsDb, sessionDraftsDb, sessionsDb } from '@/modules/database/index.js';
+import {
+  messageSourcesDb,
+  projectsDb,
+  readQueuedMessageList,
+  roomsDb,
+  sessionDraftsDb,
+  sessionsDb,
+} from '@/modules/database/index.js';
 import { providerAuthService, sessionsService } from '@/modules/providers/index.js';
 import { isSessionHandedToTelegram } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
@@ -10,6 +17,10 @@ import type {
   TelegramIncomingFile,
 } from '@/modules/telegram-bridge/services/telegram-client.service.js';
 import { storeTelegramFiles } from '@/modules/telegram-bridge/services/telegram-files.service.js';
+import {
+  readTelegramSettings,
+  writeTelegramSettings,
+} from '@/modules/telegram-bridge/services/telegram-settings.service.js';
 import {
   isSessionNotified,
   readBridgeState,
@@ -132,11 +143,24 @@ function watchProject(
 ): string {
   const session = findLatestSession(project.project_path);
   if (!session) {
-    return `${projectLabel(project)} 에는 아직 대화가 없습니다. /new 로 새 대화를 시작할 수 있습니다.`;
+    // 고른 사실은 남긴다. 예전에는 여기서 아무것도 적지 않아서, 이어 친
+    // `/new` 가 고른 프로젝트가 아니라 마지막에 쓴 프로젝트에 대화를 만들었다.
+    // 구독도 놓는다 — 다른 프로젝트를 골랐는데 보낸 글이 예전 대화로 가면 안 된다.
+    writeBridgeState(userId, {
+      watchedSessionId: null,
+      selectedProjectPath: project.project_path,
+      pendingNewChat: null,
+    });
+    return `${projectLabel(project)} 을(를) 골랐습니다. 아직 대화가 없습니다.\n/new 로 이 프로젝트에 새 대화를 시작하세요.`;
   }
 
-  writeBridgeState(userId, { watchedSessionId: session.session_id, pendingNewChat: null });
-  return `${projectLabel(project)} 의 최신 대화를 구독한다.\n${describeSession(session.session_id)}`;
+  const targetSessionId = resolveRoomLeaderSessionId(session.session_id);
+  writeBridgeState(userId, {
+    watchedSessionId: targetSessionId,
+    selectedProjectPath: project.project_path,
+    pendingNewChat: null,
+  });
+  return `${projectLabel(project)} 의 최신 대화를 구독한다.\n${describeSession(targetSessionId)}`;
 }
 
 /** 프로젝트에서 가장 최근에 손댄 세션. `/watch` 가 고르는 대상이다. */
@@ -146,6 +170,74 @@ function findLatestSession(projectPath: string) {
     return null;
   }
   return [...sessions].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+}
+
+/**
+ * 룸 참가자의 세션이면 그 룸 방장의 세션으로 바꾼다.
+ *
+ * 룸에서는 참가자가 차례로 답하므로 "가장 최근에 손댄 세션"은 마지막에 말한
+ * 참가자다. 그 세션을 구독하면 폰에서 보낸 말이 방장이 아니라 그 참가자에게
+ * 간다. 룸에 말을 거는 자리는 방장이다.
+ *
+ * 방장은 따로 정했으면 그 참가자, 아니면 룸이 사는 원래 대화다
+ * (`room-records.service.ts` 의 `isHost` 와 같은 규칙). 룸이 아니면 그대로 둔다.
+ */
+export function resolveRoomLeaderSessionId(sessionId: string): string {
+  const participant = roomsDb.getParticipantBySession(sessionId);
+  if (!participant) {
+    return sessionId;
+  }
+  const room = roomsDb.getRoom(participant.room_id);
+  if (!room) {
+    return sessionId;
+  }
+  if (room.leader_participant_id) {
+    const leader = roomsDb
+      .listParticipants(room.room_id)
+      .find((candidate) => candidate.participant_id === room.leader_participant_id);
+    if (leader?.session_id) {
+      return leader.session_id;
+    }
+  }
+  return room.host_session_id || sessionId;
+}
+
+/**
+ * `/off`: 이쪽으로 오는 알림을 전부 끈다.
+ *
+ * 알림이 오는 길은 넷이다 — 구독 중인 대화, 넘기기를 켜 둔 대화들, 설정의 전역
+ * "완료 알림", 룸마다 켜는 "라운드 끝" 알림. 예전 `/off` 는 구독 중인 대화의
+ * 표시 하나만 껐고, 나머지 셋이 계속 울렸다. 폰에서 "그만"이라고 했으면 무엇이
+ * 켜져 있었든 조용해져야 한다.
+ *
+ * 무엇을 껐는지 돌려준다. 웹에서 켜 둔 설정까지 바뀌므로 말해 줘야 한다.
+ */
+function turnEverythingOff(userId: number): string[] {
+  const state = readBridgeState(userId);
+  const turnedOff: string[] = [];
+
+  if (state.watchedSessionId) {
+    turnedOff.push(`구독: ${describeSession(state.watchedSessionId)}`);
+  }
+  if (state.notifiedSessionIds.length > 0) {
+    turnedOff.push(`넘겨받은 대화 ${state.notifiedSessionIds.length}개`);
+  }
+  writeBridgeState(userId, { watchedSessionId: null, notifiedSessionIds: [], pendingNewChat: null });
+
+  if (readTelegramSettings().notifyOnCompletion) {
+    writeTelegramSettings({ notifyOnCompletion: false });
+    turnedOff.push('완료 알림 (설정 > 텔레그램)');
+  }
+
+  const notifyingRooms = roomsDb.listRooms().filter((room) => room.notify_telegram);
+  for (const room of notifyingRooms) {
+    roomsDb.updateRoomSettings(room.room_id, { notifyTelegram: false });
+  }
+  if (notifyingRooms.length > 0) {
+    turnedOff.push(`방 라운드 알림 ${notifyingRooms.length}개`);
+  }
+
+  return turnedOff;
 }
 
 function readPendingApprovals(runtime: ProviderRuntimeGateway, sessionId: string): PendingApproval[] {
@@ -172,16 +264,21 @@ const HELP_TEXT = [
   '/status          지금 무엇이 돌고 있는지, 승인 대기가 있는지',
   '/projects        프로젝트 목록',
   '/watch <번호|이름> 그 프로젝트의 최신 대화를 구독',
-  '/unwatch         구독을 놓는다. 이 대화로 오는 것을 전부 멈춘다',
+  '/unwatch         구독을 놓는다. 이 대화로 오는 것을 멈춘다',
   '/on              구독 중인 대화의 웹 작업까지 알림 받기',
-  '/off             웹 작업 알림 끄기. 구독은 유지된다',
+  '/off             전부 끄기 — 구독, 넘기기, 완료 알림, 방 알림',
   '/allow [번호]    승인 대기 중인 도구를 허용',
   '/deny [번호]     승인 대기 중인 도구를 거부',
-  '/stop            지금 돌고 있는 턴을 중단',
+  '/stop            지금 돌고 있는 턴을 중단 (대기열은 이어서 실행)',
+  '/queue           대기열 보기 · 지금 끼어들기 · 비우기',
+  '',
+  '작업 중에 보낸 글은 웹 화면과 같은 대기열에 들어간다. 지금 턴이 끝나면',
+  '순서대로 실행되고, "지금 끼어들기" 를 누르면 지금 턴을 멈추고 바로 실행한다.',
+  '/new 는 구독 중인 대화의 프로젝트(없으면 /watch 로 고른 프로젝트)에 만든다.',
   '',
   '이쪽으로 무엇이 오는지',
   '',
-  '1. 여기서 보낸 작업의 결과 — 항상 온다. /off 로도 막히지 않는다.',
+  '1. 여기서 보낸 작업의 결과 — 구독 중이면 항상 온다.',
   '2. 웹에서 시작한 작업의 결과 — /on 으로 켠 대화만.',
   '3. 웹 화면의 빠른 설정에서 넘기기를 켜면 그 대화를 이쪽으로 넘겨받는다.',
   '   넘겨받으면 구독과 알림이 함께 켜지므로, 그 뒤로는 그 대화의 웹 작업도',
@@ -189,7 +286,7 @@ const HELP_TEXT = [
   '   여기서는 승인 창을 띄울 수 없기 때문이다.',
   '',
   '브라우저로 돌아왔으면 같은 자리에서 넘기기를 끄면 이 대화를 놓는다.',
-  '여기서 멈추려면 /unwatch, 웹 작업 알림만 끄려면 /off 를 쓴다.',
+  '이 대화만 놓으려면 /unwatch, 무엇이든 그만 받으려면 /off 를 쓴다.',
   '',
   '슬래시 없이 보낸 글은 구독 중인 대화에 그대로 들어간다.',
 ].join('\n');
@@ -255,19 +352,29 @@ export async function handleTelegramCommand(
       return `구독을 놓았습니다: ${released}\n이 대화로는 더 오지 않습니다. 다시 받으려면 /watch 해 주세요.`;
     }
 
-    case '/on':
-    case '/off': {
-      // 이제 이 스위치는 "구독 중인 세션의 웹 작업까지 알릴지"만 정한다.
-      // 여기서 보낸 작업의 결과는 이 값과 무관하게 항상 돌아온다.
+    case '/on': {
+      // 구독 중인 세션의 웹 작업까지 알린다. 여기서 보낸 작업의 결과는 이
+      // 값과 무관하게 항상 돌아온다.
       if (!state.watchedSessionId) {
         return '구독 중인 세션이 없습니다. /projects 로 고른 뒤 /watch 해 주세요.';
       }
 
-      const enabled = command === '/on';
-      setSessionNotified(context.userId, state.watchedSessionId, enabled);
-      return enabled
-        ? '이 세션은 웹에서 시작한 작업도 끝나면 알려준다.'
-        : '이 세션의 웹 작업은 알리지 않는다. 여기서 보낸 작업의 결과는 계속 온다.';
+      setSessionNotified(context.userId, state.watchedSessionId, true);
+      return '이 세션은 웹에서 시작한 작업도 끝나면 알려준다.';
+    }
+
+    case '/off': {
+      const turnedOff = turnEverythingOff(context.userId);
+      if (turnedOff.length === 0) {
+        return '켜져 있는 알림이 없습니다. 이쪽으로 오는 것은 없습니다.';
+      }
+      return [
+        '🔕 전부 껐습니다. 이제 이쪽으로 아무것도 오지 않습니다.',
+        '',
+        ...turnedOff.map((line) => `- ${line}`),
+        '',
+        '다시 받으려면 /watch 로 대화를 고르고, 웹 작업 알림은 /on 으로 켭니다.',
+      ].join('\n');
     }
 
     case '/projects':
@@ -302,13 +409,17 @@ export async function handleTelegramCommand(
       const running = chatRunRegistry.isProcessing(state.watchedSessionId);
       const approvals = readPendingApprovals(context.runtime, state.watchedSessionId);
       const notified = isSessionNotified(context.userId, state.watchedSessionId);
+      const queued = listQueuedPrompts(context.userId, state.watchedSessionId).length;
+      const watchedSession = sessionsDb.getSessionById(state.watchedSessionId);
       const lines = [
         `세션: ${describeSession(state.watchedSessionId)}`,
-        `상태: ${running ? '작업 중' : '대기'}`,
+        `프로젝트: ${describeProjectPath(watchedSession?.project_path ?? null)}`,
+        `상태: ${running ? '작업 중 (/stop 으로 중단)' : '대기'}`,
+        ...(queued > 0 ? [`대기열: ${queued}건 (/queue 로 보기)`] : []),
         // 문구가 "알림: 켜짐" 하나였을 때는 거짓말이었다 — 여기서 보낸 작업의
         // 결과는 이 값과 무관하게 항상 오는데, 꺼져 있으면 아무것도 안 온다고
         // 읽힌다.
-        `웹 작업 알림: ${notified ? '켜짐 (/off 로 끔)' : '꺼짐 (/on 으로 켬)'}`,
+        `웹 작업 알림: ${notified ? '켜짐 (/off 로 전부 끔)' : '꺼짐 (/on 으로 켬)'}`,
         '여기서 보낸 작업의 결과는 항상 옵니다.',
       ];
 
@@ -352,14 +463,33 @@ export async function handleTelegramCommand(
       if (!state.watchedSessionId) {
         return '구독 중인 세션이 없습니다.';
       }
-      const run = chatRunRegistry.getRun(state.watchedSessionId);
-      if (!run || run.status !== 'running') {
+      // 웹의 중단 버튼과 같다. 대기열은 두므로, 줄 서 있던 글이 이어서 실행된다.
+      // 그것까지 막으려면 먼저 /queue 에서 비운다.
+      const waiting = listQueuedPrompts(context.userId, state.watchedSessionId).length;
+      if (!(await abortRunningTurn(context.runtime, state.watchedSessionId))) {
         return '돌고 있는 턴이 없습니다.';
       }
+      return waiting > 0
+        ? `중단했습니다. 대기열의 ${waiting}건이 이어서 실행됩니다.`
+        : '중단했습니다.';
+    }
 
-      const aborted = await context.runtime.abort(run.provider, state.watchedSessionId);
-      chatRunRegistry.completeRun(state.watchedSessionId, { exitCode: aborted ? 0 : 1, aborted: true });
-      return '중단했습니다.';
+    case '/queue': {
+      if (!state.watchedSessionId) {
+        return '구독 중인 세션이 없습니다.';
+      }
+      const queued = listQueuedPrompts(context.userId, state.watchedSessionId);
+      if (queued.length === 0) {
+        return '대기열이 비어 있습니다.';
+      }
+      return {
+        text: [
+          `대기열 ${queued.length}건 (${chatRunRegistry.isProcessing(state.watchedSessionId) ? '지금 턴이 끝나면 실행' : '곧 실행'})`,
+          '',
+          ...queued.map((content, index) => `${index + 1}. ${content.length > 80 ? `${content.slice(0, 80)}…` : content}`),
+        ].join('\n'),
+        buttons: renderQueueButtons(state.watchedSessionId),
+      };
     }
 
     default:
@@ -381,6 +511,97 @@ function describeAttachedFiles(files: TelegramIncomingFile[]): string {
     : '보낸 파일을 확인해 주세요.';
 }
 
+/**
+ * 턴을 띄우고, 실제로 시작될 때까지만 기다린다.
+ *
+ * `runDetachedChatTurn` 은 턴이 *끝나야* 돌아온다. 예전에는 그걸 그대로
+ * 기다렸는데, 브리지는 갱신을 하나씩 차례로 처리하므로 턴이 도는 내내 폴링
+ * 전체가 멈췄다. 그동안 폰에서 보낸 `/stop`·`/status`·`/allow` 는 하나도
+ * 처리되지 않고, 턴이 끝난 뒤에 한꺼번에 처리됐다 — 멈춘 턴을 폰에서 멈출 수가
+ * 없었다.
+ *
+ * 그래서 이 세션에 실행이 등록되는 순간(자동 대화 줄이기가 먼저 돌면 그 순간)
+ * 돌아온다. 시작조차 못 했으면 그 이유를 받는다. 시작한 뒤의 실패는 완료
+ * 알림이 오류로 전한다.
+ */
+function startDetachedTurn(
+  sessionId: string,
+  launch: () => Promise<{ started: boolean; error: string | null }>,
+): Promise<{ started: boolean; error: string | null }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: { started: boolean; error: string | null }) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      stopWatching();
+      resolve(result);
+    };
+    const stopWatching = chatRunRegistry.onRunStarted((startedSessionId) => {
+      if (startedSessionId === sessionId) {
+        finish({ started: true, error: null });
+      }
+    });
+
+    launch().then(
+      (result) => finish(result),
+      (error: unknown) => finish({
+        started: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  });
+}
+
+/** 대기열에 넣은 뒤 다는 버튼. 세션 id 를 실어서, 나중에 눌러도 그 대화에만 듣는다. */
+function renderQueueButtons(sessionId: string): TelegramButton[][] {
+  return [[
+    { text: '⚡ 지금 끼어들기', data: `steer:${sessionId}` },
+    { text: '🗑 대기열 비우기', data: `qclear:${sessionId}` },
+  ]];
+}
+
+/** 이 세션 대기열에 들어 있는 글. 웹 화면의 대기열 카드와 같은 목록이다. */
+function listQueuedPrompts(userId: number, sessionId: string): string[] {
+  const draft = sessionDraftsDb.getDrafts(userId).find((record) => record.scope === sessionId);
+  return readQueuedMessageList(draft?.queuedMessage ?? null).map((item) => {
+    const content = item && typeof item === 'object' ? (item as { content?: unknown }).content : null;
+    return typeof content === 'string' && content.trim() ? content.trim() : '(첨부만)';
+  });
+}
+
+/**
+ * 대기열을 비운다. 입력 중이던 초안 글은 남긴다.
+ *
+ * 웹 화면에서 대기열 카드를 지우는 것과 같은 일을 한다 — 같은 칸을 쓰므로 웹
+ * 화면의 대기열에서도 같이 사라진다.
+ */
+function clearQueuedPrompts(userId: number, sessionId: string): number {
+  const draft = sessionDraftsDb.getDrafts(userId).find((record) => record.scope === sessionId);
+  const count = readQueuedMessageList(draft?.queuedMessage ?? null).length;
+  if (count > 0) {
+    sessionDraftsDb.saveDraft(userId, sessionId, { text: draft?.text ?? '', queuedMessage: null });
+  }
+  return count;
+}
+
+/**
+ * 돌고 있는 턴을 멈춘다. `/stop` 과 "지금 끼어들기" 버튼이 같이 쓴다.
+ *
+ * 멈추면 대기열을 비우는 쪽이 곧바로 다음 글을 보낸다(`onRunSettled`). 그래서
+ * 끼어들기는 "멈추기" 하나로 충분하다 — 줄 맨 앞에 있는 글이 바로 실행된다.
+ */
+async function abortRunningTurn(runtime: ProviderRuntimeGateway, sessionId: string): Promise<boolean> {
+  const run = chatRunRegistry.getRun(sessionId);
+  if (!run || run.status !== 'running') {
+    return false;
+  }
+  const aborted = await runtime.abort(run.provider, sessionId);
+  chatRunRegistry.completeRun(sessionId, { exitCode: aborted ? 0 : 1, aborted: true });
+  return true;
+}
+
 /** 구독 중인 세션에 한 턴을 밀어넣는다. */
 async function sendPrompt(
   text: string,
@@ -389,7 +610,7 @@ async function sendPrompt(
   files: TelegramIncomingFile[] = [],
   /** 실행 옵션에 더 실을 것. 새 대화가 이어 쓸 모델을 넘길 때 쓴다. */
   runOptions: Record<string, unknown> = {},
-): Promise<string | null> {
+): Promise<CommandResult> {
   if (!watchedSessionId) {
     return '구독 중인 세션이 없습니다. /projects 로 고른 뒤 /watch 해 주세요.';
   }
@@ -429,14 +650,23 @@ async function sendPrompt(
     // 어디서 왔는지 모른다.
     messageSourcesDb.markMessageSource(watchedSessionId, prompt, 'telegram');
     const waiting = sessionDraftsDb.countQueuedMessages(context.userId, watchedSessionId);
-    return `작업 중이라 대기열에 넣었습니다. 앞에 ${waiting - 1}건 있고, 끝나는 대로 순서대로 실행합니다.`;
+    // 웹 화면의 대기열 카드와 같은 선택지를 준다. 그냥 두면 지금 턴이 끝난 뒤
+    // 실행되고, 급하면 지금 턴을 끊고 바로 넣을 수 있다.
+    return {
+      text: [
+        `⏳ 작업 중이라 대기열에 넣었습니다 (${waiting}번째).`,
+        '지금 턴이 끝나면 순서대로 실행합니다.',
+        '급하면 "지금 끼어들기" 로 지금 턴을 멈추고 바로 실행합니다.',
+      ].join('\n'),
+      buttons: renderQueueButtons(watchedSessionId),
+    };
   }
 
   // 턴을 시작하기 전에 적는다. CLI 가 기록에 메시지를 쓰는 것은 실행 중이고,
   // 그때 우리가 끼어들 자리는 없다.
   const sourceMarkId = messageSourcesDb.markMessageSource(watchedSessionId, prompt, 'telegram');
 
-  const result = await runDetachedChatTurn(
+  const result = await startDetachedTurn(watchedSessionId, () => runDetachedChatTurn(
     {
       sessionId: watchedSessionId,
       userId: context.userId,
@@ -447,7 +677,7 @@ async function sendPrompt(
       origin: 'telegram',
     },
     { runtime: context.runtime, isSessionHandedToTelegram },
-  );
+  ));
 
   if (!result.started) {
     // 기록에 남지 않은 턴의 표시를 남겨 두면, 나중에 브라우저에서 같은 글을
@@ -505,16 +735,39 @@ function pickDefaultProvider(connected: LLMProvider[]): LLMProvider {
 }
 
 /**
- * 새 대화가 들어갈 프로젝트: 마지막에 쓴 대화의 프로젝트.
+ * 새 대화가 들어갈 프로젝트.
  *
- * 텔레그램에서는 프로젝트를 고르게 하지 않는다. 대화는 어딘가의 폴더에서 돌아야
- * 하고 웹 사이드바도 프로젝트 아래에 보여 주므로, 방금까지 쓰던 곳에 둔다.
- * 기록이 하나도 없으면 첫 번째 프로젝트.
+ * 1. 지금 구독 중인 대화의 프로젝트 — 웹에서 그 대화를 다른 프로젝트로 옮겼으면
+ *    옮긴 곳이다(세션 id 는 그대로이고 행의 경로가 바뀐다).
+ * 2. 구독 중인 대화가 없으면 `/watch` 로 마지막에 고른 프로젝트 — 아직 대화가
+ *    없는 프로젝트를 골랐을 때가 이 경우다.
+ * 3. 둘 다 없으면 마지막에 쓴 대화의 프로젝트, 그것도 없으면 첫 번째 프로젝트.
+ *
+ * 예전에는 3 만 봤다. 그래서 폰에서 프로젝트를 고르고 `/new` 를 쳐도, 웹에서
+ * 마지막에 쓰던 다른 프로젝트에 대화가 생겼다.
  */
-function pickNewChatProjectPath(): string | null {
-  return findLastUsedSession()?.project_path
+function pickNewChatProjectPath(state: TelegramBridgeState): string | null {
+  const activePaths = new Set(listActiveProjects().map((project) => project.project_path));
+  const watchedPath = state.watchedSessionId
+    ? sessionsDb.getSessionById(state.watchedSessionId)?.project_path ?? null
+    : null;
+  const candidates = [
+    watchedPath,
+    state.selectedProjectPath,
+    findLastUsedSession()?.project_path ?? null,
+  ];
+  return candidates.find((candidate): candidate is string => Boolean(candidate && activePaths.has(candidate)))
     ?? listActiveProjects()[0]?.project_path
     ?? null;
+}
+
+/** 새 대화가 어느 프로젝트에 생기는지 사람이 읽을 이름. */
+function describeProjectPath(projectPath: string | null): string {
+  if (!projectPath) {
+    return '(프로젝트 없음)';
+  }
+  const project = listActiveProjects().find((candidate) => candidate.project_path === projectPath);
+  return project ? projectLabel(project) : projectPath;
 }
 
 function readActivePendingNewChat(state: TelegramBridgeState): PendingNewChat | null {
@@ -536,11 +789,15 @@ function renderPendingNewChat(
   provider: LLMProvider,
   connected: LLMProvider[],
   offerOtherProviders: boolean,
+  state: TelegramBridgeState,
 ): TelegramReply {
   const choices = offerOtherProviders ? connected.filter((id) => id !== provider) : [];
   return {
     text: [
-      `새 ${PROVIDER_LABELS[provider]} 대화를 엽니다. 첫 메시지를 보내 주세요.`,
+      // 어디에 생기는지 먼저 보여 준다. 엉뚱한 프로젝트면 첫 메시지를 보내기
+      // 전에 /watch 로 고칠 수 있다.
+      `새 ${PROVIDER_LABELS[provider]} 대화를 ${describeProjectPath(pickNewChatProjectPath(state))} 에 엽니다. 첫 메시지를 보내 주세요.`,
+      '다른 프로젝트면 /watch 로 먼저 고르세요.',
       ...(choices.length > 0 ? ['다른 AI 로 하려면 아래에서 고르세요.'] : []),
     ].join('\n'),
     buttons: [
@@ -586,7 +843,7 @@ async function handleNewChatCommand(
   writeBridgeState(context.userId, {
     pendingNewChat: { provider, model, createdAt: Date.now() },
   });
-  return renderPendingNewChat(provider, connected, !named);
+  return renderPendingNewChat(provider, connected, !named, state);
 }
 
 /**
@@ -603,7 +860,7 @@ async function startNewChat(
   context: CommandContext,
   state: TelegramBridgeState,
 ): Promise<CommandResult> {
-  const projectPath = pickNewChatProjectPath();
+  const projectPath = pickNewChatProjectPath(state);
   if (!projectPath) {
     writeBridgeState(context.userId, { pendingNewChat: null });
     return '대화를 열 프로젝트가 없습니다. 웹에서 프로젝트를 하나 추가해 주세요.';
@@ -614,18 +871,25 @@ async function startNewChat(
     projectPath,
     text || describeAttachedFiles(files),
   );
-  writeBridgeState(context.userId, { watchedSessionId: sessionId, pendingNewChat: null });
+  writeBridgeState(context.userId, {
+    watchedSessionId: sessionId,
+    selectedProjectPath: projectPath,
+    pendingNewChat: null,
+  });
 
   const failure = await sendPrompt(text, context, sessionId, files, model ? { model } : {});
   if (failure) {
     sessionsDb.deleteSessionById(sessionId);
-    writeBridgeState(context.userId, { watchedSessionId: state.watchedSessionId });
-    return failure;
+    writeBridgeState(context.userId, {
+      watchedSessionId: state.watchedSessionId,
+      selectedProjectPath: state.selectedProjectPath,
+    });
+    return typeof failure === 'string' ? failure : failure.text;
   }
 
   // 평소에는 보냈다는 확인을 하지 않지만, 여기서는 구독이 바뀌었다는 것을
   // 알려야 한다. 이후에 보내는 글이 어디로 가는지가 달라진다.
-  return `🆕 새 ${PROVIDER_LABELS[provider]} 대화를 시작했습니다${model ? ` (${model})` : ''}. 이제 이 대화를 구독합니다.`;
+  return `🆕 ${describeProjectPath(projectPath)} 에 새 ${PROVIDER_LABELS[provider]} 대화를 시작했습니다${model ? ` (${model})` : ''}. 이제 이 대화를 구독합니다.`;
 }
 
 // ---------------------------
@@ -650,6 +914,30 @@ export async function handleTelegramButton(
     return { toast: projectLabel(project), reply: watchProject(project, context.userId) };
   }
 
+  if (kind === 'steer' || kind === 'qclear') {
+    if (!sessionsDb.getSessionById(value)) {
+      return { toast: '없어진 대화입니다.', reply: null };
+    }
+
+    if (kind === 'qclear') {
+      const cleared = clearQueuedPrompts(context.userId, value);
+      return {
+        toast: cleared > 0 ? `${cleared}건 비움` : '비어 있음',
+        reply: cleared > 0 ? `🗑 대기열 ${cleared}건을 비웠습니다.` : null,
+      };
+    }
+
+    // 끼어들기: 지금 턴을 멈추면 대기열 맨 앞의 글이 곧바로 실행된다.
+    const queued = listQueuedPrompts(context.userId, value).length;
+    if (queued === 0) {
+      return { toast: '대기열이 비어 있음', reply: '대기열에 남은 글이 없습니다. 이미 실행됐을 수 있습니다.' };
+    }
+    if (!(await abortRunningTurn(context.runtime, value))) {
+      return { toast: '곧 실행', reply: '돌고 있는 턴이 없어 대기열의 글이 곧 실행됩니다.' };
+    }
+    return { toast: '끼어들기', reply: `⚡ 지금 턴을 멈췄습니다. 대기열의 글을 바로 실행합니다 (${queued}건).` };
+  }
+
   if (kind === 'new' && value === 'cancel') {
     writeBridgeState(context.userId, { pendingNewChat: null });
     return { toast: '취소', reply: '새 대화를 열지 않습니다.' };
@@ -662,10 +950,10 @@ export async function handleTelegramButton(
       return { toast: '쓸 수 없는 AI 입니다.', reply: `쓸 수 있는 AI: ${describeConnected(connected)}` };
     }
 
-    writeBridgeState(context.userId, {
+    const state = writeBridgeState(context.userId, {
       pendingNewChat: { provider, model: findLastUsedModel(provider), createdAt: Date.now() },
     });
-    return { toast: PROVIDER_LABELS[provider], reply: renderPendingNewChat(provider, connected, false) };
+    return { toast: PROVIDER_LABELS[provider], reply: renderPendingNewChat(provider, connected, false, state) };
   }
 
   return { toast: '더 이상 쓸 수 없는 버튼입니다.', reply: null };

@@ -171,6 +171,7 @@
     "save": "Save",
     "saving": "Saving...",
     "unsaved": "You have unsaved changes",
+    "bridgeAutoEnabled": "Chat ID registered, so the Telegram bridge has been turned on. Try sending your bot a message.",
     "loadFailed": "Failed to load the Telegram settings",
     "saveFailed": "Failed to save the Telegram settings",
     "status": {

@@ -23,6 +23,14 @@ export type TelegramBridgeState = {
   /** 명령이 들어가는 세션. `/watch` 로 고른다. */
   watchedSessionId: string | null;
   /**
+   * `/watch` 로 마지막에 고른 프로젝트 경로.
+   *
+   * 아직 대화가 없는 프로젝트를 고르면 구독할 세션이 없어서, 이 값이 없으면
+   * 고른 사실 자체가 사라진다. 그러면 바로 이어 친 `/new` 가 고른 곳이 아니라
+   * 마지막에 쓴 엉뚱한 프로젝트에 대화를 만든다.
+   */
+  selectedProjectPath: string | null;
+  /**
    * `getUpdates` 에 다음번에 넘길 offset. 이미 받은 갱신의 update_id + 1.
    *
    * 메모리에만 뒀던 예전 코드는 서버가 재시작할 때마다 0 으로 돌아가, 재시작
@@ -77,6 +85,7 @@ function readPendingNewChat(value: unknown): PendingNewChat | null {
 const DEFAULT_STATE: TelegramBridgeState = {
   notifiedSessionIds: [],
   watchedSessionId: null,
+  selectedProjectPath: null,
   lastUpdateOffset: 0,
   pendingNewChat: null,
 };
@@ -118,6 +127,10 @@ export function readBridgeState(userId: number): TelegramBridgeState {
       typeof raw.watchedSessionId === 'string' && raw.watchedSessionId
         ? raw.watchedSessionId
         : null,
+    selectedProjectPath:
+      typeof raw.selectedProjectPath === 'string' && raw.selectedProjectPath
+        ? raw.selectedProjectPath
+        : null,
     lastUpdateOffset:
       typeof raw.lastUpdateOffset === 'number' && Number.isFinite(raw.lastUpdateOffset) && raw.lastUpdateOffset >= 0
         ? raw.lastUpdateOffset
@@ -141,10 +154,10 @@ export function isSessionNotified(userId: number, sessionId: string): boolean {
 }
 
 /**
- * 세션 단위 알림 토글. 폰의 `/on`·`/off` 가 쓴다.
+ * 세션 단위 알림 토글. 폰의 `/on`·`/unwatch` 가 쓴다.
  *
- * 구독(`watchedSessionId`)은 건드리지 않는다 — 폰에서 `/off` 는 "여기 알림을
- * 그만"이지 "이 대화를 놓겠다"가 아니다. 놓는 것은 `/unwatch` 다.
+ * 구독(`watchedSessionId`)은 건드리지 않는다. 구독까지 한 번에 놓는 것은
+ * `/unwatch`, 무엇이든 전부 끄는 것은 `/off` 다.
  */
 export function setSessionNotified(
   userId: number,

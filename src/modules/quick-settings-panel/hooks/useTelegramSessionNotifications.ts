@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@/shared/api';
 
@@ -41,21 +41,35 @@ const INITIAL: Omit<TelegramSessionNotificationsState, 'setEnabled' | 'isLoading
   bridgeEnabled: false,
 };
 
+/**
+ * `isVisible` 이 `false` → `true` 로 바뀔 때마다 서버 상태를 다시 읽는다.
+ * 설정 화면에서 브리지를 켜고 돌아왔는데 패널이 처음 읽은 "꺼짐"을 붙들고
+ * 있으면, 사용자는 켠 것이 반영되지 않았다고 생각한다.
+ */
 export function useTelegramSessionNotifications(
   sessionId: string | null,
+  isVisible = true,
 ): TelegramSessionNotificationsState {
   const [state, setState] = useState(INITIAL);
   const [isLoading, setIsLoading] = useState(Boolean(sessionId));
+  // 같은 세션을 다시 읽을 때는 "확인 중"으로 깜빡이지 않게, 이미 읽은 세션을 기억한다.
+  const loadedSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!sessionId) {
+      loadedSessionIdRef.current = null;
       setState(INITIAL);
       setIsLoading(false);
       return;
     }
+    if (!isVisible) {
+      return;
+    }
 
     let cancelled = false;
-    setIsLoading(true);
+    if (loadedSessionIdRef.current !== sessionId) {
+      setIsLoading(true);
+    }
 
     const load = async () => {
       try {
@@ -82,6 +96,7 @@ export function useTelegramSessionNotifications(
         }
       } finally {
         if (!cancelled) {
+          loadedSessionIdRef.current = sessionId;
           setIsLoading(false);
         }
       }
@@ -91,7 +106,7 @@ export function useTelegramSessionNotifications(
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, isVisible]);
 
   const setEnabled = useCallback(
     (next: boolean) => {

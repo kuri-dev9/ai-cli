@@ -128,18 +128,55 @@ test('/new 뒤에 글이 있으면 바로 새 대화를 열고, 기록이 없으
   });
 });
 
-test('새 대화는 구독 중인 곳이 아니라 마지막에 쓴 프로젝트에 들어간다', async () => {
+test('새 대화는 마지막에 쓴 곳이 아니라 구독 중인 대화의 프로젝트에 들어간다', async () => {
   await withHarness(async ({ projectPath, runs, send }) => {
     const otherProject = path.join(projectPath, 'other');
     projectsDb.createProjectPath(otherProject, 'Other Project');
     sessionsDb.createAppSession('a-watched', 'claude', projectPath, 'watched');
     await send('/watch 1');
-    // 구독은 첫 프로젝트에 있지만, 가장 최근에 쓴 대화는 다른 프로젝트에 있다.
+    // 구독은 첫 프로젝트에 있고, 가장 최근에 쓴 대화는 다른 프로젝트에 있다.
+    // 예전에는 후자에 만들어서, 폰에서 고른 프로젝트가 아닌 곳에 대화가 생겼다.
     sessionsDb.createAppSession('z-latest', 'claude', otherProject, 'latest');
 
-    await send('/new 안녕');
+    const reply = await send('/new 안녕');
 
-    assert.equal(sessionsDb.getSessionById(runs[0].sessionId)?.project_path, otherProject);
+    assert.equal(sessionsDb.getSessionById(runs[0].sessionId)?.project_path, projectPath);
+    assert.match(replyText(reply), /New Chat Project 에 새 Claude 대화를 시작/);
+  });
+});
+
+test('아직 대화가 없는 프로젝트를 고르고 /new 하면 그 프로젝트에 만든다', async () => {
+  await withHarness(async ({ userId, projectPath, runs, send }) => {
+    const emptyProject = path.join(projectPath, 'empty');
+    projectsDb.createProjectPath(emptyProject, 'Empty Project');
+    // 다른 프로젝트에서 방금까지 대화하고 있었다.
+    sessionsDb.createAppSession('recent', 'claude', projectPath, 'recent');
+    await send('/watch 1');
+
+    const picked = await send('/watch Empty');
+    assert.match(replyText(picked), /Empty Project 을\(를\) 골랐습니다/);
+    // 다른 프로젝트를 골랐으니 예전 대화의 구독은 놓는다.
+    assert.equal(readBridgeState(userId).watchedSessionId, null);
+
+    const pending = await send('/new');
+    assert.match(replyText(pending), /Empty Project 에 엽니다/);
+    await send('여기서 시작');
+
+    assert.equal(sessionsDb.getSessionById(runs[0].sessionId)?.project_path, emptyProject);
+  });
+});
+
+test('웹에서 구독 중인 대화를 다른 프로젝트로 옮기면 /new 도 옮긴 곳에 만든다', async () => {
+  await withHarness(async ({ userId, projectPath, runs, send }) => {
+    const movedTo = path.join(projectPath, 'moved');
+    projectsDb.createProjectPath(movedTo, 'Moved Project');
+    sessionsDb.createAppSession('handed', 'claude', movedTo, 'handed');
+    // 웹의 넘기기 버튼처럼 구독만 바꾼다. 폰에서 /watch 로 고른 프로젝트는 예전 것이다.
+    writeBridgeState(userId, { watchedSessionId: 'handed', selectedProjectPath: projectPath });
+
+    await send('/new 이어서');
+
+    assert.equal(sessionsDb.getSessionById(runs[0].sessionId)?.project_path, movedTo);
   });
 });
 
@@ -213,7 +250,7 @@ test('메뉴에서 누른 /new 는 다음 글을 첫 메시지로 받는다', as
     await send('/watch 1');
 
     const reply = await send('/new');
-    assert.match(replyText(reply), /새 Claude 대화를 엽니다. 첫 메시지를 보내 주세요/);
+    assert.match(replyText(reply), /새 Claude 대화를 New Chat Project 에 엽니다. 첫 메시지를 보내 주세요/);
     // 다른 AI 로 바꿀 버튼과 취소 버튼.
     assert.deepEqual(replyButtons(reply).map((button) => button.data), ['new:codex', 'new:cancel']);
     assert.equal(runs.length, 0);
@@ -234,7 +271,7 @@ test('AI 만 붙인 /new 는 그 AI 로 첫 메시지를 기다린다', async ()
   await withHarness(async ({ runs, send }) => {
     const reply = await send('/new codex');
 
-    assert.match(replyText(reply), /새 Codex 대화를 엽니다/);
+    assert.match(replyText(reply), /새 Codex 대화를 New Chat Project 에 엽니다/);
     assert.deepEqual(replyButtons(reply).map((button) => button.data), ['new:cancel']);
 
     await send('시작');

@@ -14,7 +14,7 @@ import {
 import { startTelegramBridge } from '@/modules/telegram-bridge/services/telegram-bridge.service.js';
 import type { TelegramClient } from '@/modules/telegram-bridge/services/telegram-client.service.js';
 import { writeTelegramSettings } from '@/modules/telegram-bridge/services/telegram-settings.service.js';
-import { setSessionNotified } from '@/modules/telegram-bridge/services/telegram-state.service.js';
+import { setSessionNotified, writeBridgeState } from '@/modules/telegram-bridge/services/telegram-state.service.js';
 import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
 
 /**
@@ -118,11 +118,22 @@ async function withBridge(runTest: (harness: Harness) => Promise<void>): Promise
 }
 
 test('텔레그램에서 시작한 작업은 알림을 켜지 않아도 결과가 돌아온다', async () => {
-  await withBridge(async ({ sent, runTurn }) => {
+  await withBridge(async ({ userId, sent, runTurn }) => {
+    writeBridgeState(userId, { watchedSessionId: SESSION_ID });
     await runTurn({ content: '테스트 돌려줘', origin: 'telegram' });
 
     assert.equal(sent.length, 1);
     assert.match(sent[0], /완료/);
+  });
+});
+
+test('/off 로 구독을 놓은 뒤에는 텔레그램에서 보냈던 작업의 결과도 오지 않는다', async () => {
+  await withBridge(async ({ sent, runTurn }) => {
+    // 구독이 없다 — `/off` 나 `/unwatch` 뒤의 상태. 대기열에 남아 있던 텔레그램
+    // 글이 이제야 실행된 경우다.
+    await runTurn({ content: '한참 전에 보낸 글', origin: 'telegram' });
+
+    assert.deepEqual(sent, []);
   });
 });
 
