@@ -171,6 +171,71 @@ test('a finished run\'s safety net cannot complete the session\'s next run', asy
   });
 });
 
+test('백그라운드 작업이 보고해 와 턴이 이어지면 끝난 실행을 다시 연다', async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('app-run-resume', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-resume',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+    const started: string[] = [];
+    const stopWatching = chatRunRegistry.onRunStarted((sessionId) => started.push(sessionId));
+
+    // 턴의 `result` — 런타임은 프로세스를 붙잡아 둔 채 끝났다고 알린다.
+    run.writer.send({ kind: 'complete', provider: 'claude', sessionId: 'native', exitCode: 0 });
+    assert.equal(chatRunRegistry.isProcessing('app-run-resume'), false);
+
+    // 백그라운드 작업이 보고해 와 모델이 스스로 이어 가기 시작했다.
+    run.writer.send({ kind: 'status', text: 'run_resumed', provider: 'claude', sessionId: 'native' });
+    assert.equal(chatRunRegistry.isProcessing('app-run-resume'), true);
+    assert.deepEqual(
+      chatRunRegistry.listRunningRuns().map((entry) => entry.sessionId),
+      ['app-run-resume'],
+    );
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+    assert.deepEqual(started, ['app-run-resume']);
+
+    // 다시 연 실행은 중단할 수 있고, 후속 턴의 `complete` 로 다시 닫힌다.
+    run.writer.send({ kind: 'complete', provider: 'claude', sessionId: 'native', exitCode: 0 });
+    assert.equal(chatRunRegistry.isProcessing('app-run-resume'), false);
+    assert.equal(connection.frames.filter((frame) => frame.kind === 'complete').length, 2);
+    stopWatching();
+  });
+});
+
+test('새 실행이 자리를 차지한 뒤의 재개 표시는 옛 실행을 다시 열지 않는다', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-old', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const oldRun = chatRunRegistry.startRun({
+      appSessionId: 'app-run-old',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(oldRun);
+    oldRun.writer.send({ kind: 'complete', provider: 'claude', sessionId: 'native', exitCode: 0 });
+    const newRun = chatRunRegistry.startRun({
+      appSessionId: 'app-run-old',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(newRun);
+    newRun.writer.send({ kind: 'complete', provider: 'claude', sessionId: 'native', exitCode: 0 });
+
+    oldRun.writer.send({ kind: 'status', text: 'run_resumed', provider: 'claude', sessionId: 'native' });
+    assert.equal(chatRunRegistry.isProcessing('app-run-old'), false);
+  });
+});
+
 test('listRunningRuns returns only currently running app sessions', async () => {
   await withIsolatedDatabase(() => {
     sessionsDb.createAppSession('app-run-7', 'claude', '/workspace/demo');

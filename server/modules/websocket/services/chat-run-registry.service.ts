@@ -72,6 +72,15 @@ const COMPLETED_RUN_RETENTION_MS = 5 * 60 * 1000;
 const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
 
 /**
+ * 끝났다고 알린 실행이 다시 일을 시작했다는 `status` 이벤트의 `text`.
+ *
+ * Claude 런타임이 백그라운드 작업을 기다리느라 붙잡아 둔 프로세스에서 후속
+ * 턴이 시작될 때 보낸다. 레지스트리는 이걸 보고 실행을 다시 열고, 화면은
+ * "작업중" 표시를 다시 켠다.
+ */
+export const RUN_RESUMED_STATUS_TEXT = 'run_resumed';
+
+/**
  * Active and recently-completed runs keyed by app session id.
  *
  * This map is the single in-memory source of truth for "is something running
@@ -109,6 +118,24 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
   // Whichever arrives first wins; the duplicate is dropped here.
   if (message.kind === 'complete' && run.status === 'completed') {
     return null;
+  }
+
+  // 끝났다고 알린 실행이 다시 일을 시작했다. 런타임이 백그라운드 작업 때문에
+  // 프로세스를 붙잡아 두었다가, 그 작업이 보고하면서 모델이 스스로 대화를
+  // 이어 가는 경우다. 다시 열지 않으면 작업은 도는데 "작업중" 표시도 중지
+  // 버튼도 없고, 그 사이 보낸 글은 대기열이 아니라 겹쳐서 실행된다.
+  //
+  // 이 세션의 현재 실행일 때만 연다 — 새 실행이 이미 자리를 차지했으면 그쪽이
+  // 주인이다. 런타임은 이 뒤 `result` 에서 `complete` 를 한 번 더 보낸다.
+  if (
+    message.kind === 'status'
+    && message.text === RUN_RESUMED_STATUS_TEXT
+    && run.status === 'completed'
+    && runs.get(run.appSessionId) === run
+  ) {
+    run.status = 'running';
+    run.completedAt = null;
+    notifyRunStarted(run.appSessionId);
   }
 
   run.lastSeq += 1;

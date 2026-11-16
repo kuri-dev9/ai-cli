@@ -431,6 +431,11 @@ export function useChatRealtimeHandlers({
             if (sid === activeViewSessionId) {
               setTokenBudget(msg.tokenBudget as Record<string, unknown>);
             }
+          } else if (msg.text === 'run_resumed' && sid) {
+            // 끝났다고 알렸던 턴을 모델이 이어 가기 시작했다(백그라운드 작업이
+            // 보고해 옴). 서버는 이 실행을 다시 열었으니 표시등도 다시 켠다.
+            // 문구는 사람에게 보일 것이 아니라서 넘기지 않는다.
+            onSessionProcessing?.(sid);
           } else if (msg.text && sid) {
             onSessionProcessing?.(sid, {
               statusText: msg.text as string,

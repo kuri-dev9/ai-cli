@@ -772,6 +772,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   // True while the process is being held open for background work, so a later
   // `result` can be recognised as that work reporting back.
   let heldForBackgroundWork = false;
+  // 붙잡아 둔 프로세스에서 후속 턴이 시작돼 실행을 다시 열었는지. 그 턴의
+  // `result` 가 `complete` 를 한 번 더 보내야 한다.
+  let resumedForBackgroundWork = false;
   // Set once a turn publishes a budget read from an assistant message, so the
   // turn-ending `result` is only mined for usage when nothing better arrived.
   let assistantBudgetSent = false;
@@ -993,6 +996,23 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         continue;
       }
 
+      // 붙잡아 둔 프로세스가 다시 말을 시작했다 — 백그라운드 작업이 보고해서
+      // 모델이 스스로 대화를 이어 가는 중이다. 이 턴은 이미 끝났다고 알렸으므로
+      // 그대로 두면 화면에는 "작업중" 표시도 중지 버튼도 없이 기록만 늘어난다.
+      // 실행을 다시 열라고 알리고, 이 후속 턴의 `result` 에서 `complete` 를 한 번
+      // 더 보낸다. 표시 문자열은 레지스트리의 `RUN_RESUMED_STATUS_TEXT` 와 같다.
+      if (
+        turnCompleteSent
+        && heldForBackgroundWork
+        && message.type === 'assistant'
+        && !supersededInstances.has(queryInstance)
+        && !(sessionKey() && abortedSessionIds.has(sessionKey()))
+      ) {
+        turnCompleteSent = false;
+        resumedForBackgroundWork = true;
+        ws.send(createNormalizedMessage({ kind: 'status', text: 'run_resumed', sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+      }
+
       // Transform and normalize message via adapter
       const transformedMessage = transformMessage(message);
       const sid = capturedSessionId || sessionId || null;
@@ -1032,13 +1052,24 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         if (!turnCompleteSent && !abortPending) {
           turnCompleteSent = true;
           ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
-          notifyRunStopped({
-            userId: ws?.userId || null,
-            provider: 'claude',
-            sessionId: sessionId || capturedSessionId || null,
-            sessionName: sessionSummary,
-            stopReason: 'completed'
-          });
+          if (resumedForBackgroundWork) {
+            // 다시 연 후속 턴이 끝났다. 알림은 예전처럼 "백그라운드 작업 완료"다.
+            resumedForBackgroundWork = false;
+            notifyBackgroundWorkCompleted({
+              userId: ws?.userId || null,
+              provider: 'claude',
+              sessionId: sessionId || capturedSessionId || null,
+              sessionName: sessionSummary
+            });
+          } else {
+            notifyRunStopped({
+              userId: ws?.userId || null,
+              provider: 'claude',
+              sessionId: sessionId || capturedSessionId || null,
+              sessionName: sessionSummary,
+              stopReason: 'completed'
+            });
+          }
         } else if (heldForBackgroundWork && !abortPending) {
           // A result after the turn already reported complete means the work we
           // held the process open for has finished and pushed a follow-up turn.
