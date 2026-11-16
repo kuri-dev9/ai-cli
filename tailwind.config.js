@@ -35,6 +35,11 @@ export default {
         // 컴포넌트에 글꼴을 박으면 설정이 먹지 않는다.
         serif: [`"Source Serif 4", "Noto Serif KR", ${SYSTEM_SERIF_FALLBACK}`],
       },
+      // bg-white 만 테마 변수로 돌린다. 라이트에서 흰 면이 눈부셔서 카드 색으로
+      // 낮춘다. text-white·border-white 는 그대로 순백이다.
+      backgroundColor: {
+        white: "hsl(var(--surface-white) / <alpha-value>)",
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
