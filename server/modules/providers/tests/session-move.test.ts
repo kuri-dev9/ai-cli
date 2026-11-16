@@ -122,6 +122,28 @@ test('a moved session keeps its id and now lives in the target project', async (
   });
 });
 
+test('백그라운드 작업 때문에 붙잡혀 있던 프로세스는 복사하기 전에 정리한다', async () => {
+  await withMovableClaude(async ({ targetProjectId, forkCalls }) => {
+    // 턴은 끝났지만 런타임이 옛 폴더에서 프로세스를 붙잡아 두고 있다. 그대로
+    // 두면 백그라운드 작업이 보고해 올 때 옛 프로젝트에서 대화가 이어진다.
+    const claude = providerRegistry.resolveProvider('claude') as { runtime: { abort: (id: string) => unknown } };
+    const realAbort = claude.runtime.abort;
+    const order: string[] = [];
+    claude.runtime.abort = (sessionId: string) => {
+      order.push(`abort:${sessionId}`);
+      return true;
+    };
+    try {
+      await sessionsService.moveSessionToProject(SESSION_ID, targetProjectId);
+    } finally {
+      claude.runtime.abort = realAbort;
+    }
+
+    assert.deepEqual(order, [`abort:${SESSION_ID}`]);
+    assert.equal(forkCalls.length, 1);
+  });
+});
+
 test('moving to the project it is already in is refused', async () => {
   await withMovableClaude(async ({ sourceProject, forkCalls }) => {
     const sourceProjectId = projectsDb.getProjectPath(sourceProject)?.project_id ?? '';

@@ -385,6 +385,20 @@ export const sessionsService = {
       });
     }
 
+    // 턴은 끝났어도 프로세스가 남아 있을 수 있다 — 백그라운드 작업(예: 띄워 둔
+    // 개발 서버)을 기다리느라 런타임이 붙잡아 둔 경우다. 그 프로세스는 옛 폴더를
+    // 작업 위치로 삼고 옛 기록에 쓴다. 그대로 두면 작업이 보고해 올 때 모델이
+    // 옮긴 뒤에도 옛 프로젝트에서 대화를 이어 간다. 복사하기 전에 정리한다.
+    // 붙잡힌 것이 없으면 아무 일도 하지 않는다.
+    try {
+      await providerRegistry.resolveProvider(provider).runtime.abort(sessionId);
+    } catch (error) {
+      console.warn('[Sessions] 이동 전에 남은 프로세스를 정리하지 못했습니다', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     const moved = await fork.forkSession({
       providerSessionId: source.provider_session_id,
       jsonlPath: source.jsonl_path,

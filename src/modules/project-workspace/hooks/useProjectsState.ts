@@ -187,10 +187,26 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
   }
 
   const previousByProjectId = new Map(previousProjects.map((project) => [project.projectId, project]));
+  // 새로 받은 목록에서 각 세션이 어느 프로젝트에 속하는지. 다른 프로젝트로 옮긴
+  // 세션을 예전 목록에서 되살리지 않으려고 본다.
+  const incomingOwnerBySessionId = new Map<string, string>();
+  for (const project of incomingProjects) {
+    for (const session of getProjectSessions(project)) {
+      incomingOwnerBySessionId.set(String(session.id), project.projectId);
+    }
+  }
 
   return incomingProjects.map((incomingProject) => {
     const previousProject = previousByProjectId.get(incomingProject.projectId);
     if (!previousProject) {
+      return incomingProject;
+    }
+
+    // 서버가 더 없다고 했으면 받은 것이 전부다. 예전 목록에만 있는 세션은
+    // 그 사이 다른 프로젝트로 옮겨졌거나 지워진 것이다 — 세션 하나가 빠지면
+    // 개수가 줄어 아래 병합을 타는데, 예전에는 거기서 옮긴 세션이 원래
+    // 프로젝트에 되살아났다.
+    if (incomingProject.sessionMeta?.hasMore === false) {
       return incomingProject;
     }
 
@@ -200,9 +216,13 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
       return incomingProject;
     }
 
+    const stillOwnedSessions = getProjectSessions(previousProject).filter((session) => {
+      const owner = incomingOwnerBySessionId.get(String(session.id));
+      return !owner || owner === incomingProject.projectId;
+    });
     const mergedProject: Project = {
       ...incomingProject,
-      sessions: mergeSessionProviderLists(incomingProject.sessions ?? [], previousProject.sessions ?? []),
+      sessions: mergeSessionProviderLists(incomingProject.sessions ?? [], stillOwnedSessions),
     };
 
     const totalSessions = Number(incomingProject.sessionMeta?.total ?? previousLoadedCount);
@@ -854,15 +874,30 @@ export function useProjectsState({
             sessionMeta: { hasMore: false, total: 0 },
           } as Project;
 
-          return [...previousProjects, upsertSessionIntoProject(newProject, upsert)];
+          // 다른 기기에서 새 프로젝트를 만들고 그리로 옮긴 경우도 여기로 온다.
+          // 원래 프로젝트에 남은 사본은 걷어 낸다.
+          return [
+            ...previousProjects.map((project) => removeSessionFromProject(project, upsert.sessionId)),
+            upsertSessionIntoProject(newProject, upsert),
+          ];
         }
 
         const updatedProject = upsertSessionIntoProject(existingProject, upsert);
-        if (updatedProject === existingProject) {
+        // 세션이 다른 프로젝트로 옮겨졌다. 새 프로젝트에 넣는 것만으로는 원래
+        // 프로젝트 목록에 그대로 남아, 새로고침할 때까지 양쪽에 보인다.
+        // 이 화면이 이동을 시킨 쪽이 아니어도(다른 탭·다른 기기) 같은 알림이 온다.
+        const withoutStaleCopies = targetProjectId
+          ? previousProjects.map((project) => (
+            project.projectId === existingProject.projectId
+              ? project
+              : removeSessionFromProject(project, upsert.sessionId)
+          ))
+          : previousProjects;
+        if (updatedProject === existingProject && withoutStaleCopies.every((project, index) => project === previousProjects[index])) {
           return previousProjects;
         }
 
-        return previousProjects.map((project) =>
+        return withoutStaleCopies.map((project) =>
           project.projectId === existingProject.projectId ? updatedProject : project,
         );
       });
