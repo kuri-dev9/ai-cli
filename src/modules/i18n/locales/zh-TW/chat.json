@@ -4,7 +4,8 @@
     "copied": "已複製",
     "copyCode": "複製程式碼",
     "playMedia": "播放",
-    "viewDocument": "檢視"
+    "viewDocument": "檢視",
+    "copyPath": "複製路徑"
   },
   "copyMessage": {
     "copy": "複製訊息",

@@ -8,7 +8,7 @@ import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/pris
 import { useTranslation } from 'react-i18next';
 
 import { getPreviewKind, isViewableFile, MermaidDiagram } from '@/modules/code-editor';
-import { ViewDocumentButton } from '@/modules/chat/tools/ViewDocumentButton';
+import { FileReferenceMenu } from '@/modules/chat/transcript/FileReferenceMenu';
 import { MediaPlayer } from '@/modules/media-library';
 import { normalizeInlineCodeFences } from '@/modules/chat/utils/chatFormatting';
 import { orderedListIndent } from '@/modules/chat/utils/orderedListIndent';
@@ -197,12 +197,7 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
 
     const docReference = documentReference(raw);
     if (docReference) {
-      return (
-        <>
-          {code}
-          <ViewDocumentButton filePath={docReference} />
-        </>
-      );
+      return <FileReferenceMenu filePath={docReference}>{code}</FileReferenceMenu>;
     }
 
     return code;

@@ -1,6 +1,6 @@
 import { memo, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { GitBranchIcon, PencilIcon, SendIcon } from 'lucide-react';
+import { GitBranchIcon, Link2Icon, PencilIcon, SendIcon } from 'lucide-react';
 
 import type { ChatMessage, ClaudePermissionSuggestion, PermissionGrantResult, LLMProvider,DiffLine,Project } from '@/shared/types';
 import { formatUsageLimitText, stripProposedPlanEnvelope } from '@/modules/chat/utils/chatFormatting';
@@ -130,6 +130,16 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, s
                     >
                       <SendIcon className="h-3 w-3" />
                       {t('message.source.telegram')}
+                    </span>
+                  )}
+                  {/* 공유 링크로 들어온 게스트가 보낸 글. */}
+                  {message.source === 'share' && (
+                    <span
+                      title={t('share:badge')}
+                      className="mr-0.5 inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                    >
+                      <Link2Icon className="h-3 w-3" />
+                      {t('share:badge')}
                     </span>
                   )}
                   {onEditMessage && message.transcriptAnchorId && (

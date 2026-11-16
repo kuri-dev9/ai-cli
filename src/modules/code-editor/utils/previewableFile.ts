@@ -67,7 +67,21 @@ export const getPreviewMimeType = (filename: string): string | undefined =>
 // 마크다운·HTML 은 렌더링해서, 나머지는 글자 그대로, PDF 는 미리보기로 보여 준다.
 const DOCUMENT_EXTENSIONS = new Set([
   'md', 'markdown', 'mdx', 'html', 'htm', 'txt', 'rst', 'adoc', 'csv', 'tsv', 'pdf',
+  'docx', 'xlsx', 'xlsm',
 ]);
+
+// Word·Excel 문서는 텍스트 에디터 대신 그 프로그램 모양에 가까운 뷰어로 연다.
+// 옛 바이너리 형식(.doc·.xls)과 .pptx 는 브라우저에서 그릴 방법이 없어 뺀다.
+export type OfficeKind = 'docx' | 'xlsx';
+
+const OFFICE_EXTENSIONS: Record<string, OfficeKind> = {
+  docx: 'docx',
+  xlsx: 'xlsx',
+  xlsm: 'xlsx',
+};
+
+export const getOfficeKind = (filename: string): OfficeKind | null =>
+  OFFICE_EXTENSIONS[extensionOf(filename)] ?? null;
 
 export const isDocumentFile = (filename: string): boolean => {
   const base = filename.split(/[\\/]/).pop() ?? filename;
@@ -95,5 +109,14 @@ export const isViewableFile = (filename: string): boolean => {
   if (SOURCE_FILENAMES.has(base)) {
     return true;
   }
-  return isDocumentFile(base) || (base.includes('.') && SOURCE_EXTENSIONS.has(extensionOf(base)));
+  // `.svg`, `.py` 처럼 확장자만 적힌 것은 "같은 이름의 .svg" 라는 줄임말이지 파일이 아니다.
+  if (/^\.[^.]+$/.test(base)) {
+    return false;
+  }
+  const previewKind = getPreviewKind(base);
+  return isDocumentFile(base)
+    // 이미지·PDF 는 미리보기로 연다. 소리·영상은 답변 안에서 재생 단추가 따로 맡는다.
+    || previewKind === 'image'
+    || previewKind === 'pdf'
+    || (base.includes('.') && SOURCE_EXTENSIONS.has(extensionOf(base)));
 };

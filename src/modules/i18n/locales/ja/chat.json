@@ -4,7 +4,8 @@
     "copied": "コピーしました",
     "copyCode": "コードをコピー",
     "playMedia": "再生",
-    "viewDocument": "表示"
+    "viewDocument": "表示",
+    "copyPath": "パスをコピー"
   },
   "copyMessage": {
     "copy": "メッセージをコピー",

@@ -4,7 +4,8 @@
     "copied": "Copied",
     "copyCode": "Copy code",
     "playMedia": "Play",
-    "viewDocument": "View"
+    "viewDocument": "View",
+    "copyPath": "Copy path"
   },
   "copyMessage": {
     "copy": "Copy message",

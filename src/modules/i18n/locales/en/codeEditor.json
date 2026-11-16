@@ -38,6 +38,9 @@
   "filePreview": {
     "loading": "Loading preview...",
     "error": "Unable to display this file.",
-    "openInNewTab": "Open in new tab"
+    "openInNewTab": "Open in new tab",
+    "refresh": "Reload",
+    "sheetTruncated": "Large sheet: showing the first {{rows}} rows and {{columns}} columns.",
+    "sheetEmpty": "This sheet is empty."
   }
 }

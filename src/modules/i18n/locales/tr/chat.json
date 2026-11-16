@@ -4,7 +4,8 @@
     "copied": "Kopyalandı",
     "copyCode": "Kodu kopyala",
     "playMedia": "Oynat",
-    "viewDocument": "Görüntüle"
+    "viewDocument": "Görüntüle",
+    "copyPath": "Yolu kopyala"
   },
   "copyMessage": {
     "copy": "Mesajı kopyala",

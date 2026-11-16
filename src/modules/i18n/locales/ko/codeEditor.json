@@ -38,6 +38,9 @@
   "filePreview": {
     "loading": "미리보기 로딩 중...",
     "error": "이 파일을 표시할 수 없습니다.",
-    "openInNewTab": "새 탭에서 열기"
+    "openInNewTab": "새 탭에서 열기",
+    "refresh": "다시 읽기",
+    "sheetTruncated": "큰 시트라 앞의 {{rows}}행, {{columns}}열만 보여 줍니다.",
+    "sheetEmpty": "빈 시트입니다."
   }
 }

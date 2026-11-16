@@ -4,7 +4,8 @@
     "copied": "Скопировано",
     "copyCode": "Копировать код",
     "playMedia": "Воспроизвести",
-    "viewDocument": "Открыть"
+    "viewDocument": "Открыть",
+    "copyPath": "Копировать путь"
   },
   "copyMessage": {
     "copy": "Копировать сообщение",

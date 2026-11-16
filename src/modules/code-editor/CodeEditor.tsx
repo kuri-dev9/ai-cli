@@ -19,6 +19,8 @@ import CodeEditorLoadingState from '@/modules/code-editor/CodeEditorLoadingState
 import CodeEditorSurface from '@/modules/code-editor/CodeEditorSurface';
 import CodeEditorBinaryFile from '@/modules/code-editor/CodeEditorBinaryFile';
 import CodeEditorMediaPreview from '@/modules/code-editor/CodeEditorMediaPreview';
+import CodeEditorOfficePreview from '@/modules/code-editor/office/CodeEditorOfficePreview';
+import { getOfficeKind } from '@/modules/code-editor/utils/previewableFile';
 
 type CodeEditorProps = {
   file: CodeEditorFile;
@@ -190,6 +192,33 @@ export default function CodeEditor({
     onClose,
     dependency: content,
   });
+
+  // Word·Excel 문서는 텍스트로 읽지 않고 전용 뷰어로 보여 준다.
+  const officeKind = getOfficeKind(file.name);
+  if (officeKind) {
+    return (
+      <CodeEditorOfficePreview
+        key={`${fileProjectId ?? ''}:${file.path}`}
+        file={file}
+        kind={officeKind}
+        projectId={fileProjectId}
+        isSidebar={isSidebar}
+        onClose={onClose}
+        labels={{
+          loading: t('filePreview.loading', 'Loading preview...'),
+          error: t('filePreview.error', 'Unable to display this file.'),
+          refresh: t('filePreview.refresh', 'Reload'),
+          close: t('actions.close', 'Close'),
+          sheetTruncated: (rows, columns) => t('filePreview.sheetTruncated', {
+            rows,
+            columns,
+            defaultValue: 'Large sheet: showing the first {{rows}} rows and {{columns}} columns.',
+          }),
+          sheetEmpty: t('filePreview.sheetEmpty', 'This sheet is empty.'),
+        }}
+      />
+    );
+  }
 
   if (loading) {
     return (
